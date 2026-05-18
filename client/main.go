@@ -1876,6 +1876,10 @@ func copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.Conn, recvCh 
 			}
 			switch f.typ {
 			case bondFrameData:
+				if len(pending) >= 1024 {
+					log.Printf("[bond %d] pending map overflow (>1024), closing", connID)
+					return
+				}
 				pending[f.seq] = f.data
 			case bondFrameFIN:
 				v := f.seq
