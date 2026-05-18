@@ -6,7 +6,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -32,28 +31,20 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/client/internal/captcha"
 	"github.com/cacggghp/vk-turn-proxy/client/internal/dnsdial"
 	"github.com/cacggghp/vk-turn-proxy/client/internal/namegen"
+	"github.com/cacggghp/vk-turn-proxy/internal/bond"
+	"github.com/cacggghp/vk-turn-proxy/internal/netadapt"
+	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/tcputil"
 	"github.com/cbeuw/connutil"
 	"github.com/google/uuid"
 	"github.com/pion/dtls/v3"
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
 	"github.com/pion/logging"
-	"github.com/pion/transport/v4"
 	"github.com/pion/turn/v5"
 	"github.com/xtaci/smux"
 )
 
 type getCredsFunc func(ctx context.Context, link string, streamID int) (string, string, string, error)
-
-type directNet struct{}
-
-type directDialer struct {
-	*net.Dialer
-}
-
-type directListenConfig struct {
-	*net.ListenConfig
-}
 
 // Global state trackers
 var (
@@ -112,196 +103,6 @@ type UDPPacket struct {
 
 var packetPool = sync.Pool{
 	New: func() any { return &UDPPacket{Data: make([]byte, 2048)} },
-}
-
-type throughputStats struct {
-	tx atomic.Uint64
-	rx atomic.Uint64
-}
-
-func (s *throughputStats) addTx(n int) {
-	// Counters are only consumed by logEvery, which is itself debug-gated.
-	// Skip the atomic add (and the cache-line traffic across N streams)
-	// when nobody is going to read the result.
-	if !isDebug || n <= 0 {
-		return
-	}
-	s.tx.Add(uint64(n))
-}
-
-func (s *throughputStats) addRx(n int) {
-	if !isDebug || n <= 0 {
-		return
-	}
-	s.rx.Add(uint64(n))
-}
-
-func (s *throughputStats) logEvery(ctx context.Context, label, txName, rxName string) {
-	if !isDebug {
-		return
-	}
-
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	var prevTx, prevRx uint64
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			tx := s.tx.Load()
-			rx := s.rx.Load()
-			deltaTx := tx - prevTx
-			deltaRx := rx - prevRx
-			prevTx = tx
-			prevRx = rx
-
-			if deltaTx == 0 && deltaRx == 0 {
-				continue
-			}
-
-			debugf(
-				"%s throughput: %s=%s %s=%s total_%s=%s total_%s=%s",
-				label,
-				txName,
-				formatBitsPerSecond(deltaTx, 5*time.Second),
-				rxName,
-				formatBitsPerSecond(deltaRx, 5*time.Second),
-				txName,
-				formatByteCount(tx),
-				rxName,
-				formatByteCount(rx),
-			)
-		}
-	}
-}
-
-func formatBitsPerSecond(bytes uint64, interval time.Duration) string {
-	if interval <= 0 {
-		interval = time.Second
-	}
-
-	bps := float64(bytes*8) / interval.Seconds()
-	if bps >= 1_000_000 {
-		return fmt.Sprintf("%.2f Mbit/s", bps/1_000_000)
-	}
-	if bps >= 1_000 {
-		return fmt.Sprintf("%.1f kbit/s", bps/1_000)
-	}
-	return fmt.Sprintf("%.0f bit/s", bps)
-}
-
-func formatByteCount(bytes uint64) string {
-	if bytes >= 1024*1024 {
-		return fmt.Sprintf("%.2f MiB", float64(bytes)/(1024*1024))
-	}
-	if bytes >= 1024 {
-		return fmt.Sprintf("%.1f KiB", float64(bytes)/1024)
-	}
-	return fmt.Sprintf("%d B", bytes)
-}
-
-type countingConn struct {
-	net.Conn
-	stats *throughputStats
-}
-
-func (c *countingConn) Read(p []byte) (int, error) {
-	n, err := c.Conn.Read(p)
-	c.stats.addRx(n)
-	return n, err
-}
-
-func (c *countingConn) Write(p []byte) (int, error) {
-	n, err := c.Conn.Write(p)
-	c.stats.addTx(n)
-	return n, err
-}
-
-func newDirectNet() transport.Net {
-	return directNet{}
-}
-
-func (directNet) ListenPacket(network string, address string) (net.PacketConn, error) {
-	return net.ListenPacket(network, address)
-}
-
-func (directNet) ListenUDP(network string, locAddr *net.UDPAddr) (transport.UDPConn, error) {
-	return net.ListenUDP(network, locAddr)
-}
-
-func (directNet) ListenTCP(network string, laddr *net.TCPAddr) (transport.TCPListener, error) {
-	listener, err := net.ListenTCP(network, laddr)
-	if err != nil {
-		return nil, err
-	}
-
-	return directTCPListener{listener}, nil
-}
-
-func (directNet) Dial(network, address string) (net.Conn, error) {
-	return net.Dial(network, address)
-}
-
-func (directNet) DialUDP(network string, laddr, raddr *net.UDPAddr) (transport.UDPConn, error) {
-	return net.DialUDP(network, laddr, raddr)
-}
-
-func (directNet) DialTCP(network string, laddr, raddr *net.TCPAddr) (transport.TCPConn, error) {
-	return net.DialTCP(network, laddr, raddr)
-}
-
-func (directNet) ResolveIPAddr(network, address string) (*net.IPAddr, error) {
-	return net.ResolveIPAddr(network, address)
-}
-
-func (directNet) ResolveUDPAddr(network, address string) (*net.UDPAddr, error) {
-	return net.ResolveUDPAddr(network, address)
-}
-
-func (directNet) ResolveTCPAddr(network, address string) (*net.TCPAddr, error) {
-	return net.ResolveTCPAddr(network, address)
-}
-
-func (directNet) Interfaces() ([]*transport.Interface, error) {
-	return nil, transport.ErrNotSupported
-}
-
-func (directNet) InterfaceByIndex(index int) (*transport.Interface, error) {
-	return nil, fmt.Errorf("%w: index=%d", transport.ErrInterfaceNotFound, index)
-}
-
-func (directNet) InterfaceByName(name string) (*transport.Interface, error) {
-	return nil, fmt.Errorf("%w: %s", transport.ErrInterfaceNotFound, name)
-}
-
-func (directNet) CreateDialer(dialer *net.Dialer) transport.Dialer {
-	return directDialer{Dialer: dialer}
-}
-
-func (directNet) CreateListenConfig(listenerConfig *net.ListenConfig) transport.ListenConfig {
-	return directListenConfig{ListenConfig: listenerConfig}
-}
-
-func (d directDialer) Dial(network, address string) (net.Conn, error) {
-	return d.Dialer.Dial(network, address)
-}
-
-func (d directListenConfig) Listen(ctx context.Context, network, address string) (net.Listener, error) {
-	return d.ListenConfig.Listen(ctx, network, address)
-}
-
-func (d directListenConfig) ListenPacket(ctx context.Context, network, address string) (net.PacketConn, error) {
-	return d.ListenConfig.ListenPacket(ctx, network, address)
-}
-
-type directTCPListener struct {
-	*net.TCPListener
-}
-
-func (l directTCPListener) AcceptTCP() (transport.TCPConn, error) {
-	return l.TCPListener.AcceptTCP()
 }
 
 // region Helper: HTTP Headers Injection
@@ -989,40 +790,6 @@ func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.Pa
 	return nil
 }
 
-type connectedUDPConn struct {
-	*net.UDPConn
-}
-
-func (c *connectedUDPConn) WriteTo(p []byte, _ net.Addr) (int, error) {
-	return c.Write(p)
-}
-
-// splitFirstWriteConn wraps a TCP net.Conn and splits the first Write into two
-// segments (default 6 bytes + remainder) with a small delay, so the STUN magic
-// cookie at offset 4-7 is broken across two TCP segments. Defeats DPI rules
-// that match on the first segment without reassembly.
-type splitFirstWriteConn struct {
-	net.Conn
-	splitAt int
-	delay   time.Duration
-	done    atomic.Bool
-}
-
-func (s *splitFirstWriteConn) Write(b []byte) (int, error) {
-	if s.done.CompareAndSwap(false, true) && len(b) > s.splitAt {
-		n1, err := s.Conn.Write(b[:s.splitAt])
-		if err != nil {
-			return n1, err
-		}
-		if s.delay > 0 {
-			time.Sleep(s.delay)
-		}
-		n2, err := s.Conn.Write(b[s.splitAt:])
-		return n1 + n2, err
-	}
-	return s.Conn.Write(b)
-}
-
 type turnParams struct {
 	host     string
 	port     string
@@ -1078,7 +845,7 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 				return
 			}
 		}()
-		turnConn = &connectedUDPConn{conn}
+		turnConn = &netadapt.ConnectedUDPConn{UDPConn: conn}
 	} else {
 		conn, err2 := d.DialContext(ctx1, "tcp", turnServerAddr)
 		if err2 != nil {
@@ -1091,7 +858,7 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 				return
 			}
 		}()
-		wrappedConn := &splitFirstWriteConn{Conn: conn, splitAt: 6, delay: 20 * time.Millisecond}
+		wrappedConn := &netadapt.SplitFirstWriteConn{Conn: conn, SplitAt: 6, Delay: 20 * time.Millisecond}
 		turnConn = turn.NewSTUNConn(wrappedConn)
 	}
 	var addrFamily turn.RequestedAddressFamily
@@ -1105,7 +872,7 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 		STUNServerAddr:         turnServerAddr,
 		TURNServerAddr:         turnServerAddr,
 		Conn:                   turnConn,
-		Net:                    newDirectNet(),
+		Net:                    netadapt.New(),
 		Username:               user,
 		Password:               pass,
 		RequestedAddressFamily: addrFamily,
@@ -1152,8 +919,8 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 
 	wg := sync.WaitGroup{}
 	turnctx, turncancel := context.WithCancel(ctx)
-	stats := &throughputStats{}
-	go stats.logEvery(turnctx, fmt.Sprintf("[STREAM %d] TURN", streamID), "to-turn", "from-turn")
+	st := stats.New(isDebug)
+	go st.LogEvery(turnctx, debugf, fmt.Sprintf("[STREAM %d] TURN", streamID), "to-turn", "from-turn")
 
 	context.AfterFunc(turnctx, func() {
 		if err := relayConn.SetDeadline(time.Now()); err != nil {
@@ -1207,7 +974,7 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 			}
 
 			written, err1 := relayConn.WriteTo(out, peer)
-			stats.addTx(written)
+			st.AddTx(written)
 			if err1 != nil {
 				return
 			}
@@ -1242,7 +1009,7 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 					}
 					payload = plain[:m]
 				}
-				stats.addRx(len(payload))
+				st.AddRx(len(payload))
 				if _, err := conn2.WriteTo(payload, addr); err != nil {
 					return
 				}
@@ -1604,86 +1371,11 @@ func (p *sessionPool) count() int {
 	return len(p.sessions)
 }
 
-const (
-	bondVersion = 1
-	bondMagic   = "VLB1"
-
-	bondFrameData byte = 1
-	bondFrameFIN  byte = 2
-
-	bondMaxChunk = 16 * 1024
-)
-
-type bondFrame struct {
-	typ  byte
-	seq  uint64
-	data []byte
-}
-
 type bondClientLane struct {
 	ps     *pooledSession
 	stream *smux.Stream
 	mu     sync.Mutex
 	dead   atomic.Bool
-}
-
-func writeBondHello(w io.Writer, connID uint64, laneIndex, laneCount uint16) error {
-	var hdr [17]byte
-	copy(hdr[0:4], bondMagic)
-	hdr[4] = bondVersion
-	binary.BigEndian.PutUint64(hdr[5:13], connID)
-	binary.BigEndian.PutUint16(hdr[13:15], laneIndex)
-	binary.BigEndian.PutUint16(hdr[15:17], laneCount)
-	_, err := w.Write(hdr[:])
-	return err
-}
-
-func writeBondFrame(w io.Writer, typ byte, seq uint64, data []byte) error {
-	var hdr [13]byte
-	hdr[0] = typ
-	binary.BigEndian.PutUint64(hdr[1:9], seq)
-	binary.BigEndian.PutUint32(hdr[9:13], uint32(len(data)))
-	if _, err := w.Write(hdr[:]); err != nil {
-		return err
-	}
-	if len(data) == 0 {
-		return nil
-	}
-	_, err := w.Write(data)
-	return err
-}
-
-func readBondFrame(r io.Reader) (bondFrame, error) {
-	var hdr [13]byte
-	if _, err := io.ReadFull(r, hdr[:]); err != nil {
-		return bondFrame{}, err
-	}
-	size := binary.BigEndian.Uint32(hdr[9:13])
-	if size > 4*1024*1024 {
-		return bondFrame{}, fmt.Errorf("bond frame too large: %d", size)
-	}
-	f := bondFrame{
-		typ: hdr[0],
-		seq: binary.BigEndian.Uint64(hdr[1:9]),
-	}
-	if size > 0 {
-		f.data = make([]byte, size)
-		if _, err := io.ReadFull(r, f.data); err != nil {
-			return bondFrame{}, err
-		}
-	}
-	return f, nil
-}
-
-func closeWrite(conn net.Conn) {
-	type closeWriter interface {
-		CloseWrite() error
-	}
-	if cw, ok := conn.(closeWriter); ok {
-		if err := cw.CloseWrite(); err != nil && isDebug {
-			log.Printf("CloseWrite failed: %v", err)
-		}
-	}
 }
 
 func handleBondedTCP(ctx context.Context, tcpConn net.Conn, connID uint64, candidates []*pooledSession) {
@@ -1703,7 +1395,7 @@ func handleBondedTCP(ctx context.Context, tcpConn net.Conn, connID uint64, candi
 			log.Printf("[bond %d] session %d open stream error: %s", connID, ps.id, err)
 			continue
 		}
-		if err := writeBondHello(stream, connID, uint16(i), uint16(len(candidates))); err != nil {
+		if err := bond.WriteHello(stream, connID, uint16(i), uint16(len(candidates))); err != nil {
 			log.Printf("[bond %d] session %d hello error: %s", connID, ps.id, err)
 			_ = stream.Close()
 			continue
@@ -1738,17 +1430,17 @@ func handleBondedTCP(ctx context.Context, tcpConn net.Conn, connID uint64, candi
 			closed := lane.ps.closed.Add(1)
 			debugf("[bond %d] lane session %d close active=%d closed=%d totals: to-session=%s from-session=%s",
 				connID, lane.ps.id, active, closed,
-				formatByteCount(lane.ps.toSession.Load()), formatByteCount(lane.ps.fromSession.Load()))
+				stats.FormatByteCount(lane.ps.toSession.Load()), stats.FormatByteCount(lane.ps.fromSession.Load()))
 		}
 	}()
 
-	recvCh := make(chan bondFrame, 1024)
+	recvCh := make(chan bond.Frame, 1024)
 	var readWG sync.WaitGroup
 	for _, lane := range lanes {
 		l := lane
 		readWG.Go(func() {
 			for {
-				f, err := readBondFrame(l.stream)
+				f, err := bond.ReadFrame(l.stream)
 				if err != nil {
 					l.dead.Store(true)
 					select {
@@ -1760,8 +1452,8 @@ func handleBondedTCP(ctx context.Context, tcpConn net.Conn, connID uint64, candi
 					}
 					return
 				}
-				if f.typ == bondFrameData {
-					l.ps.fromSession.Add(uint64(len(f.data)))
+				if f.Type == bond.FrameData {
+					l.ps.fromSession.Add(uint64(len(f.Data)))
 				}
 				select {
 				case recvCh <- f:
@@ -1788,13 +1480,13 @@ func handleBondedTCP(ctx context.Context, tcpConn net.Conn, connID uint64, candi
 }
 
 func copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.Conn, lanes []*bondClientLane) {
-	buf := make([]byte, bondMaxChunk)
+	buf := make([]byte, bond.MaxChunk)
 	var seq uint64
 	var laneIdx uint64
 	for {
 		n, err := tcpConn.Read(buf)
 		if n > 0 {
-			lane, writeErr := writeBondFrameToNextLane(ctx, lanes, bondFrameData, seq, buf[:n], &laneIdx)
+			lane, writeErr := writeBondFrameToNextLane(ctx, lanes, bond.FrameData, seq, buf[:n], &laneIdx)
 			if writeErr != nil {
 				log.Printf("[bond %d] write data error: %v", connID, writeErr)
 				return
@@ -1811,7 +1503,7 @@ func copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.Conn, lanes [
 					continue
 				}
 				lane.mu.Lock()
-				writeErr := writeBondFrame(lane.stream, bondFrameFIN, seq, nil)
+				writeErr := bond.WriteFrame(lane.stream, bond.FrameFIN, seq, nil)
 				lane.mu.Unlock()
 				if writeErr != nil && ctx.Err() == nil {
 					log.Printf("[bond %d] session %d write FIN error: %v", connID, lane.ps.id, writeErr)
@@ -1837,7 +1529,7 @@ func writeBondFrameToNextLane(ctx context.Context, lanes []*bondClientLane, typ 
 			continue
 		}
 		lane.mu.Lock()
-		err := writeBondFrame(lane.stream, typ, seq, data)
+		err := bond.WriteFrame(lane.stream, typ, seq, data)
 		lane.mu.Unlock()
 		if err == nil {
 			return lane, nil
@@ -1853,14 +1545,14 @@ func writeBondFrameToNextLane(ctx context.Context, lanes []*bondClientLane, typ 
 	return nil, fmt.Errorf("no live bond lanes")
 }
 
-func copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.Conn, recvCh <-chan bondFrame) {
+func copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.Conn, recvCh <-chan bond.Frame) {
 	pending := make(map[uint64][]byte)
 	var expect uint64
 	var finSeq *uint64
 
 	for {
 		if finSeq != nil && expect == *finSeq {
-			closeWrite(tcpConn)
+			bond.CloseWrite(tcpConn, debugf)
 			debugf("[bond %d] download finished chunks=%d", connID, expect)
 			return
 		}
@@ -1872,20 +1564,20 @@ func copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.Conn, recvCh 
 			if !ok {
 				return
 			}
-			switch f.typ {
-			case bondFrameData:
+			switch f.Type {
+			case bond.FrameData:
 				if len(pending) >= 1024 {
 					log.Printf("[bond %d] pending map overflow (>1024), closing", connID)
 					return
 				}
-				pending[f.seq] = f.data
-			case bondFrameFIN:
-				v := f.seq
+				pending[f.Seq] = f.Data
+			case bond.FrameFIN:
+				v := f.Seq
 				if finSeq == nil || v < *finSeq {
 					finSeq = &v
 				}
 			default:
-				log.Printf("[bond %d] unknown frame type %d", connID, f.typ)
+				log.Printf("[bond %d] unknown frame type %d", connID, f.Type)
 				return
 			}
 
@@ -1908,7 +1600,7 @@ func copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.Conn, recvCh 
 }
 
 // runVLESSMode implements TCP forwarding with round-robin across N TURN sessions.
-func runVLESSMode(ctx context.Context, tp *turnParams, peer *net.UDPAddr, listenAddr string, numSessions int, bond bool) {
+func runVLESSMode(ctx context.Context, tp *turnParams, peer *net.UDPAddr, listenAddr string, numSessions int, useBond bool) {
 	pool := &sessionPool{}
 
 	// Start N session maintainers with staggered startup
@@ -1950,7 +1642,7 @@ func runVLESSMode(ctx context.Context, tp *turnParams, peer *net.UDPAddr, listen
 	}
 
 	context.AfterFunc(ctx, func() { _ = wrappedListener.Close() })
-	if bond {
+	if useBond {
 		log.Printf("VLESS bond mode: listening on %s (striping each TCP connection across active sessions)", listenAddr)
 	} else {
 		log.Printf("VLESS mode: listening on %s (round-robin across %d sessions)", listenAddr, numSessions)
@@ -1971,7 +1663,7 @@ func runVLESSMode(ctx context.Context, tp *turnParams, peer *net.UDPAddr, listen
 			continue
 		}
 
-		if bond {
+		if useBond {
 			connID := (uint64(time.Now().UnixNano()) << 16) ^ pool.nextConnID()
 			lanes := pool.snapshot()
 			if len(lanes) == 0 {
@@ -2008,7 +1700,7 @@ func runVLESSMode(ctx context.Context, tp *turnParams, peer *net.UDPAddr, listen
 				closed := sessRef.closed.Add(1)
 				debugf("[session %d] TCP close #%d active=%d closed=%d totals: to-session=%s from-session=%s",
 					sessRef.id, cid, active, closed,
-					formatByteCount(sessRef.toSession.Load()), formatByteCount(sessRef.fromSession.Load()))
+					stats.FormatByteCount(sessRef.toSession.Load()), stats.FormatByteCount(sessRef.fromSession.Load()))
 			}()
 
 			stream, err := sessRef.sess.OpenStream()
@@ -2021,7 +1713,7 @@ func runVLESSMode(ctx context.Context, tp *turnParams, peer *net.UDPAddr, listen
 			sessRef.fromSession.Add(uint64(fromSession))
 			sessRef.toSession.Add(uint64(toSession))
 			debugf("[session %d] TCP done #%d local<-session=%s local->session=%s",
-				sessRef.id, cid, formatByteCount(uint64(fromSession)), formatByteCount(uint64(toSession)))
+				sessRef.id, cid, stats.FormatByteCount(uint64(fromSession)), stats.FormatByteCount(uint64(toSession)))
 		})
 	}
 }
@@ -2114,7 +1806,7 @@ func createSmuxSession(ctx context.Context, tp *turnParams, peer *net.UDPAddr, i
 			return nil, nil, fmt.Errorf("dial TURN (udp): %w", err1)
 		}
 		cleanupFns = append(cleanupFns, func() { _ = c.Close() })
-		turnConn = &connectedUDPConn{c}
+		turnConn = &netadapt.ConnectedUDPConn{UDPConn: c}
 	} else {
 		var d net.Dialer
 		c, err1 := d.DialContext(ctx1, "tcp", turnServerAddr)
@@ -2122,7 +1814,7 @@ func createSmuxSession(ctx context.Context, tp *turnParams, peer *net.UDPAddr, i
 			return nil, nil, fmt.Errorf("dial TURN (tcp): %w", err1)
 		}
 		cleanupFns = append(cleanupFns, func() { _ = c.Close() })
-		wrappedC := &splitFirstWriteConn{Conn: c, splitAt: 6, delay: 20 * time.Millisecond}
+		wrappedC := &netadapt.SplitFirstWriteConn{Conn: c, SplitAt: 6, Delay: 20 * time.Millisecond}
 		turnConn = turn.NewSTUNConn(wrappedC)
 	}
 
@@ -2137,7 +1829,7 @@ func createSmuxSession(ctx context.Context, tp *turnParams, peer *net.UDPAddr, i
 		STUNServerAddr:         turnServerAddr,
 		TURNServerAddr:         turnServerAddr,
 		Conn:                   turnConn,
-		Net:                    newDirectNet(),
+		Net:                    netadapt.New(),
 		Username:               user,
 		Password:               pass,
 		RequestedAddressFamily: addrFamily,
@@ -2200,10 +1892,10 @@ func createSmuxSession(ctx context.Context, tp *turnParams, peer *net.UDPAddr, i
 	// 5. Create KCP session over DTLS
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	cleanupFns = append(cleanupFns, statsCancel)
-	stats := &throughputStats{}
-	go stats.logEvery(statsCtx, fmt.Sprintf("[session %d] VLESS", id), "to-turn", "from-turn")
+	st := stats.New(isDebug)
+	go st.LogEvery(statsCtx, debugf, fmt.Sprintf("[session %d] VLESS", id), "to-turn", "from-turn")
 
-	kcpSess, err := tcputil.NewKCPOverDTLS(&countingConn{Conn: dtlsConn, stats: stats}, false)
+	kcpSess, err := tcputil.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, false)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("KCP session: %w", err)

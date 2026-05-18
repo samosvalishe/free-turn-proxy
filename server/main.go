@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"encoding/binary"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -13,10 +12,11 @@ import (
 	"os"
 	"os/signal"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/cacggghp/vk-turn-proxy/internal/bond"
+	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/tcputil"
 	"github.com/pion/dtls/v3"
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
@@ -172,206 +172,6 @@ func main() {
 	}
 }
 
-type throughputStats struct {
-	tx atomic.Uint64
-	rx atomic.Uint64
-}
-
-func (s *throughputStats) addTx(n int) {
-	if !isDebug || n <= 0 {
-		return
-	}
-	s.tx.Add(uint64(n))
-}
-
-func (s *throughputStats) addRx(n int) {
-	if !isDebug || n <= 0 {
-		return
-	}
-	s.rx.Add(uint64(n))
-}
-
-func (s *throughputStats) logEvery(ctx context.Context, label, txName, rxName string) {
-	if !isDebug {
-		return
-	}
-
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	var prevTx, prevRx uint64
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			tx := s.tx.Load()
-			rx := s.rx.Load()
-			deltaTx := tx - prevTx
-			deltaRx := rx - prevRx
-			prevTx = tx
-			prevRx = rx
-
-			if deltaTx == 0 && deltaRx == 0 {
-				continue
-			}
-
-			debugf(
-				"%s throughput: %s=%s %s=%s total_%s=%s total_%s=%s",
-				label,
-				txName,
-				formatBitsPerSecond(deltaTx, 5*time.Second),
-				rxName,
-				formatBitsPerSecond(deltaRx, 5*time.Second),
-				txName,
-				formatByteCount(tx),
-				rxName,
-				formatByteCount(rx),
-			)
-		}
-	}
-}
-
-func formatBitsPerSecond(bytes uint64, interval time.Duration) string {
-	if interval <= 0 {
-		interval = time.Second
-	}
-
-	bps := float64(bytes*8) / interval.Seconds()
-	if bps >= 1_000_000 {
-		return fmt.Sprintf("%.2f Mbit/s", bps/1_000_000)
-	}
-	if bps >= 1_000 {
-		return fmt.Sprintf("%.1f kbit/s", bps/1_000)
-	}
-	return fmt.Sprintf("%.0f bit/s", bps)
-}
-
-func formatByteCount(bytes uint64) string {
-	if bytes >= 1024*1024 {
-		return fmt.Sprintf("%.2f MiB", float64(bytes)/(1024*1024))
-	}
-	if bytes >= 1024 {
-		return fmt.Sprintf("%.1f KiB", float64(bytes)/1024)
-	}
-	return fmt.Sprintf("%d B", bytes)
-}
-
-type countingConn struct {
-	net.Conn
-	stats *throughputStats
-}
-
-func (c *countingConn) Read(p []byte) (int, error) {
-	n, err := c.Conn.Read(p)
-	c.stats.addRx(n)
-	return n, err
-}
-
-func (c *countingConn) Write(p []byte) (int, error) {
-	n, err := c.Conn.Write(p)
-	c.stats.addTx(n)
-	return n, err
-}
-
-const (
-	bondVersion = 1
-	bondMagic   = "VLB1"
-
-	bondFrameData byte = 1
-	bondFrameFIN  byte = 2
-
-	bondMaxChunk = 16 * 1024
-
-	bondLaneAttachTimeout = 300 * time.Millisecond
-)
-
-type bondHello struct {
-	connID    uint64
-	laneIndex uint16
-	laneCount uint16
-}
-
-type bondFrame struct {
-	typ  byte
-	seq  uint64
-	data []byte
-}
-
-func readBondHelloAfterMagic(r io.Reader, magic [4]byte) (bondHello, error) {
-	var hdr [17]byte
-	copy(hdr[0:4], magic[:])
-	if _, err := io.ReadFull(r, hdr[4:]); err != nil {
-		return bondHello{}, err
-	}
-	return parseBondHelloHeader(hdr[:])
-}
-
-func parseBondHelloHeader(hdr []byte) (bondHello, error) {
-	if len(hdr) != 17 {
-		return bondHello{}, fmt.Errorf("bad bond hello size: %d", len(hdr))
-	}
-	if string(hdr[0:4]) != bondMagic {
-		return bondHello{}, fmt.Errorf("bad bond magic")
-	}
-	if hdr[4] != bondVersion {
-		return bondHello{}, fmt.Errorf("unsupported bond version: %d", hdr[4])
-	}
-	return bondHello{
-		connID:    binary.BigEndian.Uint64(hdr[5:13]),
-		laneIndex: binary.BigEndian.Uint16(hdr[13:15]),
-		laneCount: binary.BigEndian.Uint16(hdr[15:17]),
-	}, nil
-}
-
-func writeBondFrame(w io.Writer, typ byte, seq uint64, data []byte) error {
-	var hdr [13]byte
-	hdr[0] = typ
-	binary.BigEndian.PutUint64(hdr[1:9], seq)
-	binary.BigEndian.PutUint32(hdr[9:13], uint32(len(data)))
-	if _, err := w.Write(hdr[:]); err != nil {
-		return err
-	}
-	if len(data) == 0 {
-		return nil
-	}
-	_, err := w.Write(data)
-	return err
-}
-
-func readBondFrame(r io.Reader) (bondFrame, error) {
-	var hdr [13]byte
-	if _, err := io.ReadFull(r, hdr[:]); err != nil {
-		return bondFrame{}, err
-	}
-	size := binary.BigEndian.Uint32(hdr[9:13])
-	if size > 4*1024*1024 {
-		return bondFrame{}, fmt.Errorf("bond frame too large: %d", size)
-	}
-	f := bondFrame{
-		typ: hdr[0],
-		seq: binary.BigEndian.Uint64(hdr[1:9]),
-	}
-	if size > 0 {
-		f.data = make([]byte, size)
-		if _, err := io.ReadFull(r, f.data); err != nil {
-			return bondFrame{}, err
-		}
-	}
-	return f, nil
-}
-
-func closeWrite(conn net.Conn) {
-	type closeWriter interface {
-		CloseWrite() error
-	}
-	if cw, ok := conn.(closeWriter); ok {
-		if err := cw.CloseWrite(); err != nil {
-			debugf("CloseWrite failed: %v", err)
-		}
-	}
-}
-
 type bondServerLane struct {
 	index  uint16
 	stream *smux.Stream
@@ -390,7 +190,7 @@ type bondServerConn struct {
 	want    uint16
 	ready   chan struct{}
 
-	recvCh chan bondFrame
+	recvCh chan bond.Frame
 	once   sync.Once
 }
 
@@ -415,7 +215,7 @@ func (r *bondRegistry) get(ctx context.Context, id uint64, connectAddr string) *
 		cancel:      cancel,
 		done:        make(chan struct{}),
 		ready:       make(chan struct{}, 1),
-		recvCh:      make(chan bondFrame, 1024),
+		recvCh:      make(chan bond.Frame, 1024),
 	}
 	r.conns[id] = c
 	go func() {
@@ -470,7 +270,7 @@ func (c *bondServerConn) removeLane(l *bondServerLane) int {
 }
 
 func (c *bondServerConn) waitForInitialLanes() {
-	timer := time.NewTimer(bondLaneAttachTimeout)
+	timer := time.NewTimer(bond.LaneAttachTimeout)
 	defer timer.Stop()
 	for {
 		c.lanesMu.RLock()
@@ -493,7 +293,7 @@ func (c *bondServerConn) waitForInitialLanes() {
 
 func (c *bondServerConn) readLane(l *bondServerLane) {
 	for {
-		f, err := readBondFrame(l.stream)
+		f, err := bond.ReadFrame(l.stream)
 		if err != nil {
 			left := c.removeLane(l)
 			select {
@@ -563,7 +363,7 @@ func (c *bondServerConn) copyBondToBackend(backendConn net.Conn) {
 
 	for {
 		if finSeq != nil && expect == *finSeq {
-			closeWrite(backendConn)
+			bond.CloseWrite(backendConn, debugf)
 			debugf("[bond %d] upload to backend finished chunks=%d", c.id, expect)
 			return
 		}
@@ -572,16 +372,16 @@ func (c *bondServerConn) copyBondToBackend(backendConn net.Conn) {
 		case <-c.ctx.Done():
 			return
 		case f := <-c.recvCh:
-			switch f.typ {
-			case bondFrameData:
-				pending[f.seq] = f.data
-			case bondFrameFIN:
-				v := f.seq
+			switch f.Type {
+			case bond.FrameData:
+				pending[f.Seq] = f.Data
+			case bond.FrameFIN:
+				v := f.Seq
 				if finSeq == nil || v < *finSeq {
 					finSeq = &v
 				}
 			default:
-				log.Printf("[bond %d] unknown frame type %d", c.id, f.typ)
+				log.Printf("[bond %d] unknown frame type %d", c.id, f.Type)
 				return
 			}
 
@@ -604,7 +404,7 @@ func (c *bondServerConn) copyBondToBackend(backendConn net.Conn) {
 }
 
 func (c *bondServerConn) copyBackendToBond(backendConn net.Conn) {
-	buf := make([]byte, bondMaxChunk)
+	buf := make([]byte, bond.MaxChunk)
 	var seq uint64
 	var laneIdx uint64
 	for {
@@ -612,7 +412,7 @@ func (c *bondServerConn) copyBackendToBond(backendConn net.Conn) {
 		if n > 0 {
 			data := make([]byte, n)
 			copy(data, buf[:n])
-			if writeErr := c.writeToNextLane(bondFrameData, seq, data, &laneIdx); writeErr != nil {
+			if writeErr := c.writeToNextLane(bond.FrameData, seq, data, &laneIdx); writeErr != nil {
 				log.Printf("[bond %d] lane write data error: %v", c.id, writeErr)
 				return
 			}
@@ -622,7 +422,7 @@ func (c *bondServerConn) copyBackendToBond(backendConn net.Conn) {
 			lanes := c.snapshotLanes()
 			for _, lane := range lanes {
 				lane.mu.Lock()
-				writeErr := writeBondFrame(lane.stream, bondFrameFIN, seq, nil)
+				writeErr := bond.WriteFrame(lane.stream, bond.FrameFIN, seq, nil)
 				lane.mu.Unlock()
 				if writeErr != nil && c.ctx.Err() == nil {
 					log.Printf("[bond %d] lane %d write FIN error: %v", c.id, lane.index, writeErr)
@@ -646,7 +446,7 @@ func (c *bondServerConn) writeToNextLane(typ byte, seq uint64, data []byte, lane
 			lane := lanes[*laneIdx%uint64(len(lanes))]
 			(*laneIdx)++
 			lane.mu.Lock()
-			err := writeBondFrame(lane.stream, typ, seq, data)
+			err := bond.WriteFrame(lane.stream, typ, seq, data)
 			lane.mu.Unlock()
 			if err == nil {
 				return nil
@@ -666,12 +466,12 @@ func (c *bondServerConn) writeToNextLane(typ byte, seq uint64, data []byte, lane
 }
 
 func handleBondServerStreamAfterMagic(ctx context.Context, stream *smux.Stream, connectAddr string, magic [4]byte) {
-	handleBondServerStreamWithHello(ctx, stream, connectAddr, func(r io.Reader) (bondHello, error) {
-		return readBondHelloAfterMagic(r, magic)
+	handleBondServerStreamWithHello(ctx, stream, connectAddr, func(r io.Reader) (bond.Hello, error) {
+		return bond.ReadHelloAfterMagic(r, magic)
 	})
 }
 
-func handleBondServerStreamWithHello(ctx context.Context, stream *smux.Stream, connectAddr string, readHello func(io.Reader) (bondHello, error)) {
+func handleBondServerStreamWithHello(ctx context.Context, stream *smux.Stream, connectAddr string, readHello func(io.Reader) (bond.Hello, error)) {
 	defer func() {
 		if err := stream.Close(); err != nil && err != smux.ErrGoAway {
 			log.Printf("failed to close bond smux stream: %v", err)
@@ -684,11 +484,11 @@ func handleBondServerStreamWithHello(ctx context.Context, stream *smux.Stream, c
 		return
 	}
 
-	conn := globalBondRegistry.get(ctx, hello.connID, connectAddr)
+	conn := globalBondRegistry.get(ctx, hello.ConnID, connectAddr)
 	conn.addLane(&bondServerLane{
-		index:  hello.laneIndex,
+		index:  hello.LaneIndex,
 		stream: stream,
-	}, hello.laneCount)
+	}, hello.LaneCount)
 
 	select {
 	case <-ctx.Done():
@@ -725,9 +525,10 @@ func handleUDPConnection(ctx context.Context, conn net.Conn, connectAddr string)
 
 	var wg sync.WaitGroup
 	ctx2, cancel2 := context.WithCancel(ctx)
-	stats := &throughputStats{}
-	go stats.logEvery(
+	st := stats.New(isDebug)
+	go st.LogEvery(
 		ctx2,
+		debugf,
 		fmt.Sprintf("[DTLS %s]", conn.RemoteAddr()),
 		"dtls-to-backend",
 		"backend-to-dtls",
@@ -765,7 +566,7 @@ func handleUDPConnection(ctx context.Context, conn net.Conn, connectAddr string)
 				return
 			}
 			written, err1 := serverConn.Write(buf[:n])
-			stats.addTx(written)
+			st.AddTx(written)
 			if err1 != nil {
 				log.Printf("Failed: %s", err1)
 				return
@@ -796,7 +597,7 @@ func handleUDPConnection(ctx context.Context, conn net.Conn, connectAddr string)
 				return
 			}
 			written, err1 := conn.Write(buf[:n])
-			stats.addRx(written)
+			st.AddRx(written)
 			if err1 != nil {
 				log.Printf("Failed: %s", err1)
 				return
@@ -808,19 +609,20 @@ func handleUDPConnection(ctx context.Context, conn net.Conn, connectAddr string)
 
 // handleVLESSConnection creates a KCP+smux session over DTLS and forwards
 // each smux stream as a TCP connection to the backend (Xray/VLESS).
-func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr string, bond bool) {
+func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr string, useBond bool) {
 	// 1. Create KCP session over DTLS
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	defer statsCancel()
-	stats := &throughputStats{}
-	go stats.logEvery(
+	st := stats.New(isDebug)
+	go st.LogEvery(
 		statsCtx,
+		debugf,
 		fmt.Sprintf("[VLESS %s]", dtlsConn.RemoteAddr()),
 		"to-client",
 		"from-client",
 	)
 
-	kcpSess, err := tcputil.NewKCPOverDTLS(&countingConn{Conn: dtlsConn, stats: stats}, true)
+	kcpSess, err := tcputil.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, true)
 	if err != nil {
 		log.Printf("KCP session error: %s", err)
 		return
@@ -868,12 +670,12 @@ func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr s
 				_ = s.Close()
 				return
 			}
-			if string(prefix[:]) == bondMagic {
+			if string(prefix[:]) == bond.Magic {
 				debugf("auto-detected bond smux stream")
 				handleBondServerStreamAfterMagic(ctx, s, connectAddr, prefix)
 				return
 			}
-			if bond {
+			if useBond {
 				log.Printf("non-bond smux stream accepted while -vless-bond is enabled")
 			}
 
