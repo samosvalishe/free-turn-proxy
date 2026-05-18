@@ -1794,9 +1794,7 @@ func copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.Conn, lanes [
 	for {
 		n, err := tcpConn.Read(buf)
 		if n > 0 {
-			data := make([]byte, n)
-			copy(data, buf[:n])
-			lane, writeErr := writeBondFrameToNextLane(ctx, lanes, bondFrameData, seq, data, &laneIdx)
+			lane, writeErr := writeBondFrameToNextLane(ctx, lanes, bondFrameData, seq, buf[:n], &laneIdx)
 			if writeErr != nil {
 				log.Printf("[bond %d] write data error: %v", connID, writeErr)
 				return
