@@ -198,7 +198,7 @@ jobs:
             MAJOR=$((MAJOR + 1))
             MINOR=0
             PATCH=0
-          elif printf '%s\n' "$COMMITS" | grep -Eiq '^feat([(:! ]|$)'; then
+          elif printf '%s\n' "$COMMITS" | grep -Eiq '^(feat|refactor)([(:! ]|$)'; then
             BUMP="minor"
             MINOR=$((MINOR + 1))
             PATCH=0
@@ -230,10 +230,11 @@ jobs:
           RANGE: ${{ steps.meta.outputs.range }}
         run: |
           strip_prefix() {
-            sed -E 's/^(feat|fix|break)([(!:]|[[:space:]])+[[:space:]]*//I'
+            sed -E 's/^(feat|fix|break|refactor)([(!:]|[[:space:]])+[[:space:]]*//I'
           }
 
           FEATURES="$(git log --no-merges --format='%s (%h)' "$RANGE" | grep -Ei '^feat([(:! ]|$)' | strip_prefix | LC_ALL=C sort -f || true)"
+          REFACTORS="$(git log --no-merges --format='%s (%h)' "$RANGE" | grep -Ei '^refactor([(:! ]|$)' | strip_prefix | LC_ALL=C sort -f || true)"
           FIXES="$(git log --no-merges --format='%s (%h)' "$RANGE" | grep -Ei '^fix([(:! ]|$)' | strip_prefix | LC_ALL=C sort -f || true)"
           BREAKING="$(git log --no-merges --format='%s (%h)' "$RANGE" | grep -Ei '^break([(:! ]|$)' | strip_prefix | LC_ALL=C sort -f || true)"
 
@@ -253,6 +254,13 @@ jobs:
               echo "### Features"
               echo
               printf '%s\n' "$FEATURES" | sed 's/^/- /'
+              echo
+            fi
+
+            if [ -n "$REFACTORS" ]; then
+              echo "### Refactoring"
+              echo
+              printf '%s\n' "$REFACTORS" | sed 's/^/- /'
               echo
             fi
 
@@ -283,7 +291,7 @@ jobs:
         if: steps.meta.outputs.should_release != 'true'
         run: |
           echo "No new semantic release created."
-          echo "Add a commit starting with break, feat, or fix after the latest tag."
+          echo "Add a commit starting with break, feat, fix, or refactor after the latest tag."
 
   docker:
     name: Publish Docker image
