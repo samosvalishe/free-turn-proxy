@@ -27,13 +27,6 @@ func TestWrapConnRoundTrip(t *testing.T) {
 	}
 	wire = wire[:n]
 
-	// Check DTLS header mimicry
-	if wire[0] != 0x17 {
-		t.Fatalf("content_type = 0x%02X, want 0x17", wire[0])
-	}
-	if wire[1] != 0xFE || wire[2] != 0xFD {
-		t.Fatalf("version = 0x%02X%02X, want 0xFEFD", wire[1], wire[2])
-	}
 	if bytes.Contains(wire, payload) {
 		t.Fatalf("wrapped packet contains plaintext payload")
 	}
@@ -65,35 +58,39 @@ func TestWrapConnRoundTrip(t *testing.T) {
 	}
 }
 
-func TestWrapPaddingHidesSize(t *testing.T) {
+func TestWrapPrefixLenInRange(t *testing.T) {
 	key := bytes.Repeat([]byte{0x42}, wrapKeyLen)
 	wc, _ := newWrapConn(key, false)
+	payload := []byte("x")
 
-	// Two payloads of different size should produce same wire size if in same bucket
-	p1 := make([]byte, 10)
-	p2 := make([]byte, 100)
-
-	w1 := make([]byte, wrapMaxWire(len(p1)))
-	w2 := make([]byte, wrapMaxWire(len(p2)))
-
-	n1, _ := wc.wrapInto(w1, p1)
-	n2, _ := wc.wrapInto(w2, p2)
-
-	if n1 != n2 {
-		t.Fatalf("different wire sizes for payloads in same bucket: %d vs %d", n1, n2)
+	// Run many trials; every prefix_len must fall in [1..8].
+	for range 200 {
+		wire := make([]byte, wrapMaxWire(len(payload)))
+		n, err := wc.wrapInto(wire, payload)
+		if err != nil {
+			t.Fatalf("wrapInto: %v", err)
+		}
+		prefixLen := wrapPrefixMin + int(wire[0]&0x07)
+		if prefixLen < 1 || prefixLen > 8 {
+			t.Fatalf("prefix_len out of range: %d", prefixLen)
+		}
+		expected := prefixLen + wrapNonceLen + len(payload) + wrapTagLen
+		if n != expected {
+			t.Fatalf("wire size mismatch: got %d want %d (prefix_len=%d)", n, expected, prefixLen)
+		}
 	}
 }
 
-func TestWrapEpochDirection(t *testing.T) {
+func TestWrapDirectionBit(t *testing.T) {
 	key := bytes.Repeat([]byte{0x42}, wrapKeyLen)
 	client, _ := newWrapConn(key, false)
 	server, _ := newWrapConn(key, true)
 
-	if client.epoch&0x8000 != 0 {
-		t.Fatalf("client epoch MSB should be 0, got 0x%04X", client.epoch)
+	if client.sessionID[0]&0x80 != 0 {
+		t.Fatalf("client sessionID MSB should be 0, got 0x%02X", client.sessionID[0])
 	}
-	if server.epoch&0x8000 == 0 {
-		t.Fatalf("server epoch MSB should be 1, got 0x%04X", server.epoch)
+	if server.sessionID[0]&0x80 == 0 {
+		t.Fatalf("server sessionID MSB should be 1, got 0x%02X", server.sessionID[0])
 	}
 }
 
@@ -139,8 +136,9 @@ func TestUnwrapRejectsTamperedPacket(t *testing.T) {
 	n, _ := client.wrapInto(wire, payload)
 	wire = wire[:n]
 
-	// Flip a bit in the ciphertext
-	wire[wrapHeaderLen+5] ^= 0xFF
+	// Flip a bit in the ciphertext (past prefix+nonce).
+	prefixLen := wrapPrefixMin + int(wire[0]&0x07)
+	wire[prefixLen+wrapNonceLen+1] ^= 0xFF
 
 	dst := make([]byte, 1600)
 	if _, err := server.unwrapPacket(wire, dst); err == nil {

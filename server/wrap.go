@@ -5,7 +5,6 @@ package main
 import (
 	"crypto/cipher"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -19,45 +18,28 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
-// Wire format is identical to the client — see client/wrap.go for the
-// full specification. Server uses epoch MSB=1, client uses MSB=0.
+// Wire format is identical to client — see client/wrap.go. Server sets the
+// MSB of sessionID; client clears it. Counter init is random per process.
 
 const (
 	wrapKeyLen    = 32
-	wrapHeaderLen = 13 // DTLS 1.2 record header
-	wrapTagLen    = 16 // Poly1305 tag
-	wrapLenPrefix = 2  // uint16 BE real payload length
+	wrapNonceLen  = 12
+	wrapTagLen    = 16
+	wrapPrefixMin = 1
+	wrapPrefixMax = 8
 )
-
-var padBuckets = [...]int{128, 256, 512, 768, 1024, 1300}
 
 // bufPool eliminates per-packet heap allocation on the hot read/write paths.
 var bufPool = sync.Pool{
 	New: func() any {
-		b := make([]byte, 1600)
+		b := make([]byte, 1600+wrapPrefixMax+wrapNonceLen+wrapTagLen)
 		return &b
 	},
 }
 
-func padPlaintextSize(payloadLen int) int {
-	needed := wrapLenPrefix + payloadLen
-	for _, b := range padBuckets {
-		if b >= needed {
-			return b
-		}
-	}
-	return needed
-}
-
-func wrapMaxWire(payloadLen int) int {
-	return wrapHeaderLen + padPlaintextSize(payloadLen) + wrapTagLen
-}
-
-// wrapState holds the AEAD instance and nonce mask shared by all connections
-// under one key, plus per-connection epoch/seq state.
+// wrapState holds the AEAD instance shared by all connections under one key.
 type wrapState struct {
-	aead      cipher.AEAD
-	nonceMask [12]byte
+	aead cipher.AEAD
 }
 
 func newWrapState(key []byte) (*wrapState, error) {
@@ -68,22 +50,7 @@ func newWrapState(key []byte) (*wrapState, error) {
 	if err != nil {
 		return nil, fmt.Errorf("wrap: aead init: %w", err)
 	}
-	h := sha256.Sum256(key)
-	var mask [12]byte
-	copy(mask[:], h[:12])
-	return &wrapState{aead: aead, nonceMask: mask}, nil
-}
-
-func (s *wrapState) deriveNonce(epoch uint16, seqNum uint64) [12]byte {
-	var explicit [12]byte
-	binary.BigEndian.PutUint16(explicit[2:4], epoch)
-	binary.BigEndian.PutUint16(explicit[4:6], uint16(seqNum>>32))
-	binary.BigEndian.PutUint32(explicit[6:10], uint32(seqNum))
-	var nonce [12]byte
-	for i := range 12 {
-		nonce[i] = s.nonceMask[i] ^ explicit[i]
-	}
-	return nonce
+	return &wrapState{aead: aead}, nil
 }
 
 // --- Listener ---
@@ -113,12 +80,18 @@ func (l *wrapPacketListener) Accept() (net.PacketConn, net.Addr, error) {
 	if err != nil {
 		return pc, addr, err
 	}
-	// Server epoch: random with MSB=1
-	var eb [2]byte
-	_, _ = rand.Read(eb[:])
-	epoch := binary.BigEndian.Uint16(eb[:]) | 0x8000
-
-	return &wrapPacketConn{inner: pc, ws: l.ws, epoch: epoch}, addr, nil
+	c := &wrapPacketConn{inner: pc, ws: l.ws}
+	// Per-connection sessionID (server MSB=1) + random counter init.
+	if _, err := rand.Read(c.sessionID[:]); err != nil {
+		return nil, addr, fmt.Errorf("wrap: sessionID rand: %w", err)
+	}
+	c.sessionID[0] |= 0x80
+	var cb [8]byte
+	if _, err := rand.Read(cb[:]); err != nil {
+		return nil, addr, fmt.Errorf("wrap: counter rand: %w", err)
+	}
+	c.counter.Store(binary.BigEndian.Uint64(cb[:]))
+	return c, addr, nil
 }
 
 func (l *wrapPacketListener) Close() error   { return l.inner.Close() }
@@ -127,17 +100,18 @@ func (l *wrapPacketListener) Addr() net.Addr { return l.inner.Addr() }
 // --- Per-peer PacketConn ---
 
 type wrapPacketConn struct {
-	inner net.PacketConn
-	ws    *wrapState
-	epoch uint16
-	seq   atomic.Uint64
+	inner     net.PacketConn
+	ws        *wrapState
+	sessionID [4]byte
+	counter   atomic.Uint64
 }
 
 func (c *wrapPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	bp := bufPool.Get().(*[]byte)
 	buf := *bp
-	if cap(buf) < len(p)+wrapHeaderLen+wrapTagLen {
-		buf = make([]byte, len(p)+wrapHeaderLen+wrapTagLen)
+	need := len(p) + wrapPrefixMax + wrapNonceLen + wrapTagLen
+	if cap(buf) < need {
+		buf = make([]byte, need)
 		*bp = buf
 	}
 	defer bufPool.Put(bp)
@@ -147,45 +121,34 @@ func (c *wrapPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 		return 0, addr, err
 	}
 	wire := buf[:n]
-	if len(wire) < wrapHeaderLen+wrapTagLen+wrapLenPrefix {
+	if len(wire) < wrapPrefixMin+wrapNonceLen+wrapTagLen {
 		return 0, addr, errors.New("wrap: packet too short")
 	}
-	if wire[0] != 0x17 {
-		return 0, addr, fmt.Errorf("wrap: unexpected content type 0x%02X", wire[0])
+	prefixLen := wrapPrefixMin + int(wire[0]&0x07)
+	if len(wire) < prefixLen+wrapNonceLen+wrapTagLen {
+		return 0, addr, errors.New("wrap: packet too short for prefix")
 	}
+	nonce := wire[prefixLen : prefixLen+wrapNonceLen]
+	ct := wire[prefixLen+wrapNonceLen:]
 
-	epoch := binary.BigEndian.Uint16(wire[3:5])
-	seqHigh := uint64(binary.BigEndian.Uint16(wire[5:7]))
-	seqLow := uint64(binary.BigEndian.Uint32(wire[7:11]))
-	seqNum := (seqHigh << 32) | seqLow
-	bodyLen := int(binary.BigEndian.Uint16(wire[11:13]))
-
-	if wrapHeaderLen+bodyLen > n {
-		return 0, addr, errors.New("wrap: truncated packet")
-	}
-
-	nonce := c.ws.deriveNonce(epoch, seqNum)
-	aad := wire[:wrapHeaderLen]
-	ciphertext := wire[wrapHeaderLen : wrapHeaderLen+bodyLen]
-
-	plain, err := c.ws.aead.Open(ciphertext[:0], nonce[:], ciphertext, aad)
+	plain, err := c.ws.aead.Open(ct[:0], nonce, ct, nonce)
 	if err != nil {
 		return 0, addr, fmt.Errorf("wrap: AEAD open: %w", err)
 	}
-	if len(plain) < wrapLenPrefix {
-		return 0, addr, errors.New("wrap: plaintext too short")
+	if len(plain) > len(p) {
+		return 0, addr, errors.New("wrap: dst buffer too small")
 	}
-	realLen := int(binary.BigEndian.Uint16(plain[0:2]))
-	if realLen > len(plain)-wrapLenPrefix || realLen > len(p) {
-		return 0, addr, errors.New("wrap: payload length mismatch")
-	}
-	copy(p[:realLen], plain[wrapLenPrefix:wrapLenPrefix+realLen])
-	return realLen, addr, nil
+	copy(p[:len(plain)], plain)
+	return len(plain), addr, nil
 }
 
 func (c *wrapPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
-	paddedLen := padPlaintextSize(len(p))
-	wireLen := wrapHeaderLen + paddedLen + wrapTagLen
+	var hdr [1]byte
+	if _, err := rand.Read(hdr[:]); err != nil {
+		return 0, fmt.Errorf("wrap: prefix rand: %w", err)
+	}
+	prefixLen := wrapPrefixMin + int(hdr[0]&0x07)
+	wireLen := prefixLen + wrapNonceLen + len(p) + wrapTagLen
 
 	bp := bufPool.Get().(*[]byte)
 	out := *bp
@@ -196,29 +159,22 @@ func (c *wrapPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 	out = out[:wireLen]
 	defer bufPool.Put(bp)
 
-	seq := c.seq.Add(1) - 1
-
-	// DTLS record header
-	out[0] = 0x17
-	out[1] = 0xFE
-	out[2] = 0xFD
-	binary.BigEndian.PutUint16(out[3:5], c.epoch)
-	binary.BigEndian.PutUint16(out[5:7], uint16(seq>>32))
-	binary.BigEndian.PutUint32(out[7:11], uint32(seq))
-	binary.BigEndian.PutUint16(out[11:13], uint16(paddedLen+wrapTagLen))
-
-	// Plaintext: [2B len | payload | random padding]
-	plain := out[wrapHeaderLen : wrapHeaderLen+paddedLen]
-	binary.BigEndian.PutUint16(plain[0:2], uint16(len(p)))
-	copy(plain[wrapLenPrefix:], p)
-	padStart := wrapLenPrefix + len(p)
-	if padStart < paddedLen {
-		_, _ = rand.Read(plain[padStart:paddedLen])
+	out[0] = hdr[0]
+	if prefixLen > 1 {
+		if _, err := rand.Read(out[1:prefixLen]); err != nil {
+			return 0, fmt.Errorf("wrap: prefix rand: %w", err)
+		}
 	}
 
-	nonce := c.ws.deriveNonce(c.epoch, seq)
-	aad := out[:wrapHeaderLen]
-	c.ws.aead.Seal(out[wrapHeaderLen:wrapHeaderLen], nonce[:], plain, aad)
+	noncePos := prefixLen
+	copy(out[noncePos:noncePos+4], c.sessionID[:])
+	ctr := c.counter.Add(1) - 1
+	binary.BigEndian.PutUint64(out[noncePos+4:noncePos+wrapNonceLen], ctr)
+
+	nonce := out[noncePos : noncePos+wrapNonceLen]
+	ctPos := noncePos + wrapNonceLen
+	copy(out[ctPos:], p)
+	c.ws.aead.Seal(out[ctPos:ctPos], nonce, out[ctPos:ctPos+len(p)], nonce)
 
 	if _, err := c.inner.WriteTo(out, addr); err != nil {
 		return 0, err
