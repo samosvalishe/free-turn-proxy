@@ -2222,7 +2222,7 @@ func createSmuxSession(ctx context.Context, tp *turnParams, peer *net.UDPAddr, i
 }
 
 // relayPacketConn wraps a TURN relay PacketConn to direct all writes to the peer.
-// When wc != nil, packets are wrapped/unwrapped with AEAD noise obfuscation.
+// When wc != nil, packets are wrapped/unwrapped with SRTP-mimicry AEAD.
 type relayPacketConn struct {
 	relay net.PacketConn
 	peer  net.Addr

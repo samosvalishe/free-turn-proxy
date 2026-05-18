@@ -19,20 +19,24 @@ import (
 )
 
 // Wire format is identical to client — see client/wrap.go. Server sets the
-// MSB of sessionID; client clears it. Counter init is random per process.
+// MSB of sessionID/SSRC; client clears it. RTP header fields are per-conn.
 
 const (
-	wrapKeyLen    = 32
-	wrapNonceLen  = 12
-	wrapTagLen    = 16
-	wrapPrefixMin = 1
-	wrapPrefixMax = 8
+	wrapKeyLen     = 32
+	wrapRTPHdrLen  = 12
+	wrapNonceLen   = 12
+	wrapTagLen     = 16
+	wrapHeaderLen  = wrapRTPHdrLen + wrapNonceLen
+	wrapOverhead   = wrapHeaderLen + wrapTagLen
+	wrapRTPVersion = 0x80
+	wrapRTPPT      = 0x6F
+	wrapTSStep     = 960
 )
 
 // bufPool eliminates per-packet heap allocation on the hot read/write paths.
 var bufPool = sync.Pool{
 	New: func() any {
-		b := make([]byte, 1600+wrapPrefixMax+wrapNonceLen+wrapTagLen)
+		b := make([]byte, 1600+wrapOverhead)
 		return &b
 	},
 }
@@ -81,11 +85,18 @@ func (l *wrapPacketListener) Accept() (net.PacketConn, net.Addr, error) {
 		return pc, addr, err
 	}
 	c := &wrapPacketConn{inner: pc, ws: l.ws}
-	// Per-connection sessionID (server MSB=1) + random counter init.
-	if _, err := rand.Read(c.sessionID[:]); err != nil {
-		return nil, addr, fmt.Errorf("wrap: sessionID rand: %w", err)
+
+	var rnd [16]byte
+	if _, err := rand.Read(rnd[:]); err != nil {
+		return nil, addr, fmt.Errorf("wrap: rand init: %w", err)
 	}
+	copy(c.sessionID[:], rnd[0:4])
+	copy(c.ssrc[:], rnd[4:8])
 	c.sessionID[0] |= 0x80
+	c.ssrc[0] |= 0x80
+	c.seq.Store(uint32(binary.BigEndian.Uint16(rnd[8:10])))
+	c.timestamp.Store(binary.BigEndian.Uint32(rnd[10:14]))
+
 	var cb [8]byte
 	if _, err := rand.Read(cb[:]); err != nil {
 		return nil, addr, fmt.Errorf("wrap: counter rand: %w", err)
@@ -103,13 +114,16 @@ type wrapPacketConn struct {
 	inner     net.PacketConn
 	ws        *wrapState
 	sessionID [4]byte
+	ssrc      [4]byte
 	counter   atomic.Uint64
+	seq       atomic.Uint32
+	timestamp atomic.Uint32
 }
 
 func (c *wrapPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	bp := bufPool.Get().(*[]byte) //nolint:errcheck // pool New always returns *[]byte
 	buf := *bp
-	need := len(p) + wrapPrefixMax + wrapNonceLen + wrapTagLen
+	need := len(p) + wrapOverhead
 	if cap(buf) < need {
 		buf = make([]byte, need)
 		*bp = buf
@@ -121,17 +135,14 @@ func (c *wrapPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 		return 0, addr, err
 	}
 	wire := buf[:n]
-	if len(wire) < wrapPrefixMin+wrapNonceLen+wrapTagLen {
+	if len(wire) < wrapOverhead {
 		return 0, addr, errors.New("wrap: packet too short")
 	}
-	prefixLen := wrapPrefixMin + int(wire[0]&0x07)
-	if len(wire) < prefixLen+wrapNonceLen+wrapTagLen {
-		return 0, addr, errors.New("wrap: packet too short for prefix")
-	}
-	nonce := wire[prefixLen : prefixLen+wrapNonceLen]
-	ct := wire[prefixLen+wrapNonceLen:]
+	nonce := wire[wrapRTPHdrLen : wrapRTPHdrLen+wrapNonceLen]
+	aad := wire[:wrapHeaderLen]
+	ct := wire[wrapHeaderLen:]
 
-	plain, err := c.ws.aead.Open(ct[:0], nonce, ct, nonce)
+	plain, err := c.ws.aead.Open(ct[:0], nonce, ct, aad)
 	if err != nil {
 		return 0, addr, fmt.Errorf("wrap: AEAD open: %w", err)
 	}
@@ -143,12 +154,7 @@ func (c *wrapPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
 }
 
 func (c *wrapPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
-	var hdr [1]byte
-	if _, err := rand.Read(hdr[:]); err != nil {
-		return 0, fmt.Errorf("wrap: prefix rand: %w", err)
-	}
-	prefixLen := wrapPrefixMin + int(hdr[0]&0x07)
-	wireLen := prefixLen + wrapNonceLen + len(p) + wrapTagLen
+	wireLen := wrapOverhead + len(p)
 
 	bp := bufPool.Get().(*[]byte) //nolint:errcheck // pool New always returns *[]byte
 	out := *bp
@@ -159,22 +165,25 @@ func (c *wrapPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 	out = out[:wireLen]
 	defer bufPool.Put(bp)
 
-	out[0] = hdr[0]
-	if prefixLen > 1 {
-		if _, err := rand.Read(out[1:prefixLen]); err != nil {
-			return 0, fmt.Errorf("wrap: prefix rand: %w", err)
-		}
-	}
+	// RTP header.
+	out[0] = wrapRTPVersion
+	out[1] = wrapRTPPT
+	seq := uint16(c.seq.Add(1) - 1)
+	binary.BigEndian.PutUint16(out[2:4], seq)
+	ts := c.timestamp.Add(wrapTSStep) - wrapTSStep
+	binary.BigEndian.PutUint32(out[4:8], ts)
+	copy(out[8:12], c.ssrc[:])
 
-	noncePos := prefixLen
+	noncePos := wrapRTPHdrLen
 	copy(out[noncePos:noncePos+4], c.sessionID[:])
 	ctr := c.counter.Add(1) - 1
 	binary.BigEndian.PutUint64(out[noncePos+4:noncePos+wrapNonceLen], ctr)
 
 	nonce := out[noncePos : noncePos+wrapNonceLen]
-	ctPos := noncePos + wrapNonceLen
+	aad := out[:wrapHeaderLen]
+	ctPos := wrapHeaderLen
 	copy(out[ctPos:], p)
-	c.ws.aead.Seal(out[ctPos:ctPos], nonce, out[ctPos:ctPos+len(p)], nonce)
+	c.ws.aead.Seal(out[ctPos:ctPos], nonce, out[ctPos:ctPos+len(p)], aad)
 
 	if _, err := c.inner.WriteTo(out, addr); err != nil {
 		return 0, err

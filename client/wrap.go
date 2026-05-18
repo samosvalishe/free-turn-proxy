@@ -14,35 +14,45 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 )
 
-// Wire format — noise-only AEAD (no protocol mimicry):
+// Wire format — SRTP-like mimicry:
 //
-//	[1B header | (prefix_len-1)B random | 12B nonce | AEAD ciphertext | 16B tag]
+//	[12B RTP header | 12B explicit nonce | AEAD ciphertext | 16B tag]
 //
-// prefix_len = 1 + (header & 0x07), so byte 0 is uniformly random across all
-// 256 values while encoding 1..8 bytes of leading random padding. There is
-// no fixed byte, no version, no length field — everything past the header
-// byte is indistinguishable from random to a passive observer.
+// RTP header (RFC 3550):
 //
-// Nonce (12B) = 4B sessionID || 8B counter (big-endian). sessionID has its
-// MSB set on server side, cleared on client side, preventing nonce reuse
-// between directions under the same key. counter starts at a random uint64
-// to avoid reuse across process restarts.
+//	byte 0: 0x80         V=2, P=0, X=0, CC=0
+//	byte 1: 0x6F         M=0, PT=111 (opus, typical voice PT)
+//	byte 2-3: seq16 BE   monotonic, init random
+//	byte 4-7: ts32 BE    monotonic, init random, increments by 960 (20ms @ 48kHz)
+//	byte 8-11: SSRC      random per conn, MSB encodes direction
 //
-// AAD = nonce. The random prefix is not authenticated (it carries no
-// information).
+// 12B explicit nonce = 4B sessionID || 8B counter (BE). sessionID MSB
+// matches SSRC MSB (direction bit). counter starts at a random uint64.
+// AAD = first 24 bytes (RTP header || nonce).
+//
+// VK TURN appears to forward SRTP-shaped ChannelData on a fast path and
+// drop anomalous payloads. AEAD ciphertext + 16B tag is plausible as
+// AES-GCM SRTP per RFC 7714.
 
 const (
-	wrapKeyLen    = 32
-	wrapNonceLen  = 12
-	wrapTagLen    = 16
-	wrapPrefixMin = 1
-	wrapPrefixMax = 8
+	wrapKeyLen     = 32
+	wrapRTPHdrLen  = 12
+	wrapNonceLen   = 12
+	wrapTagLen     = 16
+	wrapHeaderLen  = wrapRTPHdrLen + wrapNonceLen // 24
+	wrapOverhead   = wrapHeaderLen + wrapTagLen   // 40
+	wrapRTPVersion = 0x80                         // V=2, P=0, X=0, CC=0
+	wrapRTPPT      = 0x6F                         // M=0, PT=111 (opus)
+	wrapTSStep     = 960                          // 20ms @ 48kHz
 )
 
 type wrapConn struct {
 	aead      cipher.AEAD
-	sessionID [4]byte
+	sessionID [4]byte // 4B prefix for nonce; MSB encodes direction
+	ssrc      [4]byte // SSRC for RTP header; MSB encodes direction
 	counter   atomic.Uint64
+	seq       atomic.Uint32 // RTP sequence (used as uint16)
+	timestamp atomic.Uint32 // RTP timestamp
 }
 
 func newWrapConn(key []byte, isServer bool) (*wrapConn, error) {
@@ -54,14 +64,23 @@ func newWrapConn(key []byte, isServer bool) (*wrapConn, error) {
 		return nil, fmt.Errorf("wrap: aead init: %w", err)
 	}
 	w := &wrapConn{aead: aead}
-	if _, err := rand.Read(w.sessionID[:]); err != nil {
-		return nil, fmt.Errorf("wrap: sessionID rand: %w", err)
+
+	var rnd [16]byte
+	if _, err := rand.Read(rnd[:]); err != nil {
+		return nil, fmt.Errorf("wrap: rand init: %w", err)
 	}
+	copy(w.sessionID[:], rnd[0:4])
+	copy(w.ssrc[:], rnd[4:8])
 	if isServer {
 		w.sessionID[0] |= 0x80
+		w.ssrc[0] |= 0x80
 	} else {
 		w.sessionID[0] &^= 0x80
+		w.ssrc[0] &^= 0x80
 	}
+	w.seq.Store(uint32(binary.BigEndian.Uint16(rnd[8:10])))
+	w.timestamp.Store(binary.BigEndian.Uint32(rnd[10:14]))
+
 	var cb [8]byte
 	if _, err := rand.Read(cb[:]); err != nil {
 		return nil, fmt.Errorf("wrap: counter rand: %w", err)
@@ -72,56 +91,48 @@ func newWrapConn(key []byte, isServer bool) (*wrapConn, error) {
 
 // wrapMaxWire returns max wire bytes for a given payload size.
 func wrapMaxWire(payloadLen int) int {
-	return wrapPrefixMax + wrapNonceLen + payloadLen + wrapTagLen
+	return wrapOverhead + payloadLen
 }
 
 func (w *wrapConn) wrapInto(dst, payload []byte) (int, error) {
-	// Header + prefix length.
-	var hdr [1]byte
-	if _, err := rand.Read(hdr[:]); err != nil {
-		return 0, fmt.Errorf("wrap: prefix rand: %w", err)
-	}
-	prefixLen := wrapPrefixMin + int(hdr[0]&0x07) // 1..8
-
-	wireLen := prefixLen + wrapNonceLen + len(payload) + wrapTagLen
+	wireLen := wrapOverhead + len(payload)
 	if len(dst) < wireLen {
 		return 0, errors.New("wrap: dst buffer too small")
 	}
 
-	dst[0] = hdr[0]
-	if prefixLen > 1 {
-		if _, err := rand.Read(dst[1:prefixLen]); err != nil {
-			return 0, fmt.Errorf("wrap: prefix rand: %w", err)
-		}
-	}
+	// RTP header.
+	dst[0] = wrapRTPVersion
+	dst[1] = wrapRTPPT
+	seq := uint16(w.seq.Add(1) - 1)
+	binary.BigEndian.PutUint16(dst[2:4], seq)
+	ts := w.timestamp.Add(wrapTSStep) - wrapTSStep
+	binary.BigEndian.PutUint32(dst[4:8], ts)
+	copy(dst[8:12], w.ssrc[:])
 
-	// Nonce: 4B sessionID || 8B counter.
-	noncePos := prefixLen
+	// Explicit nonce.
+	noncePos := wrapRTPHdrLen
 	copy(dst[noncePos:noncePos+4], w.sessionID[:])
 	ctr := w.counter.Add(1) - 1
 	binary.BigEndian.PutUint64(dst[noncePos+4:noncePos+wrapNonceLen], ctr)
 
 	nonce := dst[noncePos : noncePos+wrapNonceLen]
-	ctPos := noncePos + wrapNonceLen
-	// In-place: write plaintext at ctPos, then Seal over it.
+	aad := dst[:wrapHeaderLen]
+	ctPos := wrapHeaderLen
 	copy(dst[ctPos:], payload)
-	w.aead.Seal(dst[ctPos:ctPos], nonce, dst[ctPos:ctPos+len(payload)], nonce)
+	w.aead.Seal(dst[ctPos:ctPos], nonce, dst[ctPos:ctPos+len(payload)], aad)
 
 	return wireLen, nil
 }
 
 func (w *wrapConn) unwrapPacket(wire, dst []byte) (int, error) {
-	if len(wire) < wrapPrefixMin+wrapNonceLen+wrapTagLen {
+	if len(wire) < wrapOverhead {
 		return 0, errors.New("wrap: packet too short")
 	}
-	prefixLen := wrapPrefixMin + int(wire[0]&0x07)
-	if len(wire) < prefixLen+wrapNonceLen+wrapTagLen {
-		return 0, errors.New("wrap: packet too short for prefix")
-	}
-	nonce := wire[prefixLen : prefixLen+wrapNonceLen]
-	ct := wire[prefixLen+wrapNonceLen:]
+	nonce := wire[wrapRTPHdrLen : wrapRTPHdrLen+wrapNonceLen]
+	aad := wire[:wrapHeaderLen]
+	ct := wire[wrapHeaderLen:]
 
-	plain, err := w.aead.Open(ct[:0], nonce, ct, nonce)
+	plain, err := w.aead.Open(ct[:0], nonce, ct, aad)
 	if err != nil {
 		return 0, fmt.Errorf("wrap: AEAD open: %w", err)
 	}
