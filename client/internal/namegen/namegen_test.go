@@ -143,7 +143,7 @@ func TestGenerateCoversBothGenders(t *testing.T) {
 	}
 
 	sawMale, sawFemale := false, false
-	for i := 0; i < 5000 && !(sawMale && sawFemale); i++ { //nolint:intrange // need early exit
+	for i := 0; i < 5000 && (!sawMale || !sawFemale); i++ { //nolint:intrange // need early exit
 		n := Generate()
 		first := strings.SplitN(n, " ", 2)[0]
 		if maleSet[first] {

@@ -107,7 +107,7 @@ type wrapPacketConn struct {
 }
 
 func (c *wrapPacketConn) ReadFrom(p []byte) (int, net.Addr, error) {
-	bp := bufPool.Get().(*[]byte)
+	bp := bufPool.Get().(*[]byte) //nolint:errcheck // pool New always returns *[]byte
 	buf := *bp
 	need := len(p) + wrapPrefixMax + wrapNonceLen + wrapTagLen
 	if cap(buf) < need {
@@ -150,7 +150,7 @@ func (c *wrapPacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 	prefixLen := wrapPrefixMin + int(hdr[0]&0x07)
 	wireLen := prefixLen + wrapNonceLen + len(p) + wrapTagLen
 
-	bp := bufPool.Get().(*[]byte)
+	bp := bufPool.Get().(*[]byte) //nolint:errcheck // pool New always returns *[]byte
 	out := *bp
 	if cap(out) < wireLen {
 		out = make([]byte, wireLen)

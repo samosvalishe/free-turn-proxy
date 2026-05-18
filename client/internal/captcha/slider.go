@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	_ "image/jpeg"
+	_ "image/jpeg" // register JPEG decoder for image.Decode
 	"log"
 	"math"
 	mathrand "math/rand"

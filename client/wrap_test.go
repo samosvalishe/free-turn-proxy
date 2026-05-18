@@ -60,7 +60,10 @@ func TestWrapConnRoundTrip(t *testing.T) {
 
 func TestWrapPrefixLenInRange(t *testing.T) {
 	key := bytes.Repeat([]byte{0x42}, wrapKeyLen)
-	wc, _ := newWrapConn(key, false)
+	wc, err := newWrapConn(key, false)
+	if err != nil {
+		t.Fatalf("newWrapConn: %v", err)
+	}
 	payload := []byte("x")
 
 	// Run many trials; every prefix_len must fall in [1..8].
@@ -83,8 +86,14 @@ func TestWrapPrefixLenInRange(t *testing.T) {
 
 func TestWrapDirectionBit(t *testing.T) {
 	key := bytes.Repeat([]byte{0x42}, wrapKeyLen)
-	client, _ := newWrapConn(key, false)
-	server, _ := newWrapConn(key, true)
+	client, err := newWrapConn(key, false)
+	if err != nil {
+		t.Fatalf("newWrapConn(client): %v", err)
+	}
+	server, err := newWrapConn(key, true)
+	if err != nil {
+		t.Fatalf("newWrapConn(server): %v", err)
+	}
 
 	if client.sessionID[0]&0x80 != 0 {
 		t.Fatalf("client sessionID MSB should be 0, got 0x%02X", client.sessionID[0])
@@ -120,7 +129,10 @@ func TestDecodeWrapKeyRequiresValidKeyWhenEnabled(t *testing.T) {
 
 func TestUnwrapRejectsShortPacket(t *testing.T) {
 	key := bytes.Repeat([]byte{0x42}, wrapKeyLen)
-	wc, _ := newWrapConn(key, false)
+	wc, err := newWrapConn(key, false)
+	if err != nil {
+		t.Fatalf("newWrapConn: %v", err)
+	}
 	if _, err := wc.unwrapPacket([]byte("short"), make([]byte, 16)); err == nil {
 		t.Fatalf("unwrapPacket accepted short packet")
 	}
@@ -128,12 +140,21 @@ func TestUnwrapRejectsShortPacket(t *testing.T) {
 
 func TestUnwrapRejectsTamperedPacket(t *testing.T) {
 	key := bytes.Repeat([]byte{0x42}, wrapKeyLen)
-	client, _ := newWrapConn(key, false)
-	server, _ := newWrapConn(key, true)
+	client, err := newWrapConn(key, false)
+	if err != nil {
+		t.Fatalf("newWrapConn(client): %v", err)
+	}
+	server, err := newWrapConn(key, true)
+	if err != nil {
+		t.Fatalf("newWrapConn(server): %v", err)
+	}
 
 	payload := []byte("integrity test")
 	wire := make([]byte, wrapMaxWire(len(payload)))
-	n, _ := client.wrapInto(wire, payload)
+	n, err := client.wrapInto(wire, payload)
+	if err != nil {
+		t.Fatalf("wrapInto: %v", err)
+	}
 	wire = wire[:n]
 
 	// Flip a bit in the ciphertext (past prefix+nonce).
