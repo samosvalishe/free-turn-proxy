@@ -187,15 +187,18 @@ func TestUnwrapRejectsTamperedPacket(t *testing.T) {
 	wire[wrapHeaderLen+1] ^= 0xFF
 
 	dst := make([]byte, 1600)
-	if _, err := server.unwrapPacket(wire, dst); err == nil {
+	if _, uerr := server.unwrapPacket(wire, dst); uerr == nil {
 		t.Fatalf("unwrapPacket accepted tampered ciphertext")
 	}
 
 	// Re-wrap and tamper RTP header (AAD).
-	n2, _ := client.wrapInto(wire, payload)
+	n2, err := client.wrapInto(wire, payload)
+	if err != nil {
+		t.Fatalf("wrapInto: %v", err)
+	}
 	wire = wire[:n2]
 	wire[8] ^= 0x01 // flip a bit in SSRC
-	if _, err := server.unwrapPacket(wire, dst); err == nil {
+	if _, uerr := server.unwrapPacket(wire, dst); uerr == nil {
 		t.Fatalf("unwrapPacket accepted tampered AAD")
 	}
 }
