@@ -62,8 +62,8 @@ var (
 	connectedStreams     atomic.Int32
 	globalAppCancel      context.CancelFunc
 	handshakeSem         = make(chan struct{}, 3)
-	isDebug       bool
-	manualCaptcha bool
+	isDebug              bool
+	manualCaptcha        bool
 )
 
 var appDialer net.Dialer

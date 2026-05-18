@@ -31,9 +31,9 @@ import (
 
 const (
 	wrapKeyLen    = 32
-	wrapHeaderLen = 13 // DTLS record header
-	wrapTagLen    = 16 // Poly1305 tag
-	wrapLenPrefix = 2  // uint16 BE real payload length
+	wrapHeaderLen = 13                                         // DTLS record header
+	wrapTagLen    = 16                                         // Poly1305 tag
+	wrapLenPrefix = 2                                          // uint16 BE real payload length
 	wrapOverhead  = wrapHeaderLen + wrapTagLen + wrapLenPrefix // 31
 )
 

@@ -71,7 +71,7 @@ type captchaInit struct {
 }
 
 type captchaInitData struct {
-	ShowCaptchaType string                 `json:"show_captcha_type"`
+	ShowCaptchaType string               `json:"show_captcha_type"`
 	CaptchaSettings []captchaInitSetting `json:"captcha_settings"`
 }
 
