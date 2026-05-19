@@ -176,6 +176,10 @@ func (c *Client) LockoutUntilUnix() int64 {
 	return c.lockout.Load()
 }
 
+// IsAuthError mirrors the package-level IsAuthError as a method so callers can
+// program against a small interface.
+func (c *Client) IsAuthError(err error) bool { return IsAuthError(err) }
+
 // engageLockout arms the global captcha lockout for d from now.
 func (c *Client) engageLockout(d time.Duration) {
 	c.lockout.Store(time.Now().Add(d).Unix())

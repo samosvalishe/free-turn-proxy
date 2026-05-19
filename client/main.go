@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net"
 	"os"
 	"os/signal"
@@ -25,11 +24,11 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/client/internal/vkauth"
 	"github.com/cacggghp/vk-turn-proxy/internal/bond"
 	"github.com/cacggghp/vk-turn-proxy/internal/dtlsdial"
+	udpproxy "github.com/cacggghp/vk-turn-proxy/internal/proxy/udp"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/internal/turnpipe"
 	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
 	"github.com/cacggghp/vk-turn-proxy/tcputil"
-	"github.com/cbeuw/connutil"
 	"github.com/xtaci/smux"
 )
 
@@ -39,7 +38,6 @@ type getCredsFunc func(ctx context.Context, link string, streamID int) (string, 
 var (
 	activeLocalPeer  atomic.Value
 	connectedStreams atomic.Int32
-	globalAppCancel  context.CancelFunc
 	udpDtlsDialer    = &dtlsdial.Dialer{
 		HandshakeTimeout: 20 * time.Second,
 		HandshakeSem:     make(chan struct{}, 3),
@@ -59,15 +57,6 @@ func debugf(format string, v ...any) {
 	}
 }
 
-type UDPPacket struct {
-	Data []byte
-	N    int
-}
-
-var packetPool = sync.Pool{
-	New: func() any { return &UDPPacket{Data: make([]byte, 2048)} },
-}
-
 // manualCaptchaSolver bridges the vkauth.ManualSolveFunc contract to the
 // local captcha bouncer (see manual_captcha.go).
 func manualCaptchaSolver(_ context.Context, e *captcha.Error, d net.Dialer) (string, string, error) {
@@ -82,94 +71,6 @@ func manualCaptchaSolver(_ context.Context, e *captcha.Error, d net.Dialer) (str
 	return "", "", fmt.Errorf("no redirect_uri or captcha_img")
 }
 
-func dtlsFunc(ctx context.Context, conn net.PacketConn, peer *net.UDPAddr) (net.Conn, error) {
-	return udpDtlsDialer.Dial(ctx, conn, peer)
-}
-
-func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *UDPPacket, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) error {
-	time.Sleep(time.Duration(rand.Intn(400)+100) * time.Millisecond)
-
-	dtlsctx, dtlscancel := context.WithCancel(ctx)
-	defer dtlscancel()
-
-	conn1, conn2 := connutil.AsyncPacketPipe()
-	go func() {
-		for {
-			select {
-			case <-dtlsctx.Done():
-				return
-			case connchan <- conn2:
-			}
-		}
-	}()
-	dtlsConn, err1 := dtlsFunc(dtlsctx, conn1, peer)
-	if err1 != nil {
-		return fmt.Errorf("failed to connect DTLS: %s", err1)
-	}
-	defer func() {
-		if closeErr := dtlsConn.Close(); closeErr != nil {
-			log.Printf("[STREAM %d] failed to close DTLS connection: %s", streamID, closeErr)
-		}
-		log.Printf("[STREAM %d] Closed DTLS connection\n", streamID)
-	}()
-	log.Printf("[STREAM %d] Established DTLS connection!\n", streamID)
-
-	if okchan != nil {
-		go func() {
-			select {
-			case okchan <- struct{}{}:
-			case <-dtlsctx.Done():
-			}
-		}()
-	}
-
-	wg := sync.WaitGroup{}
-	context.AfterFunc(dtlsctx, func() {
-		if err := dtlsConn.SetDeadline(time.Now()); err != nil {
-			log.Printf("[STREAM %d] Warning: SetDeadline failed: %v", streamID, err)
-		}
-	})
-
-	wg.Go(func() {
-		defer dtlscancel()
-		for {
-			select {
-			case <-dtlsctx.Done():
-				return
-			case pkt := <-inboundChan:
-				_, _ = dtlsConn.Write(pkt.Data[:pkt.N])
-				packetPool.Put(pkt)
-			}
-		}
-	})
-
-	wg.Go(func() {
-		defer dtlscancel()
-		buf := make([]byte, 1600)
-		for {
-			n, err1 := dtlsConn.Read(buf)
-			if err1 != nil {
-				return
-			}
-
-			// Send back to the active WG client
-			if peerAddr := activeLocalPeer.Load(); peerAddr != nil {
-				if addr, ok := peerAddr.(net.Addr); ok {
-					if _, err := listenConn.WriteTo(buf[:n], addr); err != nil {
-						log.Printf("[STREAM %d] failed to forward packet to local peer: %v", streamID, err)
-					}
-				}
-			}
-		}
-	})
-
-	wg.Wait()
-	if err := dtlsConn.SetDeadline(time.Time{}); err != nil {
-		log.Printf("[STREAM %d] Failed to clear DTLS deadline: %s", streamID, err)
-	}
-	return nil
-}
-
 type turnParams struct {
 	host     string
 	port     string
@@ -179,227 +80,8 @@ type turnParams struct {
 	getCreds getCredsFunc
 }
 
-func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UDPAddr, conn2 net.PacketConn, streamID int, c chan<- error) {
-	time.Sleep(time.Duration(rand.Intn(400)+100) * time.Millisecond)
-	var err error
-	defer func() { c <- err }()
-	user, pass, urlTarget, err1 := turnParams.getCreds(ctx, turnParams.link, streamID)
-	if err1 != nil {
-		err = fmt.Errorf("failed to get TURN credentials: %s", err1)
-		return
-	}
-	stream, err1 := turnpipe.Open(ctx, turnpipe.Config{
-		HostOverride: turnParams.host,
-		PortOverride: turnParams.port,
-		UDP:          turnParams.udp,
-	}, peer, user, pass, urlTarget)
-	if err1 != nil {
-		if vkauth.IsAuthError(err1) {
-			vkAuth.HandleAuthError(streamID)
-		}
-		err = err1
-		return
-	}
-	relayConn := stream.Relay
-	debugf("[STREAM %d] TURN server IP: %s", streamID, stream.ServerUDPAddr.IP)
-
-	// Reset error count on successful allocation
-	vkAuth.ResetErrors(streamID)
-
-	// Safely track active streams globally
-	connectedStreams.Add(1)
-	defer func() {
-		connectedStreams.Add(-1)
-		if cerr := stream.Close(); cerr != nil {
-			err = fmt.Errorf("failed to close TURN stream: %s", cerr)
-		}
-	}()
-
-	if isDebug {
-		log.Printf("[STREAM %d] relayed-address=%s", streamID, relayConn.LocalAddr().String())
-	}
-
-	wg := sync.WaitGroup{}
-	turnctx, turncancel := context.WithCancel(ctx)
-	st := stats.New(isDebug)
-	go st.LogEvery(turnctx, debugf, fmt.Sprintf("[STREAM %d] TURN", streamID), "to-turn", "from-turn")
-
-	context.AfterFunc(turnctx, func() {
-		if err := relayConn.SetDeadline(time.Now()); err != nil {
-			log.Printf("Failed to set relay deadline: %s", err)
-		}
-		// Do not set conn2 deadline (conn2 can sometimes be listenConn if direct mode is used)
-	})
-	var internalPipeAddr atomic.Value
-	var wc *wrap.Conn
-	if len(turnParams.wrapKey) == wrap.KeyLen {
-		var wcErr error
-		wc, wcErr = wrap.NewConn(turnParams.wrapKey, false)
-		if wcErr != nil {
-			log.Printf("[STREAM %d] WRAP init failed: %v", streamID, wcErr)
-			turncancel()
-			return
-		}
-	}
-
-	go func() {
-		defer turncancel()
-		buf := make([]byte, 1600)
-		// Reusable scratch buffer for wrapped wire bytes; sized once per
-		// stream so the hot-path TX loop performs zero allocations.
-		var wireBuf []byte
-		if wc != nil {
-			wireBuf = make([]byte, wrap.MaxWire(len(buf)))
-		}
-		for {
-			if turnctx.Err() != nil {
-				return
-			}
-			n, addr1, err1 := conn2.ReadFrom(buf)
-			if err1 != nil {
-				return
-			}
-			if turnctx.Err() != nil {
-				return
-			}
-
-			internalPipeAddr.Store(addr1)
-
-			out := buf[:n]
-			if wc != nil {
-				written, wrapErr := wc.WrapInto(wireBuf, out)
-				if wrapErr != nil {
-					log.Printf("[STREAM %d] WRAP failed: %v", streamID, wrapErr)
-					return
-				}
-				out = wireBuf[:written]
-			}
-
-			written, err1 := relayConn.WriteTo(out, peer)
-			st.AddTx(written)
-			if err1 != nil {
-				return
-			}
-		}
-	}()
-
-	wg.Go(func() {
-		defer turncancel()
-		readBufLen := 1600
-		if wc != nil {
-			readBufLen = wrap.MaxWire(1600)
-		}
-		buf := make([]byte, readBufLen)
-		plain := make([]byte, 1600)
-		for {
-			n, _, err1 := relayConn.ReadFrom(buf)
-			if err1 != nil {
-				return
-			}
-			addr1 := internalPipeAddr.Load()
-			if addr1 == nil {
-				continue
-			}
-
-			if addr, ok := addr1.(net.Addr); ok {
-				payload := buf[:n]
-				if wc != nil {
-					m, wrapErr := wc.Unwrap(payload, plain)
-					if wrapErr != nil {
-						log.Printf("[STREAM %d] UNWRAP failed: %v (n=%d)", streamID, wrapErr, n)
-						continue
-					}
-					payload = plain[:m]
-				}
-				st.AddRx(len(payload))
-				if _, err := conn2.WriteTo(payload, addr); err != nil {
-					return
-				}
-			}
-		}
-	})
-
-	wg.Wait()
-	if err := relayConn.SetDeadline(time.Time{}); err != nil {
-		log.Printf("Failed to clear relay deadline: %s", err)
-	}
-}
-
-func oneDtlsConnectionLoop(ctx context.Context, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *UDPPacket, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			err := oneDtlsConnection(ctx, peer, listenConn, inboundChan, connchan, okchan, streamID)
-			if err != nil {
-				if time.Now().Unix() < vkAuth.LockoutUntilUnix() && strings.Contains(err.Error(), "context deadline exceeded") {
-					continue
-				}
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(time.Duration(10+rand.Intn(20)) * time.Second):
-				}
-			}
-		}
-	}
-}
-
-func oneTurnConnectionLoop(ctx context.Context, turnParams *turnParams, peer *net.UDPAddr, connchan <-chan net.PacketConn, t <-chan time.Time, streamID int) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case conn2 := <-connchan:
-			select {
-			case <-t:
-			case <-ctx.Done():
-				return
-			}
-			c := make(chan error)
-			go oneTurnConnection(ctx, turnParams, peer, conn2, streamID, c)
-
-			if err := <-c; err != nil {
-				if strings.Contains(err.Error(), "FATAL_CAPTCHA") {
-					log.Printf("[STREAM %d] Fatal manual captcha error. Shutting down application.", streamID)
-					if globalAppCancel != nil {
-						globalAppCancel()
-					}
-					return
-				}
-				if strings.Contains(err.Error(), "CAPTCHA_WAIT_REQUIRED") {
-					if !strings.Contains(err.Error(), "global lockout active") {
-						log.Printf("[STREAM %d] Backing off for 60 seconds to avoid IP ban...", streamID)
-						select {
-						case <-ctx.Done():
-							return
-						case <-time.After(60 * time.Second):
-						}
-					} else {
-						lockoutEnd := vkAuth.LockoutUntilUnix()
-						sleepDuration := time.Until(time.Unix(lockoutEnd, 0))
-						if sleepDuration < 0 {
-							sleepDuration = 5 * time.Second
-						}
-						select {
-						case <-ctx.Done():
-							return
-						case <-time.After(sleepDuration):
-						}
-					}
-				} else {
-					log.Printf("[STREAM %d] %s", streamID, err)
-					time.Sleep(2 * time.Second)
-				}
-			}
-		}
-	}
-}
-
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-	globalAppCancel = cancel
 	defer cancel()
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGTERM, syscall.SIGINT)
@@ -530,7 +212,7 @@ func main() {
 	}
 
 	// Shared Worker Pool Queue for Aggregation
-	inboundChan := make(chan *UDPPacket, 2000)
+	inboundChan := make(chan *udpproxy.Packet, 2000)
 
 	go func() {
 		// Pointer-cache for the last seen local peer addr. Avoids the
@@ -542,8 +224,8 @@ func main() {
 		var lastAddr net.Addr
 		var lastAddrStr string
 		for {
-			pktIface := packetPool.Get()
-			pkt, ok := pktIface.(*UDPPacket)
+			pktIface := udpproxy.Pool.Get()
+			pkt, ok := pktIface.(*udpproxy.Packet)
 			if !ok {
 				log.Printf("packetPool returned unexpected type: %T", pktIface)
 				continue
@@ -568,7 +250,7 @@ func main() {
 			case inboundChan <- pkt:
 			default:
 				// Drop the packet only if the global queue is completely full
-				packetPool.Put(pkt)
+				udpproxy.Pool.Put(pkt)
 			}
 		}
 	}()
@@ -580,13 +262,31 @@ func main() {
 		log.Panicf("Direct mode not supported with dispatcher")
 	}
 
+	udpDeps := &udpproxy.Deps{
+		DTLSDialer:       udpDtlsDialer,
+		Auth:             vkAuth,
+		Debug:            isDebug,
+		Debugf:           debugf,
+		ActiveLocalPeer:  &activeLocalPeer,
+		ConnectedStreams: &connectedStreams,
+		AppCancel:        cancel,
+	}
+	udpParams := &udpproxy.Params{
+		Host:     params.host,
+		Port:     params.port,
+		Link:     params.link,
+		UDP:      params.udp,
+		WrapKey:  params.wrapKey,
+		GetCreds: udpproxy.GetCredsFunc(params.getCreds),
+	}
+
 	okchan := make(chan struct{})
 	connchan := make(chan net.PacketConn)
 	wg1.Go(func() {
-		oneDtlsConnectionLoop(ctx, peer, listenConn, inboundChan, connchan, okchan, 1)
+		udpproxy.DTLSLoop(ctx, udpDeps, peer, listenConn, inboundChan, connchan, okchan, 1)
 	})
 	wg1.Go(func() {
-		oneTurnConnectionLoop(ctx, params, peer, connchan, t, 1)
+		udpproxy.TURNLoop(ctx, udpDeps, udpParams, peer, connchan, t, 1)
 	})
 
 	select {
@@ -598,10 +298,10 @@ func main() {
 		cchan := make(chan net.PacketConn)
 		streamID := i
 		wg1.Go(func() {
-			oneDtlsConnectionLoop(ctx, peer, listenConn, inboundChan, cchan, nil, streamID)
+			udpproxy.DTLSLoop(ctx, udpDeps, peer, listenConn, inboundChan, cchan, nil, streamID)
 		})
 		wg1.Go(func() {
-			oneTurnConnectionLoop(ctx, params, peer, cchan, t, streamID)
+			udpproxy.TURNLoop(ctx, udpDeps, udpParams, peer, cchan, t, streamID)
 		})
 	}
 
