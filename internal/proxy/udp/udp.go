@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/dtlsdial"
+	"github.com/cacggghp/vk-turn-proxy/internal/logx"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/internal/turnpipe"
 	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
@@ -66,17 +67,17 @@ type Params struct {
 type Deps struct {
 	DTLSDialer       *dtlsdial.Dialer
 	Auth             AuthHandler
-	Debug            bool
-	Debugf           func(format string, v ...any)
+	Log              logx.Logger
 	ActiveLocalPeer  *atomic.Value
 	ConnectedStreams *atomic.Int32
 	AppCancel        func()
 }
 
-func (d *Deps) debugf(format string, v ...any) {
-	if d.Debugf != nil {
-		d.Debugf(format, v...)
+func (d *Deps) log() logx.Logger {
+	if d.Log == nil {
+		return logx.Nop()
 	}
+	return d.Log
 }
 
 // DTLSLoop keeps a single DTLS termination alive for streamID, restarting it
@@ -265,7 +266,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		return
 	}
 	relayConn := stream.Relay
-	deps.debugf("[STREAM %d] TURN server IP: %s", streamID, stream.ServerUDPAddr.IP)
+	deps.log().Debugf("[STREAM %d] TURN server IP: %s", streamID, stream.ServerUDPAddr.IP)
 
 	deps.Auth.ResetErrors(streamID)
 
@@ -277,14 +278,14 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		}
 	}()
 
-	if deps.Debug {
+	if deps.log().DebugEnabled() {
 		log.Printf("[STREAM %d] relayed-address=%s", streamID, relayConn.LocalAddr().String())
 	}
 
 	wg := sync.WaitGroup{}
 	turnctx, turncancel := context.WithCancel(ctx)
-	st := stats.New(deps.Debug)
-	go st.LogEvery(turnctx, deps.debugf, fmt.Sprintf("[STREAM %d] TURN", streamID), "to-turn", "from-turn")
+	st := stats.New(deps.log().DebugEnabled())
+	go st.LogEvery(turnctx, deps.log().Debugf, fmt.Sprintf("[STREAM %d] TURN", streamID), "to-turn", "from-turn")
 
 	context.AfterFunc(turnctx, func() {
 		if err := relayConn.SetDeadline(time.Now()); err != nil {

@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cacggghp/vk-turn-proxy/internal/logx"
+
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
@@ -38,8 +40,8 @@ type Config struct {
 	AutoSolver   AutoSolveFunc
 	ManualSolver ManualSolveFunc
 
-	// Debugf is the gated debug log sink. nil -> no-op.
-	Debugf func(format string, v ...any)
+	// Log is the leveled logger. nil -> no-op.
+	Log logx.Logger
 }
 
 // Client is the VK auth + creds-cache facade used by callers. It owns the
@@ -52,7 +54,7 @@ type Client struct {
 	streamsFn   func() int32
 	autoSolver  AutoSolveFunc
 	manualSolve ManualSolveFunc
-	debugf      func(format string, v ...any)
+	log         logx.Logger
 
 	store *Store
 
@@ -80,14 +82,14 @@ func New(cfg Config) *Client {
 		streamsFn:   cfg.StreamsAlive,
 		autoSolver:  cfg.AutoSolver,
 		manualSolve: cfg.ManualSolver,
-		debugf:      cfg.Debugf,
+		log:         cfg.Log,
 		store:       NewStore(cfg.StreamsPerCache),
 	}
 	if len(c.credentials) == 0 {
 		c.credentials = DefaultCredentials
 	}
-	if c.debugf == nil {
-		c.debugf = func(string, ...any) {}
+	if c.log == nil {
+		c.log = logx.Nop()
 	}
 	if c.streamsFn == nil {
 		c.streamsFn = func() int32 { return 1 }
@@ -111,7 +113,7 @@ func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) 
 		u, p := cache.creds.Username, cache.creds.Password
 		addr := cache.creds.ServerAddrs[streamID%len(cache.creds.ServerAddrs)]
 		cache.mutex.RUnlock()
-		c.debugf("[STREAM %d] [VK Auth] Using cached credentials (cache=%d, expires in %v, server=%s)", streamID, cacheID, expires, addr)
+		c.log.Debugf("[STREAM %d] [VK Auth] Using cached credentials (cache=%d, expires in %v, server=%s)", streamID, cacheID, expires, addr)
 		return u, p, addr, nil
 	}
 	cache.mutex.RUnlock()

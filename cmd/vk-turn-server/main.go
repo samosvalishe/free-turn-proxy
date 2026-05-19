@@ -15,6 +15,7 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/internal/bond"
 	bondserver "github.com/cacggghp/vk-turn-proxy/internal/bond/server"
 	"github.com/cacggghp/vk-turn-proxy/internal/config"
+	"github.com/cacggghp/vk-turn-proxy/internal/logx"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
 	"github.com/cacggghp/vk-turn-proxy/tcputil"
@@ -23,20 +24,18 @@ import (
 	"github.com/xtaci/smux"
 )
 
-var isDebug bool
-
-func debugf(format string, v ...any) {
-	if isDebug {
-		log.Printf(format, v...)
-	}
-}
+var (
+	logger             logx.Logger = logx.Nop()
+	globalBondRegistry *bondserver.Registry
+)
 
 func main() {
 	cfg, err := config.ParseServer(os.Args[1:], os.Stderr)
 	if err != nil {
 		log.Panicf("%v", err)
 	}
-	isDebug = cfg.Debug
+	logger = logx.New(cfg.Debug)
+	globalBondRegistry = bondserver.NewRegistry(bondserver.Deps{Log: logger})
 
 	if cfg.GenWrapKey {
 		key, gerr := wrap.GenKeyHex()
@@ -123,7 +122,7 @@ func main() {
 					log.Printf("failed to close incoming connection: %s", closeErr)
 				}
 			}()
-			debugf("Connection from %s\n", conn.RemoteAddr())
+			logger.Debugf("Connection from %s\n", conn.RemoteAddr())
 
 			// Perform the handshake with a 30-second timeout
 			ctx1, cancel1 := context.WithTimeout(ctx, 30*time.Second)
@@ -134,12 +133,12 @@ func main() {
 				log.Println("Type error: expected *dtls.Conn")
 				return
 			}
-			debugf("Start handshake")
+			logger.Debugf("Start handshake")
 			if err := dtlsConn.HandshakeContext(ctx1); err != nil {
 				log.Printf("Handshake failed: %v", err)
 				return
 			}
-			debugf("Handshake done")
+			logger.Debugf("Handshake done")
 
 			if cfg.VLESSMode {
 				handleVLESSConnection(ctx, dtlsConn, cfg.Connect)
@@ -147,12 +146,10 @@ func main() {
 				handleUDPConnection(ctx, conn, cfg.Connect)
 			}
 
-			debugf("Connection closed: %s\n", conn.RemoteAddr())
+			logger.Debugf("Connection closed: %s\n", conn.RemoteAddr())
 		})
 	}
 }
-
-var globalBondRegistry = bondserver.NewRegistry(bondserver.Deps{Debug: isDebug, Debugf: debugf})
 
 type prefixedConn struct {
 	net.Conn
@@ -183,10 +180,10 @@ func handleUDPConnection(ctx context.Context, conn net.Conn, connectAddr string)
 
 	var wg sync.WaitGroup
 	ctx2, cancel2 := context.WithCancel(ctx)
-	st := stats.New(isDebug)
+	st := stats.New(logger.DebugEnabled())
 	go st.LogEvery(
 		ctx2,
-		debugf,
+		logger.Debugf,
 		fmt.Sprintf("[DTLS %s]", conn.RemoteAddr()),
 		"dtls-to-backend",
 		"backend-to-dtls",
@@ -271,10 +268,10 @@ func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr s
 	// 1. Create KCP session over DTLS
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	defer statsCancel()
-	st := stats.New(isDebug)
+	st := stats.New(logger.DebugEnabled())
 	go st.LogEvery(
 		statsCtx,
-		debugf,
+		logger.Debugf,
 		fmt.Sprintf("[VLESS %s]", dtlsConn.RemoteAddr()),
 		"to-client",
 		"from-client",
@@ -290,7 +287,7 @@ func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr s
 			log.Printf("failed to close KCP session: %v", closeErr)
 		}
 	}()
-	debugf("KCP session established (server)")
+	logger.Debugf("KCP session established (server)")
 
 	// 2. Create smux server session over KCP
 	smuxSess, err := smux.Server(kcpSess, tcputil.DefaultSmuxConfig())
@@ -303,7 +300,7 @@ func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr s
 			log.Printf("failed to close smux session: %v", err)
 		}
 	}()
-	debugf("smux session established (server)")
+	logger.Debugf("smux session established (server)")
 
 	// 3. Accept smux streams and forward to backend via TCP
 	var wg sync.WaitGroup
@@ -329,7 +326,7 @@ func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr s
 				return
 			}
 			if string(prefix[:]) == bond.Magic {
-				debugf("auto-detected bond smux stream")
+				logger.Debugf("auto-detected bond smux stream")
 				globalBondRegistry.HandleStreamAfterMagic(ctx, s, connectAddr, prefix)
 				return
 			}
@@ -366,10 +363,10 @@ func pipeConn(ctx context.Context, c1, c2 net.Conn) {
 
 	context.AfterFunc(ctx2, func() {
 		if err := c1.SetDeadline(time.Now()); err != nil {
-			debugf("pipeConn: failed to set deadline c1: %v", err)
+			logger.Debugf("pipeConn: failed to set deadline c1: %v", err)
 		}
 		if err := c2.SetDeadline(time.Now()); err != nil {
-			debugf("pipeConn: failed to set deadline c2: %v", err)
+			logger.Debugf("pipeConn: failed to set deadline c2: %v", err)
 		}
 	})
 
@@ -377,13 +374,13 @@ func pipeConn(ctx context.Context, c1, c2 net.Conn) {
 
 	wg.Go(func() {
 		if _, err := io.Copy(c1, c2); err != nil {
-			debugf("pipeConn: c1<-c2 copy error: %v", err)
+			logger.Debugf("pipeConn: c1<-c2 copy error: %v", err)
 		}
 	})
 
 	wg.Go(func() {
 		if _, err := io.Copy(c2, c1); err != nil {
-			debugf("pipeConn: c2<-c1 copy error: %v", err)
+			logger.Debugf("pipeConn: c2<-c1 copy error: %v", err)
 		}
 	})
 
@@ -391,9 +388,9 @@ func pipeConn(ctx context.Context, c1, c2 net.Conn) {
 
 	// Reset deadlines (best-effort; connection may already be closed)
 	if err := c1.SetDeadline(time.Time{}); err != nil {
-		debugf("pipeConn: failed to reset deadline c1: %v", err)
+		logger.Debugf("pipeConn: failed to reset deadline c1: %v", err)
 	}
 	if err := c2.SetDeadline(time.Time{}); err != nil {
-		debugf("pipeConn: failed to reset deadline c2: %v", err)
+		logger.Debugf("pipeConn: failed to reset deadline c2: %v", err)
 	}
 }

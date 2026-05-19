@@ -11,6 +11,7 @@ import (
 
 	"github.com/cacggghp/vk-turn-proxy/internal/dtlsdial"
 	"github.com/cacggghp/vk-turn-proxy/internal/ish"
+	"github.com/cacggghp/vk-turn-proxy/internal/logx"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/internal/turnpipe"
 	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
@@ -40,15 +41,15 @@ type BondHandler func(ctx context.Context, tcpConn net.Conn, connID uint64, lane
 // Deps groups host-process dependencies needed by the VLESS loop.
 type Deps struct {
 	DTLSDialer  *dtlsdial.Dialer
-	Debug       bool
-	Debugf      func(format string, v ...any)
+	Log         logx.Logger
 	BondHandler BondHandler
 }
 
-func (d *Deps) debugf(format string, v ...any) {
-	if d.Debugf != nil {
-		d.Debugf(format, v...)
+func (d *Deps) log() logx.Logger {
+	if d.Log == nil {
+		return logx.Nop()
 	}
+	return d.Log
 }
 
 // Run is the VLESS-mode entrypoint. It spawns numSessions maintainers, waits
@@ -146,7 +147,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 		connID := pool.NextConnID()
 		opened := ps.Opened.Add(1)
 		active := ps.Active.Add(1)
-		deps.debugf("[session %d] TCP accept #%d from=%s active=%d opened=%d pool=%d",
+		deps.log().Debugf("[session %d] TCP accept #%d from=%s active=%d opened=%d pool=%d",
 			ps.ID, connID, tcpConn.RemoteAddr(), active, opened, pool.Count())
 
 		tc, sessRef, cid := tcpConn, ps, connID
@@ -155,7 +156,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 			defer func() {
 				active := sessRef.Active.Add(-1)
 				closed := sessRef.Closed.Add(1)
-				deps.debugf("[session %d] TCP close #%d active=%d closed=%d totals: to-session=%s from-session=%s",
+				deps.log().Debugf("[session %d] TCP close #%d active=%d closed=%d totals: to-session=%s from-session=%s",
 					sessRef.ID, cid, active, closed,
 					stats.FormatByteCount(sessRef.ToSession.Load()), stats.FormatByteCount(sessRef.FromSession.Load()))
 			}()
@@ -169,7 +170,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 			fromSession, toSession := pipe(deps, ctx, tc, stream)
 			sessRef.FromSession.Add(uint64(fromSession))
 			sessRef.ToSession.Add(uint64(toSession))
-			deps.debugf("[session %d] TCP done #%d local<-session=%s local->session=%s",
+			deps.log().Debugf("[session %d] TCP done #%d local<-session=%s local->session=%s",
 				sessRef.ID, cid, stats.FormatByteCount(uint64(fromSession)), stats.FormatByteCount(uint64(toSession)))
 		})
 	}
@@ -246,8 +247,8 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	}
 	cleanupFns = append(cleanupFns, func() { _ = stream.Close() })
 	relayConn := stream.Relay
-	deps.debugf("[session %d] TURN server IP: %s", id, stream.ServerUDPAddr.IP)
-	deps.debugf("relayed-address=%s", relayConn.LocalAddr().String())
+	deps.log().Debugf("[session %d] TURN server IP: %s", id, stream.ServerUDPAddr.IP)
+	deps.log().Debugf("relayed-address=%s", relayConn.LocalAddr().String())
 
 	var relayWC *wrap.Conn
 	if len(params.WrapKey) == wrap.KeyLen {
@@ -264,12 +265,12 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 		return nil, nil, fmt.Errorf("DTLS handshake: %w", err)
 	}
 	cleanupFns = append(cleanupFns, func() { _ = dtlsConn.Close() })
-	deps.debugf("DTLS connection established")
+	deps.log().Debugf("DTLS connection established")
 
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	cleanupFns = append(cleanupFns, statsCancel)
-	st := stats.New(deps.Debug)
-	go st.LogEvery(statsCtx, deps.debugf, fmt.Sprintf("[session %d] VLESS", id), "to-turn", "from-turn")
+	st := stats.New(deps.log().DebugEnabled())
+	go st.LogEvery(statsCtx, deps.log().Debugf, fmt.Sprintf("[session %d] VLESS", id), "to-turn", "from-turn")
 
 	kcpSess, err := tcputil.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, false)
 	if err != nil {
@@ -277,7 +278,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 		return nil, nil, fmt.Errorf("KCP session: %w", err)
 	}
 	cleanupFns = append(cleanupFns, func() { _ = kcpSess.Close() })
-	deps.debugf("KCP session established")
+	deps.log().Debugf("KCP session established")
 
 	smuxSess, err := smux.Client(kcpSess, tcputil.DefaultSmuxConfig())
 	if err != nil {
@@ -285,7 +286,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 		return nil, nil, fmt.Errorf("smux client: %w", err)
 	}
 	cleanupFns = append(cleanupFns, func() { _ = smuxSess.Close() })
-	deps.debugf("smux session established")
+	deps.log().Debugf("smux session established")
 
 	return smuxSess, cleanup, nil
 }
@@ -310,7 +311,7 @@ func pipe(deps *Deps, ctx context.Context, c1, c2 net.Conn) (int64, int64) {
 		defer cancel()
 		n, err := io.Copy(c1, c2)
 		c1FromC2 = n
-		if err != nil && deps.Debug {
+		if err != nil && deps.log().DebugEnabled() {
 			log.Printf("pipe: c1<-c2 copy error: %v", err)
 		}
 	})
@@ -318,15 +319,15 @@ func pipe(deps *Deps, ctx context.Context, c1, c2 net.Conn) (int64, int64) {
 		defer cancel()
 		n, err := io.Copy(c2, c1)
 		c2FromC1 = n
-		if err != nil && deps.Debug {
+		if err != nil && deps.log().DebugEnabled() {
 			log.Printf("pipe: c2<-c1 copy error: %v", err)
 		}
 	})
 	wg.Wait()
-	if err := c1.SetDeadline(time.Time{}); err != nil && deps.Debug {
+	if err := c1.SetDeadline(time.Time{}); err != nil && deps.log().DebugEnabled() {
 		log.Printf("pipe: failed to reset deadline c1: %v", err)
 	}
-	if err := c2.SetDeadline(time.Time{}); err != nil && deps.Debug {
+	if err := c2.SetDeadline(time.Time{}); err != nil && deps.log().DebugEnabled() {
 		log.Printf("pipe: failed to reset deadline c2: %v", err)
 	}
 	return c1FromC2, c2FromC1

@@ -22,6 +22,7 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/internal/client/vkauth"
 	"github.com/cacggghp/vk-turn-proxy/internal/config"
 	"github.com/cacggghp/vk-turn-proxy/internal/dtlsdial"
+	"github.com/cacggghp/vk-turn-proxy/internal/logx"
 	udpproxy "github.com/cacggghp/vk-turn-proxy/internal/proxy/udp"
 	"github.com/cacggghp/vk-turn-proxy/internal/proxy/vless"
 	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
@@ -38,19 +39,12 @@ var (
 		HandshakeSem:     make(chan struct{}, 3),
 	}
 	vlessDtlsDialer = &dtlsdial.Dialer{HandshakeTimeout: 30 * time.Second}
-	isDebug         bool
 )
 
 var appDialer net.Dialer
 
 // vkAuth is the lazily-initialized VK auth client. Set once in main().
 var vkAuth *vkauth.Client
-
-func debugf(format string, v ...any) {
-	if isDebug {
-		log.Printf(format, v...)
-	}
-}
 
 // manualCaptchaSolver bridges the vkauth.ManualSolveFunc contract to the
 // local captcha bouncer (internal/client/captcha/manual).
@@ -118,7 +112,7 @@ func main() {
 		log.Printf("WRAP mode enabled: peer server must use matching -wrap-key")
 	}
 
-	isDebug = cfg.Debug
+	logger := logx.New(cfg.Debug)
 	manualcaptcha.Debug = cfg.Debug
 
 	vkAuth = vkauth.New(vkauth.Config{
@@ -127,7 +121,7 @@ func main() {
 		StreamsPerCache: cfg.StreamsPerCred,
 		StreamsAlive:    func() int32 { return connectedStreams.Load() },
 		ManualSolver:    manualCaptchaSolver,
-		Debugf:          debugf,
+		Log:             logger,
 	})
 
 	getCreds := getCredsFunc(vkAuth.GetCredentials)
@@ -142,11 +136,10 @@ func main() {
 	}
 
 	if cfg.VLESSMode {
-		bondH := &bondclient.Handler{Deps: bondclient.Deps{Debug: isDebug, Debugf: debugf}}
+		bondH := &bondclient.Handler{Deps: bondclient.Deps{Log: logger}}
 		vlessDeps := &vless.Deps{
 			DTLSDialer:  vlessDtlsDialer,
-			Debug:       isDebug,
-			Debugf:      debugf,
+			Log:         logger,
 			BondHandler: bondH.Handle,
 		}
 		vlessParams := &vless.Params{
@@ -226,8 +219,7 @@ func main() {
 	udpDeps := &udpproxy.Deps{
 		DTLSDialer:       udpDtlsDialer,
 		Auth:             vkAuth,
-		Debug:            isDebug,
-		Debugf:           debugf,
+		Log:              logger,
 		ActiveLocalPeer:  &activeLocalPeer,
 		ConnectedStreams: &connectedStreams,
 		AppCancel:        cancel,

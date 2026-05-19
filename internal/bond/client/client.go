@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/bond"
+	"github.com/cacggghp/vk-turn-proxy/internal/logx"
 	"github.com/cacggghp/vk-turn-proxy/internal/proxy/vless"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/xtaci/smux"
@@ -24,14 +25,14 @@ import (
 
 // Deps groups host-process dependencies needed by the bond client.
 type Deps struct {
-	Debug  bool
-	Debugf func(format string, v ...any)
+	Log logx.Logger
 }
 
-func (d *Deps) debugf(format string, v ...any) {
-	if d.Debugf != nil {
-		d.Debugf(format, v...)
+func (d *Deps) log() logx.Logger {
+	if d.Log == nil {
+		return logx.Nop()
 	}
+	return d.Log
 }
 
 // Handler binds Deps and exposes Handle, matching the vless.BondHandler signature.
@@ -83,23 +84,23 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 	}
 	context.AfterFunc(ctx, func() {
 		now := time.Now()
-		if err := tcpConn.SetDeadline(now); err != nil && h.Deps.Debug {
-			log.Printf("[bond %d] local TCP deadline error: %v", connID, err)
+		if err := tcpConn.SetDeadline(now); err != nil {
+			h.Deps.log().Debugf("[bond %d] local TCP deadline error: %v", connID, err)
 		}
 		for _, l := range lanes {
-			if err := l.stream.SetDeadline(now); err != nil && h.Deps.Debug {
-				log.Printf("[bond %d] session %d stream deadline error: %v", connID, l.ps.ID, err)
+			if err := l.stream.SetDeadline(now); err != nil {
+				h.Deps.log().Debugf("[bond %d] session %d stream deadline error: %v", connID, l.ps.ID, err)
 			}
 		}
 	})
 
-	h.Deps.debugf("[bond %d] TCP accept from=%s lanes=%d [%s]", connID, tcpConn.RemoteAddr(), len(lanes), strings.Join(laneIDs, ","))
+	h.Deps.log().Debugf("[bond %d] TCP accept from=%s lanes=%d [%s]", connID, tcpConn.RemoteAddr(), len(lanes), strings.Join(laneIDs, ","))
 	defer func() {
 		for _, l := range lanes {
 			_ = l.stream.Close()
 			active := l.ps.Active.Add(-1)
 			closed := l.ps.Closed.Add(1)
-			h.Deps.debugf("[bond %d] lane session %d close active=%d closed=%d totals: to-session=%s from-session=%s",
+			h.Deps.log().Debugf("[bond %d] lane session %d close active=%d closed=%d totals: to-session=%s from-session=%s",
 				connID, l.ps.ID, active, closed,
 				stats.FormatByteCount(l.ps.ToSession.Load()), stats.FormatByteCount(l.ps.FromSession.Load()))
 		}
@@ -117,7 +118,7 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 					case <-ctx.Done():
 					default:
 						if err != io.EOF {
-							h.Deps.debugf("[bond %d] session %d read frame error: %v", connID, l.ps.ID, err)
+							h.Deps.log().Debugf("[bond %d] session %d read frame error: %v", connID, l.ps.ID, err)
 						}
 					}
 					return
@@ -165,8 +166,8 @@ func (h *Handler) copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.
 			seq++
 		}
 		if err != nil {
-			if h.Deps.Debug && err != io.EOF {
-				log.Printf("[bond %d] local TCP read finished with error: %v", connID, err)
+			if err != io.EOF {
+				h.Deps.log().Debugf("[bond %d] local TCP read finished with error: %v", connID, err)
 			}
 			for _, l := range lanes {
 				if l.dead.Load() {
@@ -179,7 +180,7 @@ func (h *Handler) copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.
 					log.Printf("[bond %d] session %d write FIN error: %v", connID, l.ps.ID, writeErr)
 				}
 			}
-			h.Deps.debugf("[bond %d] upload finished chunks=%d", connID, seq)
+			h.Deps.log().Debugf("[bond %d] upload finished chunks=%d", connID, seq)
 			return
 		}
 		select {
@@ -222,8 +223,8 @@ func (h *Handler) copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.
 
 	for {
 		if finSeq != nil && expect == *finSeq {
-			bond.CloseWrite(tcpConn, h.Deps.debugf)
-			h.Deps.debugf("[bond %d] download finished chunks=%d", connID, expect)
+			bond.CloseWrite(tcpConn, h.Deps.log().Debugf)
+			h.Deps.log().Debugf("[bond %d] download finished chunks=%d", connID, expect)
 			return
 		}
 

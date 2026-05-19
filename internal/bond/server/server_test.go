@@ -56,7 +56,7 @@ func (f *fakeStream) writtenFrames(t *testing.T) []bond.Frame {
 
 func newTestConn(t *testing.T) *serverConn {
 	t.Helper()
-	deps := &Deps{Debug: false, Debugf: func(string, ...any) {}}
+	deps := &Deps{}
 	ctx, cancel := context.WithCancel(t.Context())
 	t.Cleanup(cancel)
 	return &serverConn{
@@ -248,7 +248,7 @@ func TestWriteToNextLaneAllFail(t *testing.T) {
 // TestRegistryGetDedup ensures concurrent get() calls for the same ConnID
 // share one serverConn, and that completion removes it from the registry.
 func TestRegistryGetDedup(t *testing.T) {
-	r := NewRegistry(Deps{Debugf: func(string, ...any) {}})
+	r := NewRegistry(Deps{})
 	ctx := t.Context()
 
 	c1 := r.get(ctx, 7, "127.0.0.1:1")

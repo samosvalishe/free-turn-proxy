@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/bond"
+	"github.com/cacggghp/vk-turn-proxy/internal/logx"
 	"github.com/xtaci/smux"
 )
 
@@ -27,14 +28,14 @@ type laneStream interface {
 
 // Deps groups host-process dependencies needed by the bond server.
 type Deps struct {
-	Debug  bool
-	Debugf func(format string, v ...any)
+	Log logx.Logger
 }
 
-func (d *Deps) debugf(format string, v ...any) {
-	if d.Debugf != nil {
-		d.Debugf(format, v...)
+func (d *Deps) log() logx.Logger {
+	if d.Log == nil {
+		return logx.Nop()
 	}
+	return d.Log
 }
 
 // Registry deduplicates concurrent lanes that share a ConnID into a single
@@ -145,7 +146,7 @@ func (c *serverConn) addLane(l *serverLane, laneCount uint16) {
 	c.lanes = append(c.lanes, l)
 	count := len(c.lanes)
 	c.lanesMu.Unlock()
-	c.deps.debugf("[bond %d] lane %d attached (lanes=%d)", c.id, l.index, count)
+	c.deps.log().Debugf("[bond %d] lane %d attached (lanes=%d)", c.id, l.index, count)
 	select {
 	case c.ready <- struct{}{}:
 	default:
@@ -193,7 +194,7 @@ func (c *serverConn) waitForInitialLanes() {
 			return
 		case <-c.ready:
 		case <-timer.C:
-			c.deps.debugf("[bond %d] starting with %d/%d lanes after attach timeout", c.id, count, want)
+			c.deps.log().Debugf("[bond %d] starting with %d/%d lanes after attach timeout", c.id, count, want)
 			return
 		}
 	}
@@ -208,7 +209,7 @@ func (c *serverConn) readLane(l *serverLane) {
 			case <-c.ctx.Done():
 			default:
 				if err != io.EOF {
-					c.deps.debugf("[bond %d] lane %d read error: %v (lanes=%d)", c.id, l.index, err, left)
+					c.deps.log().Debugf("[bond %d] lane %d read error: %v (lanes=%d)", c.id, l.index, err, left)
 				}
 				if left == 0 {
 					c.cancel()
@@ -251,7 +252,7 @@ func (c *serverConn) run() {
 			}
 		}
 	})
-	c.deps.debugf("[bond %d] backend connected", c.id)
+	c.deps.log().Debugf("[bond %d] backend connected", c.id)
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -271,8 +272,8 @@ func (c *serverConn) copyBondToBackend(backendConn net.Conn) {
 
 	for {
 		if finSeq != nil && expect == *finSeq {
-			bond.CloseWrite(backendConn, c.deps.debugf)
-			c.deps.debugf("[bond %d] upload to backend finished chunks=%d", c.id, expect)
+			bond.CloseWrite(backendConn, c.deps.log().Debugf)
+			c.deps.log().Debugf("[bond %d] upload to backend finished chunks=%d", c.id, expect)
 			return
 		}
 
@@ -336,7 +337,7 @@ func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
 					log.Printf("[bond %d] lane %d write FIN error: %v", c.id, lane.index, writeErr)
 				}
 			}
-			c.deps.debugf("[bond %d] download from backend finished chunks=%d", c.id, seq)
+			c.deps.log().Debugf("[bond %d] download from backend finished chunks=%d", c.id, seq)
 			return
 		}
 		select {
