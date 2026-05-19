@@ -1,0 +1,892 @@
+// Package manual implements the manual CAPTCHA solving flow used as a
+// fallback when the auto solver (internal/client/captcha) fails or when
+// the user passes -manual-captcha. It runs a local HTTP server on
+// 127.0.0.1:8765 that proxies the VK CAPTCHA page (rewriting absolute
+// URLs and gzipping), opens it in the user's browser, and waits for the
+// token/key produced after the user completes the puzzle.
+package manual
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"net/http/httputil"
+	neturl "net/url"
+	"os/exec"
+	"regexp"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/cacggghp/vk-turn-proxy/internal/client/browserprofile"
+	"github.com/cacggghp/vk-turn-proxy/internal/ish"
+)
+
+// Debug toggles verbose request/response logging for the proxied browser
+// traffic. Set from main once cfg is parsed.
+var Debug bool
+
+const captchaListenPort = "8765"
+
+type browserCommand struct {
+	name string
+	args []string
+}
+
+func localCaptchaOrigin() string {
+	return "http://localhost:" + captchaListenPort
+}
+
+func localCaptchaListenAddrs() []string {
+	return []string{
+		"127.0.0.1:" + captchaListenPort,
+		"[::1]:" + captchaListenPort,
+	}
+}
+
+func localCaptchaHosts() []string {
+	return []string{
+		"localhost:" + captchaListenPort,
+		"127.0.0.1:" + captchaListenPort,
+		"[::1]:" + captchaListenPort,
+	}
+}
+
+func isLocalCaptchaHost(host string) bool {
+	for _, localHost := range localCaptchaHosts() {
+		if strings.EqualFold(host, localHost) {
+			return true
+		}
+	}
+	return false
+}
+
+func localCaptchaURLForTarget(targetURL *neturl.URL) string {
+	localURL := &neturl.URL{
+		Scheme:   "http",
+		Host:     "localhost:" + captchaListenPort,
+		Path:     targetURL.Path,
+		RawPath:  targetURL.RawPath,
+		RawQuery: targetURL.RawQuery,
+	}
+	if localURL.Path == "" {
+		localURL.Path = "/"
+	}
+	return localURL.String()
+}
+
+func targetOrigin(targetURL *neturl.URL) string {
+	return targetURL.Scheme + "://" + targetURL.Host
+}
+
+func isSafeLocalRedirectPath(raw string) bool {
+	if raw == "" || raw[0] != '/' {
+		return false
+	}
+	if len(raw) > 1 && (raw[1] == '/' || raw[1] == '\\') {
+		return false
+	}
+	return true
+}
+
+func rewriteProxyRedirectLocation(raw string, targetURL *neturl.URL) (string, bool) {
+	if isSafeLocalRedirectPath(raw) {
+		return raw, true
+	}
+
+	parsed, err := neturl.Parse(raw)
+	if err != nil {
+		return "", false
+	}
+	if !strings.EqualFold(parsed.Scheme, targetURL.Scheme) || !strings.EqualFold(parsed.Host, targetURL.Host) {
+		return "", false
+	}
+
+	return localCaptchaURLForTarget(parsed), true
+}
+
+func rewriteProxyHeaderURL(raw string, targetURL *neturl.URL) string {
+	if raw == "" {
+		return raw
+	}
+	parsed, err := neturl.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	if parsed.Scheme != "http" || !isLocalCaptchaHost(parsed.Host) {
+		return raw
+	}
+	parsed.Scheme = targetURL.Scheme
+	parsed.Host = targetURL.Host
+	return parsed.String()
+}
+
+func rewriteProxyRequest(req *http.Request, targetURL *neturl.URL) {
+	req.URL.Scheme = targetURL.Scheme
+	req.URL.Host = targetURL.Host
+	if req.URL.Path == "" {
+		req.URL.Path = targetURL.Path
+	}
+	req.Host = targetURL.Host
+
+	req.Header.Del("Accept-Encoding")
+	req.Header.Del("TE") // Disable transfer encoding compression
+	for _, h := range []string{
+		"X-Requested-With",
+		"X-Android-Package",
+		"X-Android-Cert",
+		"X-Client-Data",
+		"X-Discord-Locale",
+		"X-Discord-Timezone",
+		"Save-Data",
+		"Purpose",
+		"Sec-Purpose",
+	} {
+		req.Header.Del(h)
+	}
+	for _, headerName := range []string{"Origin", "Referer"} {
+		if rewritten := rewriteProxyHeaderURL(req.Header.Get(headerName), targetURL); rewritten != "" {
+			req.Header.Set(headerName, rewritten)
+		} else {
+			req.Header.Del(headerName)
+		}
+	}
+}
+
+func extractSuccessToken(body []byte) string {
+	var payload struct {
+		Response struct {
+			SuccessToken string `json:"success_token"`
+		} `json:"response"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return ""
+	}
+	return payload.Response.SuccessToken
+}
+
+func rewriteProxyCookies(header http.Header) {
+	cookies := (&http.Response{Header: header}).Cookies()
+	if len(cookies) == 0 {
+		return
+	}
+	header.Del("Set-Cookie")
+	for _, cookie := range cookies {
+		cookie.Domain = ""
+		cookie.Secure = false
+		cookie.Partitioned = false
+		if cookie.SameSite == http.SameSiteNoneMode || cookie.SameSite == http.SameSiteStrictMode {
+			cookie.SameSite = http.SameSiteLaxMode
+		}
+		header.Add("Set-Cookie", cookie.String())
+	}
+}
+
+// htmlURLAttrDoubleRe matches src/href/action attributes with double-quoted absolute or protocol-relative URLs.
+var htmlURLAttrDoubleRe = regexp.MustCompile(`(?i)((?:src|href|action)\s*=\s*)"((?:https?:)?//[^"]+)"`)
+
+// htmlURLAttrSingleRe matches src/href/action attributes with single-quoted absolute or protocol-relative URLs.
+var htmlURLAttrSingleRe = regexp.MustCompile(`(?i)((?:src|href|action)\s*=\s*)'((?:https?:)?//[^']+)'`)
+
+// htmlScriptContentRe matches <script> tags to extract their content.
+var htmlScriptContentRe = regexp.MustCompile(`(?is)(<script[^>]*>)(.*?)(</script>)`)
+
+// htmlStyleContentRe matches <style> tags to extract their content.
+var htmlStyleContentRe = regexp.MustCompile(`(?is)(<style[^>]*>)(.*?)(</style>)`)
+
+// rewriteHTMLAttrsServerSide rewrites absolute and protocol-relative URLs in src/href/action
+// attributes of raw HTML. URLs matching the upstream origin are redirected to localhost;
+// all other absolute URLs are routed through /generic_proxy so that cross-domain resources
+// (st.vk.com, userapi.com, etc.) load correctly through the proxy.
+func rewriteHTMLAttrsServerSide(html string, targetURL *neturl.URL) string {
+	localOrigin := localCaptchaOrigin()
+	upstreamOrigin := targetOrigin(targetURL)
+
+	rewriteURL := func(rawURL string) string {
+		// Normalise protocol-relative URL to absolute using the upstream scheme
+		absURL := rawURL
+		if strings.HasPrefix(rawURL, "//") {
+			absURL = targetURL.Scheme + ":" + rawURL
+		}
+		if strings.HasPrefix(absURL, upstreamOrigin) {
+			return localOrigin + absURL[len(upstreamOrigin):]
+		}
+		// Already points to local proxy — leave as-is
+		if strings.HasPrefix(absURL, localOrigin) {
+			return rawURL
+		}
+		// Any other absolute URL → route through generic_proxy
+		return "/generic_proxy?proxy_url=" + neturl.QueryEscape(absURL)
+	}
+
+	var placeholders = make(map[string]string)
+
+	html = htmlScriptContentRe.ReplaceAllStringFunc(html, func(match string) string {
+		groups := htmlScriptContentRe.FindStringSubmatch(match)
+		if len(groups) < 4 {
+			return match
+		}
+		id := fmt.Sprintf("@@CONTENT_%d@@", len(placeholders))
+		placeholders[id] = groups[2]
+		return groups[1] + id + groups[3]
+	})
+
+	html = htmlStyleContentRe.ReplaceAllStringFunc(html, func(match string) string {
+		groups := htmlStyleContentRe.FindStringSubmatch(match)
+		if len(groups) < 4 {
+			return match
+		}
+		id := fmt.Sprintf("@@CONTENT_%d@@", len(placeholders))
+		placeholders[id] = groups[2]
+		return groups[1] + id + groups[3]
+	})
+
+	html = htmlURLAttrDoubleRe.ReplaceAllStringFunc(html, func(match string) string {
+		groups := htmlURLAttrDoubleRe.FindStringSubmatch(match)
+		if len(groups) < 3 {
+			return match
+		}
+		return groups[1] + `"` + rewriteURL(groups[2]) + `"`
+	})
+
+	html = htmlURLAttrSingleRe.ReplaceAllStringFunc(html, func(match string) string {
+		groups := htmlURLAttrSingleRe.FindStringSubmatch(match)
+		if len(groups) < 3 {
+			return match
+		}
+		return groups[1] + `'` + rewriteURL(groups[2]) + `'`
+	})
+
+	for id, content := range placeholders {
+		html = strings.Replace(html, id, content, 1)
+	}
+
+	return html
+}
+
+func rewriteCaptchaHTML(html string, targetURL *neturl.URL) string {
+	localOrigin := localCaptchaOrigin()
+	upstreamOrigin := targetOrigin(targetURL)
+
+	// Step 1: plain text replacement for the primary upstream origin
+	html = strings.ReplaceAll(html, upstreamOrigin, localOrigin)
+
+	// Step 2: rewrite all other absolute URLs in HTML attributes server-side.
+	// This is critical: the browser begins downloading <script src> / <link href> / <img src>
+	// resources immediately as it parses HTML — before any injected JS can intercept them.
+	html = rewriteHTMLAttrsServerSide(html, targetURL)
+
+	script := fmt.Sprintf(`
+<script>
+(function() {
+    var localOrigin = %q;
+    var upstreamOrigin = %q;
+
+    function rewriteUrl(urlStr) {
+        if (!urlStr || typeof urlStr !== 'string') return urlStr;
+        if (urlStr.indexOf(localOrigin) === 0) return urlStr;
+        if (urlStr.indexOf(upstreamOrigin) === 0) return localOrigin + urlStr.slice(upstreamOrigin.length);
+        if (urlStr.indexOf('//') === 0) {
+            return '/generic_proxy?proxy_url=' + encodeURIComponent(window.location.protocol + urlStr);
+        }
+        if (urlStr.indexOf('http://') === 0 || urlStr.indexOf('https://') === 0) {
+            return '/generic_proxy?proxy_url=' + encodeURIComponent(urlStr);
+        }
+        return urlStr;
+    }
+
+    function rewriteElementAttr(el, attr) {
+        if (!el || !el.getAttribute) return;
+        var value = el.getAttribute(attr);
+        if (!value) return;
+        var rewritten = rewriteUrl(value);
+        if (rewritten !== value) {
+            el.setAttribute(attr, rewritten);
+        }
+    }
+
+    function rewriteDocument(root) {
+        if (!root || !root.querySelectorAll) return;
+        root.querySelectorAll('[href]').forEach(function(el) { rewriteElementAttr(el, 'href'); });
+        root.querySelectorAll('[src]').forEach(function(el) { rewriteElementAttr(el, 'src'); });
+        root.querySelectorAll('form[action]').forEach(function(el) { rewriteElementAttr(el, 'action'); });
+    }
+
+    function handleSuccessToken(token) {
+        if (!token) return;
+        console.log('Captcha solved, sending token to proxy...');
+        var body = 'token=' + encodeURIComponent(token);
+
+        // sendBeacon is the most reliable on mobile Safari:
+        // it's fire-and-forget and works even if the page navigates away.
+        if (navigator && navigator.sendBeacon) {
+            var blob = new Blob([body], {type: 'application/x-www-form-urlencoded'});
+            var sent = navigator.sendBeacon('/local-captcha-result', blob);
+            if (sent) {
+                console.log('Token sent via sendBeacon');
+                showDone();
+                return;
+            }
+        }
+
+        // Fallback: fetch
+        fetch('/local-captcha-result', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: body
+        }).then(function(r) {
+            console.log('Proxy acknowledged token');
+            showDone();
+        }).catch(function(e) {
+            console.error('Fetch failed, trying form submit...', e);
+            // Last resort: form POST (navigates the page)
+            var form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/local-captcha-result';
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'token';
+            input.value = token;
+            form.appendChild(input);
+            document.body.appendChild(form);
+            form.submit();
+        });
+    }
+
+    function showDone() {
+        document.body.innerHTML = '<div style="text-align:center;margin-top:20vh;font-family:sans-serif">' +
+            '<h2 style="color:#4caf50">✔ Done!</h2>' +
+            '<p>Captcha solved successfully. You can close this tab now.</p>' +
+            '</div>';
+        // On iOS, window.close() often doesn't work, so we just let the user know they are done.
+        setTimeout(function() { window.close(); }, 1000);
+    }
+
+    var origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function() {
+        if (arguments[1] && typeof arguments[1] === 'string') {
+            this._origUrl = arguments[1];
+            arguments[1] = rewriteUrl(arguments[1]);
+        }
+        return origOpen.apply(this, arguments);
+    };
+
+    var origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function() {
+        var xhr = this;
+        if (this._origUrl && this._origUrl.indexOf('captchaNotRobot.check') !== -1) {
+            xhr.addEventListener('load', function() {
+                try {
+                    var data = JSON.parse(xhr.responseText);
+                    if (data.response && data.response.success_token) {
+                        handleSuccessToken(data.response.success_token);
+                    }
+                } catch (e) {}
+            });
+        }
+        return origSend.apply(this, arguments);
+    };
+
+    var origFetch = window.fetch;
+    if (origFetch) {
+        window.fetch = function() {
+            var url = arguments[0];
+            var isObj = (typeof url === 'object' && url && url.url);
+            var urlStr = isObj ? url.url : url;
+            var origUrlStr = urlStr;
+
+            if (typeof urlStr === 'string') {
+                urlStr = rewriteUrl(urlStr);
+                arguments[0] = urlStr;
+            }
+
+            var p = origFetch.apply(this, arguments);
+            if (typeof origUrlStr === 'string' && origUrlStr.indexOf('captchaNotRobot.check') !== -1) {
+                p.then(function(response) {
+                    return response.clone().json();
+                }).then(function(data) {
+                    if (data.response && data.response.success_token) {
+                        handleSuccessToken(data.response.success_token);
+                    }
+                }).catch(function() {});
+            }
+            return p;
+        };
+    }
+
+    document.addEventListener('submit', function(event) {
+        if (event.target && event.target.action) {
+            event.target.action = rewriteUrl(event.target.action);
+        }
+    }, true);
+
+    document.addEventListener('click', function(event) {
+        var target = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+        if (target && target.href) {
+            target.href = rewriteUrl(target.href);
+        }
+    }, true);
+
+    var origFormSubmit = HTMLFormElement.prototype.submit;
+    HTMLFormElement.prototype.submit = function() {
+        if (this.action) {
+            this.action = rewriteUrl(this.action);
+        }
+        return origFormSubmit.apply(this, arguments);
+    };
+
+    var origWindowOpen = window.open;
+    if (origWindowOpen) {
+        window.open = function(url) {
+            if (typeof url === 'string') {
+                arguments[0] = rewriteUrl(url);
+            }
+            return origWindowOpen.apply(this, arguments);
+        };
+    }
+
+    rewriteDocument(document);
+    if (document.documentElement && window.MutationObserver) {
+        new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                if (mutation.type === 'attributes' && mutation.target) {
+                    rewriteElementAttr(mutation.target, mutation.attributeName);
+                    return;
+                }
+                mutation.addedNodes.forEach(function(node) {
+                    if (node.nodeType === 1) {
+                        rewriteDocument(node);
+                    }
+                });
+            });
+        }).observe(document.documentElement, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            attributeFilter: ['href', 'src', 'action']
+        });
+    }
+})();
+</script>
+`, localOrigin, upstreamOrigin)
+
+	// Step 3: inject the client-side script as early as possible — at the opening <head> tag
+	// so that XHR/fetch overrides are active before any inline <script> block in <head> runs.
+	switch {
+	case strings.Contains(html, "<head>"):
+		return strings.Replace(html, "<head>", "<head>"+script, 1)
+	case strings.Contains(html, "</head>"):
+		return strings.Replace(html, "</head>", script+"</head>", 1)
+	case strings.Contains(html, "</body>"):
+		return strings.Replace(html, "</body>", script+"</body>", 1)
+	default:
+		return html + script
+	}
+}
+
+func newCaptchaProxyTransport(dialer net.Dialer) *http.Transport {
+	return &http.Transport{
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     false,
+		DialContext:           dialer.DialContext,
+	}
+}
+
+func startCaptchaServer(srv *http.Server, logPrefix string) error {
+	var listenErrs []string
+	var listening bool
+
+	for _, addr := range localCaptchaListenAddrs() {
+		listener, err := net.Listen("tcp", addr)
+		if err != nil {
+			listenErrs = append(listenErrs, fmt.Sprintf("%s (%v)", addr, err))
+			continue
+		}
+		listening = true
+		wrappedListener, err := ish.WrapListener(listener)
+		if err != nil {
+			log.Printf("%s: failed to wrap listener for iSH: %v", logPrefix, err)
+			wrappedListener = listener
+		}
+		go func(listener net.Listener) {
+			if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Printf("%s: %s", logPrefix, err)
+			}
+		}(wrappedListener)
+	}
+
+	if listening {
+		return nil
+	}
+
+	return fmt.Errorf("captcha listeners failed: %s", strings.Join(listenErrs, "; "))
+}
+
+// runCaptchaServerAndWait triggers the browser, and waiting gracefully for the solution token.
+func runCaptchaServerAndWait(handler http.Handler, captchaURL string, keyCh <-chan string, logPrefix string) (string, error) {
+	srv := &http.Server{Handler: handler}
+
+	if err := startCaptchaServer(srv, logPrefix); err != nil {
+		return "", err
+	}
+
+	fmt.Println("\n==============================================")
+	fmt.Println("ACTION REQUIRED: MANUAL CAPTCHA SOLVING NEEDED")
+	fmt.Println("If your browser didn't open automatically,")
+	fmt.Println("manually open this URL: " + localCaptchaOrigin())
+	fmt.Println("==============================================")
+	fmt.Println()
+
+	log.Printf("[%s] Opening browser...", logPrefix)
+	openBrowser(captchaURL)
+
+	key := <-keyCh
+
+	// Best-effort shutdown: the token is already received, so even if
+	// Shutdown times out (e.g. because ishConn.SetDeadline is a no-op
+	// on iSH and active connections can't be force-closed), we still
+	// return the token successfully.
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer shutCancel()
+	if err := srv.Shutdown(shutCtx); err != nil {
+		log.Printf("%s: shutdown warning (token already received): %v", logPrefix, err)
+	}
+
+	return key, nil
+}
+
+// notifyKey pushes the key string to the given channel without blocking
+func notifyKey(keyCh chan<- string, key string) {
+	if key != "" {
+		select {
+		case keyCh <- key:
+		default:
+		}
+	}
+}
+
+// SolveViaHTTP serves a tiny HTML page asking the user to solve the
+// pictured CAPTCHA, opens it in the browser, and blocks until the key
+// is posted back.
+func SolveViaHTTP(captchaImg string) (string, error) {
+	keyCh := make(chan string, 1)
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
+<html><head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:sans-serif;text-align:center;padding:20px}
+img{max-width:100%%;margin:16px 0}
+input{font-size:24px;padding:12px;width:80%%;box-sizing:border-box}
+button{font-size:24px;padding:12px 32px;margin-top:12px;cursor:pointer}</style>
+</head><body>
+<h2>Solve the Captcha</h2>
+<img src="%s" alt="captcha"/>
+<form onsubmit="fetch('/solve?key='+encodeURIComponent(document.getElementById('k').value)).then(()=>{document.body.innerHTML='<h2>Done!</h2>';setTimeout(function(){window.close();}, 300);});return false;">
+<br><input id="k" type="text" autofocus placeholder="Text from image"/>
+<br><button type="submit">Submit</button>
+</form></body></html>`, captchaImg)
+	})
+
+	mux.HandleFunc("/solve", func(w http.ResponseWriter, r *http.Request) {
+		notifyKey(keyCh, r.URL.Query().Get("key"))
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Done!</h2></body></html>`)
+	})
+
+	return runCaptchaServerAndWait(mux, localCaptchaOrigin(), keyCh, "captcha HTTP server error")
+}
+
+type loggingTransport struct {
+	rt http.RoundTripper
+}
+
+func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	isCaptchaRequest := req.Body != nil && (strings.Contains(req.URL.Path, "captchaNotRobot.check") || strings.Contains(req.URL.Path, "captchaNotRobot.componentDone"))
+
+	if isCaptchaRequest {
+		b, err := io.ReadAll(req.Body)
+		if err != nil {
+			log.Printf("[Captcha Proxy] Failed to read request body: %v", err)
+			b = nil
+		}
+		req.Body = io.NopCloser(bytes.NewReader(b))
+
+		if Debug {
+			log.Printf("[Captcha Proxy] Real browser sent %s data: %s", req.URL.Path, string(b))
+			for k, v := range req.Header {
+				log.Printf("[Captcha Proxy] Header (%s): %s = %s", req.URL.Path, k, strings.Join(v, ", "))
+			}
+		}
+
+		if strings.Contains(req.URL.Path, "captchaNotRobot.componentDone") || strings.Contains(req.URL.Path, "captchaNotRobot.check") {
+			parsedBody, err := neturl.ParseQuery(string(b))
+			if err != nil {
+				log.Printf("[Captcha Proxy] Failed to parse request body: %v", err)
+			}
+			device := parsedBody.Get("device")
+			browserFp := parsedBody.Get("browser_fp")
+
+			// We only save it if device is present. componentDone usually has it.
+			if device != "" && browserFp != "" {
+				sp := browserprofile.Saved{
+					Profile: browserprofile.Profile{
+						UserAgent:       req.Header.Get("User-Agent"),
+						SecChUa:         req.Header.Get("Sec-Ch-Ua"),
+						SecChUaMobile:   req.Header.Get("Sec-Ch-Ua-Mobile"),
+						SecChUaPlatform: req.Header.Get("Sec-Ch-Ua-Platform"),
+					},
+					DeviceJSON: device,
+					BrowserFp:  browserFp,
+				}
+				if err := browserprofile.Save(sp); err != nil {
+					log.Printf("[Captcha Proxy] Failed to save browser profile: %v", err)
+				} else {
+					log.Printf("[Captcha Proxy] Successfully intercepted and saved real browser profile!")
+				}
+			}
+		}
+	}
+	return t.rt.RoundTrip(req)
+}
+
+// SolveViaProxy proxies the VK redirect_uri page through a local HTTP
+// server, rewriting absolute URLs so the browser stays on
+// 127.0.0.1:8765 throughout the puzzle, then returns the resulting
+// auth token.
+func SolveViaProxy(redirectURI string, dialer net.Dialer) (string, error) {
+	keyCh := make(chan string, 1)
+
+	targetURL, err := neturl.Parse(redirectURI)
+	if err != nil {
+		return "", fmt.Errorf("invalid redirect URI: %v", err)
+	}
+
+	transport := &loggingTransport{rt: newCaptchaProxyTransport(dialer)}
+
+	proxy := &httputil.ReverseProxy{
+		Transport: transport,
+		Rewrite: func(req *httputil.ProxyRequest) {
+			rewriteProxyRequest(req.Out, targetURL)
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			log.Printf("[Captcha Proxy] ERROR for %s %s: %v", r.Method, r.URL.String(), err)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:20px"><h2>Captcha proxy error</h2><p>%s %s</p><p>%v</p></body></html>`, r.Method, r.URL.String(), err)
+		},
+		ModifyResponse: func(res *http.Response) error {
+			rewriteProxyCookies(res.Header)
+
+			if res.StatusCode >= 300 && res.StatusCode < 400 {
+				if loc := res.Header.Get("Location"); loc != "" {
+					// Don't log the full redirect URL to keep console clean
+					if rewritten, ok := rewriteProxyRedirectLocation(loc, targetURL); ok {
+						res.Header.Set("Location", rewritten)
+					} else {
+						res.Header.Del("Location")
+					}
+				}
+			}
+
+			contentType := res.Header.Get("Content-Type")
+			contentEncoding := res.Header.Get("Content-Encoding")
+			if Debug {
+				log.Printf("[Captcha Proxy] %s %d | Content-Type: %q, Encoding: %q", res.Request.Method, res.StatusCode, contentType, contentEncoding)
+			}
+
+			shouldInspectBody := strings.Contains(contentType, "text/html") ||
+				strings.Contains(contentType, "application/xhtml+xml") ||
+				strings.Contains(res.Request.URL.Path, "captchaNotRobot.check")
+
+			if !shouldInspectBody {
+				return nil
+			}
+
+			reader := res.Body
+			if res.Header.Get("Content-Encoding") == "gzip" {
+				gzReader, err := gzip.NewReader(res.Body)
+				if err == nil {
+					reader = gzReader
+					defer func() {
+						if err := gzReader.Close(); err != nil {
+							log.Printf("failed to close gzip reader: %v", err)
+						}
+					}()
+				}
+			}
+
+			bodyBytes, err := io.ReadAll(reader)
+			if err != nil {
+				return err
+			}
+			if err := res.Body.Close(); err != nil {
+				return err
+			}
+
+			if strings.Contains(res.Request.URL.Path, "captchaNotRobot.check") {
+				notifyKey(keyCh, extractSuccessToken(bodyBytes))
+			}
+
+			if strings.Contains(contentType, "text/html") {
+				for _, headerName := range []string{
+					"Content-Security-Policy",
+					"Content-Security-Policy-Report-Only",
+					"X-Content-Security-Policy",
+					"X-WebKit-CSP",
+					"Cross-Origin-Opener-Policy",
+					"Cross-Origin-Embedder-Policy",
+					"Cross-Origin-Resource-Policy",
+					"X-Frame-Options",
+					"Strict-Transport-Security",
+					"Alt-Svc",
+				} {
+					res.Header.Del(headerName)
+				}
+
+				bodyBytes = []byte(rewriteCaptchaHTML(string(bodyBytes), targetURL))
+				res.Header.Del("Content-Encoding")
+			}
+
+			res.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			res.ContentLength = int64(len(bodyBytes))
+			res.Header.Set("Content-Length", fmt.Sprint(len(bodyBytes)))
+
+			return nil
+		},
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/local-captcha-result", func(w http.ResponseWriter, r *http.Request) {
+		token := r.FormValue("token")
+		if token != "" {
+			log.Printf("[Captcha] Received success token from browser (%d bytes)", len(token))
+			notifyKey(keyCh, token)
+		} else {
+			log.Printf("[Captcha] Received empty token from browser")
+		}
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = fmt.Fprint(w, "ok")
+	})
+
+	mux.HandleFunc("/generic_proxy", func(w http.ResponseWriter, r *http.Request) {
+		targetAuthURL := r.URL.Query().Get("proxy_url")
+		targetParsed, err := neturl.Parse(targetAuthURL)
+		if err != nil || targetParsed.Host == "" {
+			http.Error(w, "Bad URL", http.StatusBadRequest)
+			return
+		}
+		genericReverse := &httputil.ReverseProxy{
+			Transport: transport,
+			Rewrite: func(req *httputil.ProxyRequest) {
+				req.Out.URL.Path = targetParsed.Path
+				req.Out.URL.RawQuery = targetParsed.RawQuery
+				rewriteProxyRequest(req.Out, targetParsed)
+			},
+			ModifyResponse: func(res *http.Response) error {
+				// Strip security headers that can block cross-origin resource loading
+				// when static assets (JS/CSS) are served through the proxy.
+				for _, h := range []string{
+					"Content-Security-Policy",
+					"Content-Security-Policy-Report-Only",
+					"X-Content-Security-Policy",
+					"X-WebKit-CSP",
+					"Cross-Origin-Opener-Policy",
+					"Cross-Origin-Embedder-Policy",
+					"Cross-Origin-Resource-Policy",
+					"X-Frame-Options",
+					"Strict-Transport-Security",
+				} {
+					res.Header.Del(h)
+				}
+				// Allow the browser to use the resource cross-origin
+				res.Header.Set("Access-Control-Allow-Origin", "*")
+
+				// captchaNotRobot.check goes to api.vk.ru (different host from the main
+				// proxy upstream vk.com), so it is routed through /generic_proxy.
+				// Extract the success_token here so the server path works on iOS
+				// even if the browser-side JS callback never fires.
+				if strings.Contains(targetAuthURL, "captchaNotRobot.check") {
+					bodyBytes, readErr := io.ReadAll(res.Body)
+					if readErr == nil {
+						_ = res.Body.Close()
+						res.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+						res.ContentLength = int64(len(bodyBytes))
+						res.Header.Set("Content-Length", fmt.Sprint(len(bodyBytes)))
+						notifyKey(keyCh, extractSuccessToken(bodyBytes))
+					}
+				}
+
+				return nil
+			},
+		}
+		genericReverse.ServeHTTP(w, r)
+	})
+
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[Captcha Proxy] HTTP %s %s", r.Method, r.URL.Path)
+		if r.URL.Path == "/" && targetURL.Path != "" && targetURL.Path != "/" && r.URL.RawQuery == "" {
+			// Don't log the full redirect URL to keep console clean
+			http.Redirect(w, r, localCaptchaURLForTarget(targetURL), http.StatusTemporaryRedirect)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	})
+
+	return runCaptchaServerAndWait(mux, localCaptchaURLForTarget(targetURL), keyCh, "proxy HTTP server error")
+}
+
+func openBrowser(url string) {
+	for _, cmd := range browserOpenCommands(runtime.GOOS, url) {
+		if err := exec.Command(cmd.name, cmd.args...).Start(); err == nil {
+			return
+		}
+	}
+}
+
+func browserOpenCommands(goos string, url string) []browserCommand {
+	switch goos {
+	case "windows":
+		// 'rundll32 url.dll,FileProtocolHandler' is more reliable than 'cmd /c start'
+		// because it doesn't involve the shell (cmd.exe), avoiding issues with '&' and other special characters.
+		return []browserCommand{
+			{name: "rundll32", args: []string{"url.dll,FileProtocolHandler", url}},
+			// Fallback with empty title argument for 'start' to handle potential quoting issues
+			{name: "cmd", args: []string{"/c", "start", "", url}},
+		}
+	case "darwin":
+		return []browserCommand{{name: "open", args: []string{url}}}
+	case "linux":
+		return []browserCommand{
+			{name: "xdg-open", args: []string{url}},
+			{name: "gio", args: []string{"open", url}},
+		}
+	case "android":
+		return []browserCommand{
+			{name: "termux-open-url", args: []string{url}},
+			{name: "/system/bin/am", args: []string{"start", "-a", "android.intent.action.VIEW", "-d", url}},
+			{name: "am", args: []string{"start", "-a", "android.intent.action.VIEW", "-d", url}},
+			{name: "xdg-open", args: []string{url}},
+		}
+	case "ios":
+		return []browserCommand{
+			{name: "open", args: []string{url}},
+			{name: "uiopen", args: []string{url}},
+		}
+	}
+	return nil
+}
