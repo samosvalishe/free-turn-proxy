@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -19,8 +18,8 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// GetCredsFunc is an alias of common.GetCredsFunc kept for cmd/main wiring
-// stability.
+// GetCredsFunc is re-exported from common so callers can keep their imports
+// scoped to this package.
 type GetCredsFunc = common.GetCredsFunc
 
 // Params is the per-pool TURN/wrap configuration.
@@ -55,7 +54,7 @@ func (d *Deps) log() logx.Logger {
 // Run is the VLESS-mode entrypoint. It spawns numSessions maintainers, waits
 // for at least one to connect, then accepts local TCP connections and forwards
 // each as a smux stream (round-robin) or bonded across all live sessions.
-func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenAddr string, numSessions int, useBond bool) {
+func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenAddr string, numSessions int, useBond bool) error {
 	pool := &SessionPool{}
 
 	var wgMaint sync.WaitGroup
@@ -70,12 +69,12 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 		})
 	}
 
-	deps.log().Errorf("VLESS mode: waiting for sessions to connect (total: %d)...", numSessions)
+	deps.log().Infof("VLESS mode: waiting for sessions to connect (total: %d)...", numSessions)
 	for {
 		select {
 		case <-ctx.Done():
 			wgMaint.Wait()
-			return
+			return nil
 		case <-time.After(100 * time.Millisecond):
 		}
 		if pool.Count() > 0 {
@@ -85,20 +84,21 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		log.Panicf("TCP listen: %s", err)
+		wgMaint.Wait()
+		return fmt.Errorf("tcpfwd listen %s: %w", listenAddr, err)
 	}
 
 	wrappedListener, err := ish.WrapListener(listener)
 	if err != nil {
-		deps.log().Errorf("Warning: failed to wrap listener: %v", err)
+		deps.log().Warnf("failed to wrap listener: %v", err)
 		wrappedListener = listener
 	}
 
 	context.AfterFunc(ctx, func() { _ = wrappedListener.Close() })
 	if useBond {
-		deps.log().Errorf("VLESS bond mode: listening on %s (striping each TCP connection across active sessions)", listenAddr)
+		deps.log().Infof("VLESS bond mode: listening on %s (striping each TCP connection across active sessions)", listenAddr)
 	} else {
-		deps.log().Errorf("VLESS mode: listening on %s (round-robin across %d sessions)", listenAddr, numSessions)
+		deps.log().Infof("VLESS mode: listening on %s (round-robin across %d sessions)", listenAddr, numSessions)
 	}
 
 	var wgConn sync.WaitGroup
@@ -109,7 +109,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 			case <-ctx.Done():
 				wgConn.Wait()
 				wgMaint.Wait()
-				return
+				return nil
 			default:
 			}
 			deps.log().Errorf("TCP accept error: %s", err)
@@ -176,8 +176,9 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 	}
 }
 
-// maintainSession keeps one TURN+DTLS+KCP+smux session alive, reconnecting on
-// failure with a fixed 2-3s backoff.
+// maintainSession keeps one TURN+DTLS+KCP+smux session alive: 3s backoff on
+// setup failure, 2s after a successful session disconnects, in both cases
+// before the next reconnect attempt.
 func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, id int, pool *SessionPool) {
 	for {
 		select {
@@ -198,7 +199,7 @@ func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.
 		}
 
 		ps := pool.Add(id, smuxSess)
-		deps.log().Errorf("[session %d] connected (active: %d)", id, pool.Count())
+		deps.log().Infof("[session %d] connected (active: %d)", id, pool.Count())
 
 		for !smuxSess.IsClosed() {
 			select {
@@ -212,7 +213,7 @@ func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.
 
 		pool.Remove(ps)
 		cleanup()
-		deps.log().Errorf("[session %d] disconnected (active: %d), reconnecting...", id, pool.Count())
+		deps.log().Infof("[session %d] disconnected (active: %d), reconnecting...", id, pool.Count())
 
 		select {
 		case <-ctx.Done():

@@ -156,6 +156,8 @@ func (c *Conn) WrapInto(dst, payload []byte) (int, error) {
 }
 
 // Unwrap decodes a wire packet into dst and returns the plaintext length.
+// Note: the AEAD opens in-place inside wire, so callers must treat wire as
+// consumed after this call (do not reuse its contents).
 func (c *Conn) Unwrap(wire, dst []byte) (int, error) {
 	if len(wire) < Overhead {
 		return 0, errors.New("wrap: packet too short")

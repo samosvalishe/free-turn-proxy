@@ -33,13 +33,22 @@ func Nop() Logger { return nopLogger{} }
 
 func (l *stdLogger) Debugf(format string, v ...any) {
 	if l.debug {
-		log.Printf(format, v...)
+		log.Printf("[DEBUG] "+format, v...)
 	}
 }
-func (l *stdLogger) Infof(format string, v ...any)  { log.Printf(format, v...) }
-func (l *stdLogger) Warnf(format string, v ...any)  { log.Printf(format, v...) }
-func (l *stdLogger) Errorf(format string, v ...any) { log.Printf(format, v...) }
+func (l *stdLogger) Infof(format string, v ...any)  { log.Printf("[INFO] "+format, v...) }
+func (l *stdLogger) Warnf(format string, v ...any)  { log.Printf("[WARN] "+format, v...) }
+func (l *stdLogger) Errorf(format string, v ...any) { log.Printf("[ERROR] "+format, v...) }
 func (l *stdLogger) DebugEnabled() bool             { return l.debug }
+
+// OrNop returns l if non-nil, else a Nop logger. Use in package constructors
+// that accept a nullable Logger.
+func OrNop(l Logger) Logger {
+	if l == nil {
+		return Nop()
+	}
+	return l
+}
 
 type nopLogger struct{}
 

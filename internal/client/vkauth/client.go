@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"net"
 	"strings"
@@ -157,12 +156,12 @@ func (c *Client) HandleAuthError(streamID int) bool {
 	count := cache.errorCount.Add(1)
 	cache.lastErrorTime.Store(now)
 
-	log.Printf("[STREAM %d] Auth error (cache=%d, count=%d/%d)", streamID, cacheID, count, MaxCacheErrors)
+	c.log.Infof("[STREAM %d] Auth error (cache=%d, count=%d/%d)", streamID, cacheID, count, MaxCacheErrors)
 
 	if count >= MaxCacheErrors {
-		log.Printf("[VK Auth] Multiple auth errors detected (%d), invalidating cache %d for stream %d...", count, cacheID, streamID)
+		c.log.Infof("[VK Auth] Multiple auth errors detected (%d), invalidating cache %d for stream %d...", count, cacheID, streamID)
 		cache.Invalidate()
-		log.Printf("[STREAM %d] [VK Auth] Credentials cache invalidated", streamID)
+		c.log.Infof("[STREAM %d] [VK Auth] Credentials cache invalidated", streamID)
 		return true
 	}
 	return false
@@ -198,7 +197,7 @@ func (c *Client) fetchSerialized(ctx context.Context, link string, streamID int)
 	elapsed := time.Since(c.lastFetchTime)
 	if !c.lastFetchTime.IsZero() && elapsed < minInterval {
 		wait := minInterval - elapsed
-		log.Printf("[STREAM %d] [VK Auth] Throttling: waiting %v to prevent rate limit...", streamID, wait.Truncate(time.Millisecond))
+		c.log.Infof("[STREAM %d] [VK Auth] Throttling: waiting %v to prevent rate limit...", streamID, wait.Truncate(time.Millisecond))
 		select {
 		case <-ctx.Done():
 			return "", "", nil, ctx.Err()
@@ -218,22 +217,22 @@ func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, 
 	var lastErr error
 	jar := tlsclient.NewCookieJar()
 	for _, creds := range c.credentials {
-		log.Printf("[STREAM %d] [VK Auth] Trying credentials: client_id=%s", streamID, creds.ClientID)
+		c.log.Infof("[STREAM %d] [VK Auth] Trying credentials: client_id=%s", streamID, creds.ClientID)
 
 		user, pass, addrs, err := c.tokenChain(ctx, link, streamID, creds, jar)
 		if err == nil {
-			log.Printf("[STREAM %d] [VK Auth] Success with client_id=%s", streamID, creds.ClientID)
+			c.log.Infof("[STREAM %d] [VK Auth] Success with client_id=%s", streamID, creds.ClientID)
 			return user, pass, addrs, nil
 		}
 		lastErr = err
-		log.Printf("[STREAM %d] [VK Auth] Failed with client_id=%s: %v", streamID, creds.ClientID, err)
+		c.log.Infof("[STREAM %d] [VK Auth] Failed with client_id=%s: %v", streamID, creds.ClientID, err)
 
 		if errors.Is(err, ErrCaptchaWaitRequired) || errors.Is(err, ErrFatalCaptchaNoStreams) {
 			return "", "", nil, err
 		}
 		es := err.Error()
 		if strings.Contains(es, "error_code:29") || strings.Contains(es, "error_code: 29") || strings.Contains(es, "Rate limit") {
-			log.Printf("[STREAM %d] [VK Auth] Rate limit detected, trying next credentials...", streamID)
+			c.log.Infof("[STREAM %d] [VK Auth] Rate limit detected, trying next credentials...", streamID)
 		}
 	}
 	return "", "", nil, fmt.Errorf("all VK credentials failed: %w", lastErr)

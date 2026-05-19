@@ -14,8 +14,8 @@ import (
 )
 
 // PooledSession is a single TURN+DTLS+KCP+smux session inside the pool, with
-// its lifetime counters. Fields are exported so the bond client (in main) can
-// account per-lane traffic; mutate via the atomic operations only.
+// its lifetime counters. Fields are exported so internal/proxy/bondclient can
+// account per-lane traffic; mutate the atomics via their atomic methods only.
 type PooledSession struct {
 	ID          int
 	Sess        *smux.Session

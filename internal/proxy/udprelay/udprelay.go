@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"math/rand"
 	"net"
 	"sync"
@@ -37,12 +36,13 @@ var packetPool = sync.Pool{
 	New: func() any { return &Packet{Data: make([]byte, 2048)} },
 }
 
-// GetCredsFunc is an alias of common.GetCredsFunc kept for cmd/main wiring
-// stability.
+// GetCredsFunc is re-exported from common so callers can keep their imports
+// scoped to this package.
 type GetCredsFunc = common.GetCredsFunc
 
-// AuthHandler is the subset of vkauth.Client this package needs. Keeping it as
-// an interface lets internal/proxy/udprelay avoid importing internal/client/vkauth.
+// AuthHandler is the subset of vkauth.Client this package needs. Defined as
+// an interface so tests can inject fakes; the production wiring still imports
+// vkauth for its sentinel errors (ErrFatalCaptchaNoStreams, etc.).
 type AuthHandler interface {
 	IsAuthError(err error) bool
 	HandleAuthError(streamID int) bool
@@ -84,10 +84,10 @@ func (d *Deps) log() logx.Logger {
 // connectedStreams is owned by the caller (vkauth reads it via StreamsAlive)
 // and incremented/decremented by oneTURN.
 // Returns after all stream loops exit (i.e. when ctx is cancelled).
-func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, appCancel context.CancelFunc, params *Params, peer *net.UDPAddr, listenAddr string, numStreams int) {
+func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, appCancel context.CancelFunc, params *Params, peer *net.UDPAddr, listenAddr string, numStreams int) error {
 	listenConn, err := net.ListenPacket("udp", listenAddr)
 	if err != nil {
-		log.Panicf("Failed to listen: %s", err)
+		return fmt.Errorf("udprelay listen %s: %w", listenAddr, err)
 	}
 	context.AfterFunc(ctx, func() {
 		if closeErr := listenConn.Close(); closeErr != nil {
@@ -141,6 +141,7 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	}
 
 	wg.Wait()
+	return nil
 }
 
 const inboundQueueCap = 2000
@@ -235,10 +236,16 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 			case <-ctx.Done():
 				return
 			}
-			c := make(chan error)
+			c := make(chan error, 1)
 			go oneTURN(ctx, deps, params, peer, conn2, streamID, c)
 
-			if err := <-c; err != nil {
+			var err error
+			select {
+			case err = <-c:
+			case <-ctx.Done():
+				return
+			}
+			if err != nil {
 				if errors.Is(err, vkauth.ErrFatalCaptchaNoStreams) {
 					deps.log().Errorf("[STREAM %d] Fatal manual captcha error. Shutting down application.", streamID)
 					if deps.AppCancel != nil {
@@ -268,7 +275,11 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 					}
 				} else {
 					deps.log().Errorf("[STREAM %d] %s", streamID, err)
-					time.Sleep(2 * time.Second)
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(2 * time.Second):
+					}
 				}
 			}
 		}
@@ -303,9 +314,9 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 		if closeErr := dtlsConn.Close(); closeErr != nil {
 			deps.log().Errorf("[STREAM %d] failed to close DTLS connection: %s", streamID, closeErr)
 		}
-		deps.log().Errorf("[STREAM %d] Closed DTLS connection\n", streamID)
+		deps.log().Infof("[STREAM %d] Closed DTLS connection", streamID)
 	}()
-	deps.log().Errorf("[STREAM %d] Established DTLS connection!\n", streamID)
+	deps.log().Infof("[STREAM %d] Established DTLS connection", streamID)
 
 	if okchan != nil {
 		go func() {
@@ -387,9 +398,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		}
 	}()
 
-	if deps.log().DebugEnabled() {
-		deps.log().Errorf("[STREAM %d] relayed-address=%s", streamID, relayConn.LocalAddr().String())
-	}
+	deps.log().Debugf("[STREAM %d] relayed-address=%s", streamID, relayConn.LocalAddr().String())
 
 	wg := sync.WaitGroup{}
 	turnctx, turncancel := context.WithCancel(ctx)
@@ -409,7 +418,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		return
 	}
 
-	go func() {
+	wg.Go(func() {
 		defer turncancel()
 		buf := make([]byte, 1600)
 		var wireBuf []byte
@@ -446,7 +455,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 				return
 			}
 		}
-	}()
+	})
 
 	wg.Go(func() {
 		defer turncancel()

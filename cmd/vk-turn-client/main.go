@@ -56,7 +56,7 @@ func main() {
 
 	cfg, err := config.ParseClient(os.Args[1:], os.Stderr)
 	if err != nil {
-		log.Panicf("%v", err)
+		log.Fatalf("%v", err)
 	}
 
 	if cfg.DNS.Servers != nil {
@@ -111,7 +111,9 @@ func main() {
 			WrapKey:  cfg.Obf.WrapKey,
 			GetCreds: tcpfwd.GetCredsFunc(vkAuth.GetCredentials),
 		}
-		tcpfwd.Run(ctx, vlessDeps, vlessParams, peer, cfg.Proxy.Listen, cfg.TURN.N, cfg.Proxy.Mode == config.ProxyModeTCPFwdBond)
+		if err := tcpfwd.Run(ctx, vlessDeps, vlessParams, peer, cfg.Proxy.Listen, cfg.TURN.N, cfg.Proxy.Mode == config.ProxyModeTCPFwdBond); err != nil {
+			log.Fatalf("tcpfwd: %v", err)
+		}
 		return
 	}
 
@@ -127,5 +129,7 @@ func main() {
 		WrapKey:  cfg.Obf.WrapKey,
 		GetCreds: udprelay.GetCredsFunc(vkAuth.GetCredentials),
 	}
-	udprelay.Run(ctx, udpDtlsDialer, vkAuth, logger, &connectedStreams, cancel, udpParams, peer, cfg.Proxy.Listen, cfg.TURN.N)
+	if err := udprelay.Run(ctx, udpDtlsDialer, vkAuth, logger, &connectedStreams, cancel, udpParams, peer, cfg.Proxy.Listen, cfg.TURN.N); err != nil {
+		log.Fatalf("udprelay: %v", err)
+	}
 }

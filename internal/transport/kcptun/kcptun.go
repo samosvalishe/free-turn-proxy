@@ -204,17 +204,21 @@ func NewKCPOverDTLS(dtlsConn net.Conn, isServer bool) (*kcp.UDPSession, error) {
 	dataShards, parityShards := selectedFEC()
 
 	if isServer {
-		// Server: listen on the PacketConn and accept one session
+		// Server: listen on the PacketConn, accept one session, then drop the
+		// listener (it owns the PacketConn — the accepted session keeps using
+		// it via the shared kcp mux).
 		var listener *kcp.Listener
 		listener, err = kcp.ServeConn(block, dataShards, parityShards, pc)
 		if err != nil {
 			return nil, err
 		}
 		if err = listener.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			_ = listener.Close()
 			return nil, err
 		}
 		sess, err = listener.AcceptKCP()
 		if err != nil {
+			_ = listener.Close()
 			return nil, err
 		}
 	} else {

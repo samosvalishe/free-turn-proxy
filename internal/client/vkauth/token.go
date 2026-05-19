@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	neturl "net/url"
 	"strings"
 	"time"
@@ -46,7 +45,7 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 	name := namegen.Generate()
 	escapedName := neturl.QueryEscape(name)
 
-	log.Printf("[STREAM %d] [VK Auth] Connecting Identity - Name: %s | User-Agent: %s", streamID, name, profile.UserAgent)
+	c.log.Infof("[STREAM %d] [VK Auth] Connecting Identity - Name: %s | User-Agent: %s", streamID, name, profile.UserAgent)
 
 	doRequest := func(data string, url string) (resp map[string]any, err error) {
 		parsedURL, err := neturl.Parse(url)
@@ -76,7 +75,7 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 		}
 		defer func() {
 			if closeErr := httpResp.Body.Close(); closeErr != nil {
-				log.Printf("close response body: %s", closeErr)
+				c.log.Infof("close response body: %s", closeErr)
 			}
 		}()
 
@@ -110,7 +109,7 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 	// Token 1 -> getCallPreview (warmup, non-fatal).
 	data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&fields=photo_200&access_token=%s", link, token1)
 	if _, prevErr := doRequest(data, "https://api.vk.ru/method/calls.getCallPreview?v=5.275&client_id="+creds.ClientID); prevErr != nil {
-		log.Printf("[STREAM %d] [VK Auth] Warning: getCallPreview failed: %v", streamID, prevErr)
+		c.log.Infof("[STREAM %d] [VK Auth] Warning: getCallPreview failed: %v", streamID, prevErr)
 	}
 
 	vkDelayRandom(200, 400)
@@ -131,10 +130,10 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 			if captchaErr != nil && captchaErr.IsCaptcha() {
 				solveMode, hasSolveMode := CaptchaSolveModeForAttempt(attempt, c.manualOnly)
 				if !hasSolveMode {
-					log.Printf("[STREAM %d] [Captcha] No more solve modes available (attempt %d)", streamID, attempt+1)
+					c.log.Infof("[STREAM %d] [Captcha] No more solve modes available (attempt %d)", streamID, attempt+1)
 					c.engageLockout(60 * time.Second)
 					if c.streamsFn() == 0 {
-						log.Printf("[STREAM %d] [FATAL] 0 connected streams and captcha solve modes exhausted.", streamID)
+						c.log.Infof("[STREAM %d] [FATAL] 0 connected streams and captcha solve modes exhausted.", streamID)
 						return "", "", nil, ErrFatalCaptchaNoStreams
 					}
 					return "", "", nil, ErrCaptchaWaitRequired
@@ -153,7 +152,7 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 					if captchaErr.SessionToken != "" && captchaErr.RedirectURI != "" {
 						successToken, solveErr = solveFn(ctx, captchaErr, streamID, client, profile)
 						if solveErr != nil {
-							log.Printf("[STREAM %d] [Captcha] Auto captcha failed: %v", streamID, solveErr)
+							c.log.Infof("[STREAM %d] [Captcha] Auto captcha failed: %v", streamID, solveErr)
 						}
 					} else {
 						solveErr = fmt.Errorf("missing fields for auto solve")
@@ -163,7 +162,7 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 						solveErr = fmt.Errorf("manual captcha solver not configured")
 						break
 					}
-					log.Printf("[STREAM %d] [Captcha] Triggering manual captcha fallback...", streamID)
+					c.log.Infof("[STREAM %d] [Captcha] Triggering manual captcha fallback...", streamID)
 					// Manual solver gets its own 3-min budget so a tight parent
 					// deadline doesn't cut user solve time. We still propagate
 					// parent cancellation (app shutdown) so the in-flight solver
@@ -188,12 +187,12 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 						solveErr = res.err
 						if successToken != "" || captchaKey != "" {
 							if solveErr != nil {
-								log.Printf("[STREAM %d] [Captcha] Token received (ignoring cleanup error: %v)", streamID, solveErr)
+								c.log.Infof("[STREAM %d] [Captcha] Token received (ignoring cleanup error: %v)", streamID, solveErr)
 								solveErr = nil
 							}
-							log.Printf("[STREAM %d] [Captcha] Successfully got token from browser", streamID)
+							c.log.Infof("[STREAM %d] [Captcha] Successfully got token from browser", streamID)
 						} else if solveErr != nil {
-							log.Printf("[STREAM %d] [Captcha] manual solver returned error: %v", streamID, solveErr)
+							c.log.Infof("[STREAM %d] [Captcha] manual solver returned error: %v", streamID, solveErr)
 						}
 					case <-manualCtx.Done():
 						if errors.Is(manualCtx.Err(), context.DeadlineExceeded) {
@@ -206,15 +205,15 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 				}
 
 				if solveErr != nil {
-					log.Printf("[STREAM %d] [Captcha] %s failed (attempt %d): %v", streamID, CaptchaSolveModeLabel(solveMode), attempt+1, solveErr)
+					c.log.Infof("[STREAM %d] [Captcha] %s failed (attempt %d): %v", streamID, CaptchaSolveModeLabel(solveMode), attempt+1, solveErr)
 					nextSolveMode, hasNextSolveMode := CaptchaSolveModeForAttempt(attempt+1, c.manualOnly)
 					if hasNextSolveMode {
-						log.Printf("[STREAM %d] [Captcha] Falling back to %s...", streamID, CaptchaSolveModeLabel(nextSolveMode))
+						c.log.Infof("[STREAM %d] [Captcha] Falling back to %s...", streamID, CaptchaSolveModeLabel(nextSolveMode))
 						continue
 					}
 					c.engageLockout(60 * time.Second)
 					if c.streamsFn() == 0 {
-						log.Printf("[STREAM %d] [FATAL] 0 connected streams and manual captcha failed/timed out.", streamID)
+						c.log.Infof("[STREAM %d] [FATAL] 0 connected streams and manual captcha failed/timed out.", streamID)
 						return "", "", nil, ErrFatalCaptchaNoStreams
 					}
 					return "", "", nil, ErrCaptchaWaitRequired
@@ -285,9 +284,9 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 		return "", "", nil, fmt.Errorf("missing or empty urls in turn_server")
 	}
 
-	log.Printf("[STREAM %d] [VK Auth] TURN urls (%d total):", streamID, len(urlsRaw))
+	c.log.Infof("[STREAM %d] [VK Auth] TURN urls (%d total):", streamID, len(urlsRaw))
 	for i, u := range urlsRaw {
-		log.Printf("[STREAM %d] [VK Auth]   [%d] %v", streamID, i, u)
+		c.log.Infof("[STREAM %d] [VK Auth]   [%d] %v", streamID, i, u)
 	}
 
 	var addresses []string

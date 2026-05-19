@@ -24,7 +24,7 @@ import (
 func main() {
 	cfg, err := config.ParseServer(os.Args[1:], os.Stderr)
 	if err != nil {
-		log.Panicf("%v", err)
+		log.Fatalf("%v", err)
 	}
 	logger := logx.New(cfg.Log.Debug)
 	registry := bondserver.NewRegistry(bondserver.Deps{Log: logger})
@@ -32,7 +32,7 @@ func main() {
 	if cfg.Obf.GenWrapKey {
 		key, gerr := srtpmimicry.GenKeyHex()
 		if gerr != nil {
-			log.Panicf("gen-wrap-key: %v", gerr)
+			log.Fatalf("gen-wrap-key: %v", gerr)
 		}
 		fmt.Println(key)
 		return
