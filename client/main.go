@@ -24,15 +24,12 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/client/internal/dnsdial"
 	"github.com/cacggghp/vk-turn-proxy/client/internal/vkauth"
 	"github.com/cacggghp/vk-turn-proxy/internal/bond"
-	"github.com/cacggghp/vk-turn-proxy/internal/netadapt"
+	"github.com/cacggghp/vk-turn-proxy/internal/dtlsdial"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
+	"github.com/cacggghp/vk-turn-proxy/internal/turnpipe"
 	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
 	"github.com/cacggghp/vk-turn-proxy/tcputil"
 	"github.com/cbeuw/connutil"
-	"github.com/pion/dtls/v3"
-	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
-	"github.com/pion/logging"
-	"github.com/pion/turn/v5"
 	"github.com/xtaci/smux"
 )
 
@@ -43,8 +40,12 @@ var (
 	activeLocalPeer  atomic.Value
 	connectedStreams atomic.Int32
 	globalAppCancel  context.CancelFunc
-	handshakeSem     = make(chan struct{}, 3)
-	isDebug          bool
+	udpDtlsDialer    = &dtlsdial.Dialer{
+		HandshakeTimeout: 20 * time.Second,
+		HandshakeSem:     make(chan struct{}, 3),
+	}
+	vlessDtlsDialer = &dtlsdial.Dialer{HandshakeTimeout: 30 * time.Second}
+	isDebug         bool
 )
 
 var appDialer net.Dialer
@@ -82,37 +83,7 @@ func manualCaptchaSolver(_ context.Context, e *captcha.Error, d net.Dialer) (str
 }
 
 func dtlsFunc(ctx context.Context, conn net.PacketConn, peer *net.UDPAddr) (net.Conn, error) {
-	certificate, err := selfsign.GenerateSelfSigned()
-	if err != nil {
-		return nil, err
-	}
-
-	select {
-	case handshakeSem <- struct{}{}:
-		defer func() { <-handshakeSem }()
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-
-	ctx1, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	dtlsConn, err := dtls.ClientWithOptions(
-		conn,
-		peer,
-		dtls.WithCertificates(certificate),
-		dtls.WithInsecureSkipVerify(true),
-		dtls.WithExtendedMasterSecret(dtls.RequireExtendedMasterSecret),
-		dtls.WithCipherSuites(dtls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256),
-		dtls.WithConnectionIDGenerator(dtls.OnlySendCIDGenerator()),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := dtlsConn.HandshakeContext(ctx1); err != nil {
-		return nil, err
-	}
-	return dtlsConn, nil
+	return udpDtlsDialer.Dial(ctx, conn, peer)
 }
 
 func oneDtlsConnection(ctx context.Context, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *UDPPacket, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) error {
@@ -217,98 +188,20 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 		err = fmt.Errorf("failed to get TURN credentials: %s", err1)
 		return
 	}
-	urlhost, urlport, err1 := net.SplitHostPort(urlTarget)
-	if err1 != nil {
-		err = fmt.Errorf("failed to parse TURN server address: %s", err1)
-		return
-	}
-	if turnParams.host != "" {
-		urlhost = turnParams.host
-	}
-	if turnParams.port != "" {
-		urlport = turnParams.port
-	}
-	var turnServerAddr string
-	turnServerAddr = net.JoinHostPort(urlhost, urlport)
-	turnServerUDPAddr, err1 := net.ResolveUDPAddr("udp", turnServerAddr)
-	if err1 != nil {
-		err = fmt.Errorf("failed to resolve TURN server address: %s", err1)
-		return
-	}
-	turnServerAddr = turnServerUDPAddr.String()
-	debugf("[STREAM %d] TURN server IP: %s", streamID, turnServerUDPAddr.IP)
-	var cfg *turn.ClientConfig
-	var turnConn net.PacketConn
-	var d net.Dialer
-	ctx1, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if turnParams.udp {
-		conn, err2 := net.DialUDP("udp", nil, turnServerUDPAddr) // nolint: noctx
-		if err2 != nil {
-			err = fmt.Errorf("failed to connect to TURN server: %s", err2)
-			return
-		}
-		defer func() {
-			if err1 = conn.Close(); err1 != nil {
-				err = fmt.Errorf("failed to close TURN server connection: %s", err1)
-				return
-			}
-		}()
-		turnConn = &netadapt.ConnectedUDPConn{UDPConn: conn}
-	} else {
-		conn, err2 := d.DialContext(ctx1, "tcp", turnServerAddr)
-		if err2 != nil {
-			err = fmt.Errorf("failed to connect to TURN server: %s", err2)
-			return
-		}
-		defer func() {
-			if err1 = conn.Close(); err1 != nil {
-				err = fmt.Errorf("failed to close TURN server connection: %s", err1)
-				return
-			}
-		}()
-		wrappedConn := &netadapt.SplitFirstWriteConn{Conn: conn, SplitAt: 6, Delay: 20 * time.Millisecond}
-		turnConn = turn.NewSTUNConn(wrappedConn)
-	}
-	var addrFamily turn.RequestedAddressFamily
-	if peer.IP.To4() != nil {
-		addrFamily = turn.RequestedAddressFamilyIPv4
-	} else {
-		addrFamily = turn.RequestedAddressFamilyIPv6
-	}
-
-	cfg = &turn.ClientConfig{
-		STUNServerAddr:         turnServerAddr,
-		TURNServerAddr:         turnServerAddr,
-		Conn:                   turnConn,
-		Net:                    netadapt.New(),
-		Username:               user,
-		Password:               pass,
-		RequestedAddressFamily: addrFamily,
-		LoggerFactory:          logging.NewDefaultLoggerFactory(),
-	}
-
-	client, err1 := turn.NewClient(cfg)
-	if err1 != nil {
-		err = fmt.Errorf("failed to create TURN client: %s", err1)
-		return
-	}
-	defer client.Close()
-
-	err1 = client.Listen()
-	if err1 != nil {
-		err = fmt.Errorf("failed to listen: %s", err1)
-		return
-	}
-
-	relayConn, err1 := client.Allocate()
+	stream, err1 := turnpipe.Open(ctx, turnpipe.Config{
+		HostOverride: turnParams.host,
+		PortOverride: turnParams.port,
+		UDP:          turnParams.udp,
+	}, peer, user, pass, urlTarget)
 	if err1 != nil {
 		if vkauth.IsAuthError(err1) {
 			vkAuth.HandleAuthError(streamID)
 		}
-		err = fmt.Errorf("failed to allocate: %s", err1)
+		err = err1
 		return
 	}
+	relayConn := stream.Relay
+	debugf("[STREAM %d] TURN server IP: %s", streamID, stream.ServerUDPAddr.IP)
 
 	// Reset error count on successful allocation
 	vkAuth.ResetErrors(streamID)
@@ -317,8 +210,8 @@ func oneTurnConnection(ctx context.Context, turnParams *turnParams, peer *net.UD
 	connectedStreams.Add(1)
 	defer func() {
 		connectedStreams.Add(-1)
-		if err1 := relayConn.Close(); err1 != nil {
-			err = fmt.Errorf("failed to close TURN allocated connection: %s", err1)
+		if cerr := stream.Close(); cerr != nil {
+			err = fmt.Errorf("failed to close TURN stream: %s", cerr)
 		}
 	}()
 
@@ -1192,87 +1085,22 @@ func createSmuxSession(ctx context.Context, tp *turnParams, peer *net.UDPAddr, i
 	if err != nil {
 		return nil, nil, fmt.Errorf("get TURN creds: %w", err)
 	}
-	urlhost, urlport, err := net.SplitHostPort(rawURL)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse TURN addr: %w", err)
-	}
-	if tp.host != "" {
-		urlhost = tp.host
-	}
-	if tp.port != "" {
-		urlport = tp.port
-	}
-	turnServerAddr := net.JoinHostPort(urlhost, urlport)
-	turnServerUDPAddr, err := net.ResolveUDPAddr("udp", turnServerAddr)
-	if err != nil {
-		return nil, nil, fmt.Errorf("resolve TURN addr: %w", err)
-	}
-	turnServerAddr = turnServerUDPAddr.String()
-	debugf("[session %d] TURN server IP: %s", id, turnServerUDPAddr.IP)
 
-	// 2. Connect to TURN server
-	var turnConn net.PacketConn
-	ctx1, cancel1 := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel1()
-	if tp.udp {
-		c, err1 := net.DialUDP("udp", nil, turnServerUDPAddr)
-		if err1 != nil {
-			return nil, nil, fmt.Errorf("dial TURN (udp): %w", err1)
-		}
-		cleanupFns = append(cleanupFns, func() { _ = c.Close() })
-		turnConn = &netadapt.ConnectedUDPConn{UDPConn: c}
-	} else {
-		var d net.Dialer
-		c, err1 := d.DialContext(ctx1, "tcp", turnServerAddr)
-		if err1 != nil {
-			return nil, nil, fmt.Errorf("dial TURN (tcp): %w", err1)
-		}
-		cleanupFns = append(cleanupFns, func() { _ = c.Close() })
-		wrappedC := &netadapt.SplitFirstWriteConn{Conn: c, SplitAt: 6, Delay: 20 * time.Millisecond}
-		turnConn = turn.NewSTUNConn(wrappedC)
-	}
-
-	// 3. Create TURN client and allocate relay
-	var addrFamily turn.RequestedAddressFamily
-	if peer.IP.To4() != nil {
-		addrFamily = turn.RequestedAddressFamilyIPv4
-	} else {
-		addrFamily = turn.RequestedAddressFamilyIPv6
-	}
-	cfg := &turn.ClientConfig{
-		STUNServerAddr:         turnServerAddr,
-		TURNServerAddr:         turnServerAddr,
-		Conn:                   turnConn,
-		Net:                    netadapt.New(),
-		Username:               user,
-		Password:               pass,
-		RequestedAddressFamily: addrFamily,
-		LoggerFactory:          logging.NewDefaultLoggerFactory(),
-	}
-	turnClient, err := turn.NewClient(cfg)
+	// 2-3. Dial TURN and allocate relay.
+	stream, err := turnpipe.Open(ctx, turnpipe.Config{
+		HostOverride: tp.host,
+		PortOverride: tp.port,
+		UDP:          tp.udp,
+	}, peer, user, pass, rawURL)
 	if err != nil {
-		cleanup()
-		return nil, nil, fmt.Errorf("create TURN client: %w", err)
+		return nil, nil, err
 	}
-	cleanupFns = append(cleanupFns, func() { turnClient.Close() })
-	if err = turnClient.Listen(); err != nil {
-		cleanup()
-		return nil, nil, fmt.Errorf("TURN listen: %w", err)
-	}
-	relayConn, err := turnClient.Allocate()
-	if err != nil {
-		cleanup()
-		return nil, nil, fmt.Errorf("TURN allocate: %w", err)
-	}
-	cleanupFns = append(cleanupFns, func() { _ = relayConn.Close() })
+	cleanupFns = append(cleanupFns, func() { _ = stream.Close() })
+	relayConn := stream.Relay
+	debugf("[session %d] TURN server IP: %s", id, stream.ServerUDPAddr.IP)
 	debugf("relayed-address=%s", relayConn.LocalAddr().String())
 
 	// 4. Establish DTLS over TURN relay
-	certificate, err := selfsign.GenerateSelfSigned()
-	if err != nil {
-		cleanup()
-		return nil, nil, fmt.Errorf("generate cert: %w", err)
-	}
 	var relayWC *wrap.Conn
 	if len(tp.wrapKey) == wrap.KeyLen {
 		relayWC, err = wrap.NewConn(tp.wrapKey, false)
@@ -1282,21 +1110,8 @@ func createSmuxSession(ctx context.Context, tp *turnParams, peer *net.UDPAddr, i
 		}
 	}
 	dtlsPC := &wrap.RelayPacketConn{Relay: relayConn, Peer: peer, Conn: relayWC}
-	dtlsConn, err := dtls.ClientWithOptions(dtlsPC, peer,
-		dtls.WithCertificates(certificate),
-		dtls.WithInsecureSkipVerify(true),
-		dtls.WithExtendedMasterSecret(dtls.RequireExtendedMasterSecret),
-		dtls.WithCipherSuites(dtls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256),
-		dtls.WithConnectionIDGenerator(dtls.OnlySendCIDGenerator()),
-	)
+	dtlsConn, err := vlessDtlsDialer.Dial(ctx, dtlsPC, peer)
 	if err != nil {
-		cleanup()
-		return nil, nil, fmt.Errorf("DTLS client create: %w", err)
-	}
-	ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel2()
-	if err = dtlsConn.HandshakeContext(ctx2); err != nil {
-		_ = dtlsConn.Close()
 		cleanup()
 		return nil, nil, fmt.Errorf("DTLS handshake: %w", err)
 	}
