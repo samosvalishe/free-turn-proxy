@@ -1,4 +1,4 @@
-package netadapt
+package netconn
 
 import (
 	"bytes"

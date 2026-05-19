@@ -1,9 +1,9 @@
-// Package udp implements the UDP-mode proxy loop: it terminates DTLS from a
+// Package udprelay implements the UDP-mode proxy loop: it terminates DTLS from a
 // local peer (WireGuard) and relays its packets through a per-stream TURN
 // allocation back to a remote peer. It owns oneDtlsConnection /
 // oneTurnConnection and their retry loops; wiring (flag parsing, listener,
 // inbound dispatch) stays in main.
-package udp
+package udprelay
 
 import (
 	"context"
@@ -16,11 +16,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/dtlsdial"
 	"github.com/cacggghp/vk-turn-proxy/internal/logx"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
-	"github.com/cacggghp/vk-turn-proxy/internal/turnpipe"
-	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
+	"github.com/cacggghp/vk-turn-proxy/internal/transport/dtlsdial"
+	"github.com/cacggghp/vk-turn-proxy/internal/transport/turndial"
+	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
 	"github.com/cbeuw/connutil"
 )
 
@@ -253,7 +253,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		err = fmt.Errorf("failed to get TURN credentials: %s", err1)
 		return
 	}
-	stream, err1 := turnpipe.Open(ctx, turnpipe.Config{
+	stream, err1 := turndial.Open(ctx, turndial.Config{
 		HostOverride: params.Host,
 		PortOverride: params.Port,
 		UDP:          params.UDP,
@@ -293,10 +293,10 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		}
 	})
 	var internalPipeAddr atomic.Value
-	var wc *wrap.Conn
-	if len(params.WrapKey) == wrap.KeyLen {
+	var wc *srtpmimicry.Conn
+	if len(params.WrapKey) == srtpmimicry.KeyLen {
 		var wcErr error
-		wc, wcErr = wrap.NewConn(params.WrapKey, false)
+		wc, wcErr = srtpmimicry.NewConn(params.WrapKey, false)
 		if wcErr != nil {
 			log.Printf("[STREAM %d] WRAP init failed: %v", streamID, wcErr)
 			turncancel()
@@ -309,7 +309,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		buf := make([]byte, 1600)
 		var wireBuf []byte
 		if wc != nil {
-			wireBuf = make([]byte, wrap.MaxWire(len(buf)))
+			wireBuf = make([]byte, srtpmimicry.MaxWire(len(buf)))
 		}
 		for {
 			if turnctx.Err() != nil {
@@ -347,7 +347,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		defer turncancel()
 		readBufLen := 1600
 		if wc != nil {
-			readBufLen = wrap.MaxWire(1600)
+			readBufLen = srtpmimicry.MaxWire(1600)
 		}
 		buf := make([]byte, readBufLen)
 		plain := make([]byte, 1600)

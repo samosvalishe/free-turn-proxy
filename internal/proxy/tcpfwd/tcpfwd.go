@@ -1,4 +1,4 @@
-package vless
+package tcpfwd
 
 import (
 	"context"
@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/dtlsdial"
-	"github.com/cacggghp/vk-turn-proxy/internal/ish"
+	"github.com/cacggghp/vk-turn-proxy/internal/client/ish"
 	"github.com/cacggghp/vk-turn-proxy/internal/logx"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
-	"github.com/cacggghp/vk-turn-proxy/internal/turnpipe"
-	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
-	"github.com/cacggghp/vk-turn-proxy/tcputil"
+	"github.com/cacggghp/vk-turn-proxy/internal/transport/dtlsdial"
+	"github.com/cacggghp/vk-turn-proxy/internal/transport/kcptun"
+	"github.com/cacggghp/vk-turn-proxy/internal/transport/turndial"
+	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
 	"github.com/xtaci/smux"
 )
 
@@ -237,7 +237,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 		return nil, nil, fmt.Errorf("get TURN creds: %w", err)
 	}
 
-	stream, err := turnpipe.Open(ctx, turnpipe.Config{
+	stream, err := turndial.Open(ctx, turndial.Config{
 		HostOverride: params.Host,
 		PortOverride: params.Port,
 		UDP:          params.UDP,
@@ -250,15 +250,15 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	deps.log().Debugf("[session %d] TURN server IP: %s", id, stream.ServerUDPAddr.IP)
 	deps.log().Debugf("relayed-address=%s", relayConn.LocalAddr().String())
 
-	var relayWC *wrap.Conn
-	if len(params.WrapKey) == wrap.KeyLen {
-		relayWC, err = wrap.NewConn(params.WrapKey, false)
+	var relayWC *srtpmimicry.Conn
+	if len(params.WrapKey) == srtpmimicry.KeyLen {
+		relayWC, err = srtpmimicry.NewConn(params.WrapKey, false)
 		if err != nil {
 			cleanup()
 			return nil, nil, fmt.Errorf("wrap init: %w", err)
 		}
 	}
-	dtlsPC := &wrap.RelayPacketConn{Relay: relayConn, Peer: peer, Conn: relayWC}
+	dtlsPC := &srtpmimicry.RelayPacketConn{Relay: relayConn, Peer: peer, Conn: relayWC}
 	dtlsConn, err := deps.DTLSDialer.Dial(ctx, dtlsPC, peer)
 	if err != nil {
 		cleanup()
@@ -272,7 +272,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	st := stats.New(deps.log().DebugEnabled())
 	go st.LogEvery(statsCtx, deps.log().Debugf, fmt.Sprintf("[session %d] VLESS", id), "to-turn", "from-turn")
 
-	kcpSess, err := tcputil.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, false)
+	kcpSess, err := kcptun.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, false)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("KCP session: %w", err)
@@ -280,7 +280,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	cleanupFns = append(cleanupFns, func() { _ = kcpSess.Close() })
 	deps.log().Debugf("KCP session established")
 
-	smuxSess, err := smux.Client(kcpSess, tcputil.DefaultSmuxConfig())
+	smuxSess, err := smux.Client(kcpSess, kcptun.DefaultSmuxConfig())
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("smux client: %w", err)

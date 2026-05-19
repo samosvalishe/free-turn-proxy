@@ -1,4 +1,4 @@
-package wrap
+package srtpmimicry
 
 import (
 	"bytes"

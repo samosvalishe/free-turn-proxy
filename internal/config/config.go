@@ -12,7 +12,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
+	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
 )
 
 // Mirrors of constants defined in internal/client/* packages, duplicated here
@@ -125,7 +125,7 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	if *vklink == "" {
 		return nil, errors.New("need vk-link")
 	}
-	key, err := wrap.DecodeKey(c.WrapMode, *wrapKeyHex)
+	key, err := srtpmimicry.DecodeKey(c.WrapMode, *wrapKeyHex)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +182,7 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 	if s.Connect == "" {
 		return nil, fmt.Errorf("server address is required")
 	}
-	key, err := wrap.DecodeKey(s.WrapMode, *wrapKeyHex)
+	key, err := srtpmimicry.DecodeKey(s.WrapMode, *wrapKeyHex)
 	if err != nil {
 		return nil, err
 	}

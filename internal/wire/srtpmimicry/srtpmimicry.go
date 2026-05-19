@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-// Package wrap implements an SRTP-mimicry AEAD framing used to bypass
+// Package srtpmimicry implements an SRTP-mimicry AEAD framing used to bypass
 // the VK TURN content filter.
+//
+// Purpose: obfuscation, not security. DTLS already provides confidentiality
+// and integrity on the inner channel. This layer exists to make traffic look
+// like SRTP so the VK content-filter does not drop it; it is not a defense
+// against an active adversary on its own.
 //
 // Wire format:
 //
@@ -20,7 +25,7 @@
 // AAD = first 24 bytes (RTP header || nonce).
 //
 // Wire format is frozen — bit-exact compatibility with deployed peers is required.
-package wrap
+package srtpmimicry
 
 import (
 	"crypto/cipher"

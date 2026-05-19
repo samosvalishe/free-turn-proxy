@@ -12,13 +12,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/bond"
-	bondserver "github.com/cacggghp/vk-turn-proxy/internal/bond/server"
 	"github.com/cacggghp/vk-turn-proxy/internal/config"
 	"github.com/cacggghp/vk-turn-proxy/internal/logx"
+	bondserver "github.com/cacggghp/vk-turn-proxy/internal/proxy/bondserver"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
-	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
-	"github.com/cacggghp/vk-turn-proxy/tcputil"
+	"github.com/cacggghp/vk-turn-proxy/internal/transport/kcptun"
+	"github.com/cacggghp/vk-turn-proxy/internal/wire/bondframe"
+	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
 	"github.com/pion/dtls/v3"
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
 	"github.com/xtaci/smux"
@@ -38,7 +38,7 @@ func main() {
 	globalBondRegistry = bondserver.NewRegistry(bondserver.Deps{Log: logger})
 
 	if cfg.GenWrapKey {
-		key, gerr := wrap.GenKeyHex()
+		key, gerr := srtpmimicry.GenKeyHex()
 		if gerr != nil {
 			log.Panicf("gen-wrap-key: %v", gerr)
 		}
@@ -83,7 +83,7 @@ func main() {
 	var listener net.Listener
 	if cfg.WrapMode {
 		log.Printf("WRAP mode enabled: listener only accepts clients with matching -wrap-key")
-		wrapListener, werr := wrap.Listen(addr, wrapKey)
+		wrapListener, werr := srtpmimicry.Listen(addr, wrapKey)
 		if werr != nil {
 			panic(werr)
 		}
@@ -277,7 +277,7 @@ func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr s
 		"from-client",
 	)
 
-	kcpSess, err := tcputil.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, true)
+	kcpSess, err := kcptun.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, true)
 	if err != nil {
 		log.Printf("KCP session error: %s", err)
 		return
@@ -290,7 +290,7 @@ func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr s
 	logger.Debugf("KCP session established (server)")
 
 	// 2. Create smux server session over KCP
-	smuxSess, err := smux.Server(kcpSess, tcputil.DefaultSmuxConfig())
+	smuxSess, err := smux.Server(kcpSess, kcptun.DefaultSmuxConfig())
 	if err != nil {
 		log.Printf("smux server error: %s", err)
 		return
@@ -325,7 +325,7 @@ func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr s
 				_ = s.Close()
 				return
 			}
-			if string(prefix[:]) == bond.Magic {
+			if string(prefix[:]) == bondframe.Magic {
 				logger.Debugf("auto-detected bond smux stream")
 				globalBondRegistry.HandleStreamAfterMagic(ctx, s, connectAddr, prefix)
 				return

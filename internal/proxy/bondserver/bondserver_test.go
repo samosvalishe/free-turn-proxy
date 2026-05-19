@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/bond"
+	"github.com/cacggghp/vk-turn-proxy/internal/wire/bondframe"
 )
 
 // fakeStream implements laneStream over an in-memory ring; reads block when
@@ -36,14 +36,14 @@ func (f *fakeStream) Write(p []byte) (int, error) {
 
 func (f *fakeStream) SetDeadline(time.Time) error { return nil }
 
-func (f *fakeStream) writtenFrames(t *testing.T) []bond.Frame {
+func (f *fakeStream) writtenFrames(t *testing.T) []bondframe.Frame {
 	t.Helper()
 	f.mu.Lock()
 	buf := bytes.NewReader(f.sink.Bytes())
 	f.mu.Unlock()
-	var out []bond.Frame
+	var out []bondframe.Frame
 	for {
-		fr, err := bond.ReadFrame(buf)
+		fr, err := bondframe.ReadFrame(buf)
 		if err != nil {
 			if err == io.EOF {
 				return out
@@ -66,7 +66,7 @@ func newTestConn(t *testing.T) *serverConn {
 		cancel: cancel,
 		done:   make(chan struct{}),
 		ready:  make(chan struct{}, 1),
-		recvCh: make(chan bond.Frame, 1024),
+		recvCh: make(chan bondframe.Frame, 1024),
 	}
 }
 
@@ -94,10 +94,10 @@ func TestCopyBondToBackendReorder(t *testing.T) {
 	}()
 
 	// out-of-order: seq 2, 0, FIN(3), 1
-	c.recvCh <- bond.Frame{Type: bond.FrameData, Seq: 2, Data: []byte("C")}
-	c.recvCh <- bond.Frame{Type: bond.FrameData, Seq: 0, Data: []byte("A")}
-	c.recvCh <- bond.Frame{Type: bond.FrameFIN, Seq: 3}
-	c.recvCh <- bond.Frame{Type: bond.FrameData, Seq: 1, Data: []byte("B")}
+	c.recvCh <- bondframe.Frame{Type: bondframe.FrameData, Seq: 2, Data: []byte("C")}
+	c.recvCh <- bondframe.Frame{Type: bondframe.FrameData, Seq: 0, Data: []byte("A")}
+	c.recvCh <- bondframe.Frame{Type: bondframe.FrameFIN, Seq: 3}
+	c.recvCh <- bondframe.Frame{Type: bondframe.FrameData, Seq: 1, Data: []byte("B")}
 
 	select {
 	case <-done:
@@ -140,10 +140,10 @@ func TestCopyBondToBackendPendingDrains(t *testing.T) {
 		if i == 0 {
 			continue
 		}
-		c.recvCh <- bond.Frame{Type: bond.FrameData, Seq: uint64(i), Data: []byte{byte(i)}}
+		c.recvCh <- bondframe.Frame{Type: bondframe.FrameData, Seq: uint64(i), Data: []byte{byte(i)}}
 	}
-	c.recvCh <- bond.Frame{Type: bond.FrameData, Seq: 0, Data: []byte{0}}
-	c.recvCh <- bond.Frame{Type: bond.FrameFIN, Seq: uint64(N)}
+	c.recvCh <- bondframe.Frame{Type: bondframe.FrameData, Seq: 0, Data: []byte{0}}
+	c.recvCh <- bondframe.Frame{Type: bondframe.FrameFIN, Seq: uint64(N)}
 
 	select {
 	case <-done:
@@ -172,7 +172,7 @@ func TestWriteToNextLaneRoundRobin(t *testing.T) {
 
 	var idx uint64
 	for seq := range 6 {
-		if err := c.writeToNextLane(bond.FrameData, uint64(seq), []byte{byte(seq)}, &idx); err != nil {
+		if err := c.writeToNextLane(bondframe.FrameData, uint64(seq), []byte{byte(seq)}, &idx); err != nil {
 			t.Fatalf("write seq %d: %v", seq, err)
 		}
 	}
@@ -205,7 +205,7 @@ func TestWriteToNextLaneChurn(t *testing.T) {
 
 	var idx uint64
 	for seq := range 4 {
-		if err := c.writeToNextLane(bond.FrameData, uint64(seq), []byte{byte(seq)}, &idx); err != nil {
+		if err := c.writeToNextLane(bondframe.FrameData, uint64(seq), []byte{byte(seq)}, &idx); err != nil {
 			t.Fatalf("seq %d: %v", seq, err)
 		}
 	}
@@ -236,7 +236,7 @@ func TestWriteToNextLaneAllFail(t *testing.T) {
 	c.lanes = []*serverLane{mk(0), mk(1)}
 
 	var idx uint64
-	err := c.writeToNextLane(bond.FrameData, 0, []byte("x"), &idx)
+	err := c.writeToNextLane(bondframe.FrameData, 0, []byte("x"), &idx)
 	if err == nil {
 		t.Fatal("expected error when all lanes fail")
 	}

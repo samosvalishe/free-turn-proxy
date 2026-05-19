@@ -1,8 +1,8 @@
-// Package netadapt holds small net.Conn / transport.Net adapters used by both
+// Package netconn holds small net.Conn / transport.Net adapters used by both
 // client and server: a passthrough transport.Net (for pion turn),
 // ConnectedUDPConn (Write-only WriteTo on a dialed UDPConn), and
 // SplitFirstWriteConn (DPI evasion via first-segment split).
-package netadapt
+package netconn
 
 import (
 	"context"

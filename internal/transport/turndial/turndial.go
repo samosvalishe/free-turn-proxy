@@ -1,11 +1,11 @@
-// Package turnpipe centralizes the TURN dial+allocate pipeline shared by
+// Package turndial centralizes the TURN dial+allocate pipeline shared by
 // the client UDP (oneTurnConnection) and VLESS (createSmuxSession) modes.
 //
 // One call to Open performs: parse target, apply host/port overrides,
 // resolve UDP addr, dial UDP-or-TCP (with SplitFirstWriteConn over TCP),
 // turn.NewClient, Listen, Allocate. Returns the relay PacketConn plus a
 // Close that tears down the allocation, TURN client, and underlying conn.
-package turnpipe
+package turndial
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/netadapt"
+	"github.com/cacggghp/vk-turn-proxy/internal/netconn"
 	"github.com/pion/logging"
 	"github.com/pion/turn/v5"
 )
@@ -86,7 +86,7 @@ func Open(ctx context.Context, cfg Config, peer *net.UDPAddr, user, pass, rawAdd
 		if derr != nil {
 			return nil, fmt.Errorf("dial TURN (udp): %w", derr)
 		}
-		turnConn = &netadapt.ConnectedUDPConn{UDPConn: c}
+		turnConn = &netconn.ConnectedUDPConn{UDPConn: c}
 		closeConn = c.Close
 	} else {
 		dctx, cancel := context.WithTimeout(ctx, dialTimeout)
@@ -96,7 +96,7 @@ func Open(ctx context.Context, cfg Config, peer *net.UDPAddr, user, pass, rawAdd
 		if derr != nil {
 			return nil, fmt.Errorf("dial TURN (tcp): %w", derr)
 		}
-		wrapped := &netadapt.SplitFirstWriteConn{Conn: c, SplitAt: 6, Delay: 20 * time.Millisecond}
+		wrapped := &netconn.SplitFirstWriteConn{Conn: c, SplitAt: 6, Delay: 20 * time.Millisecond}
 		turnConn = turn.NewSTUNConn(wrapped)
 		closeConn = c.Close
 	}
@@ -111,7 +111,7 @@ func Open(ctx context.Context, cfg Config, peer *net.UDPAddr, user, pass, rawAdd
 		STUNServerAddr:         turnServerAddr,
 		TURNServerAddr:         turnServerAddr,
 		Conn:                   turnConn,
-		Net:                    netadapt.New(),
+		Net:                    netconn.New(),
 		Username:               user,
 		Password:               pass,
 		RequestedAddressFamily: addrFamily,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-package wrap
+package srtpmimicry
 
 import (
 	"net"

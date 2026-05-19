@@ -15,17 +15,17 @@ import (
 	"syscall"
 	"time"
 
-	bondclient "github.com/cacggghp/vk-turn-proxy/internal/bond/client"
 	"github.com/cacggghp/vk-turn-proxy/internal/client/captcha"
 	manualcaptcha "github.com/cacggghp/vk-turn-proxy/internal/client/captcha/manual"
 	"github.com/cacggghp/vk-turn-proxy/internal/client/dnsdial"
 	"github.com/cacggghp/vk-turn-proxy/internal/client/vkauth"
 	"github.com/cacggghp/vk-turn-proxy/internal/config"
-	"github.com/cacggghp/vk-turn-proxy/internal/dtlsdial"
 	"github.com/cacggghp/vk-turn-proxy/internal/logx"
-	udpproxy "github.com/cacggghp/vk-turn-proxy/internal/proxy/udp"
-	"github.com/cacggghp/vk-turn-proxy/internal/proxy/vless"
-	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
+	bondclient "github.com/cacggghp/vk-turn-proxy/internal/proxy/bondclient"
+	"github.com/cacggghp/vk-turn-proxy/internal/proxy/tcpfwd"
+	"github.com/cacggghp/vk-turn-proxy/internal/proxy/udprelay"
+	"github.com/cacggghp/vk-turn-proxy/internal/transport/dtlsdial"
+	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
 )
 
 type getCredsFunc func(ctx context.Context, link string, streamID int) (string, string, string, error)
@@ -97,7 +97,7 @@ func main() {
 	appDialer = dnsdial.AppDialer(cfg.DNSMode)
 	dnsdial.InstallGlobalResolver(cfg.DNSMode)
 	if cfg.GenWrapKey {
-		key, gerr := wrap.GenKeyHex()
+		key, gerr := srtpmimicry.GenKeyHex()
 		if gerr != nil {
 			log.Panicf("%v", gerr)
 		}
@@ -137,20 +137,20 @@ func main() {
 
 	if cfg.VLESSMode {
 		bondH := &bondclient.Handler{Deps: bondclient.Deps{Log: logger}}
-		vlessDeps := &vless.Deps{
+		vlessDeps := &tcpfwd.Deps{
 			DTLSDialer:  vlessDtlsDialer,
 			Log:         logger,
 			BondHandler: bondH.Handle,
 		}
-		vlessParams := &vless.Params{
+		vlessParams := &tcpfwd.Params{
 			Host:     params.host,
 			Port:     params.port,
 			Link:     params.link,
 			UDP:      params.udp,
 			WrapKey:  params.wrapKey,
-			GetCreds: vless.GetCredsFunc(params.getCreds),
+			GetCreds: tcpfwd.GetCredsFunc(params.getCreds),
 		}
-		vless.Run(ctx, vlessDeps, vlessParams, peer, cfg.Listen, cfg.N, cfg.VLESSBond)
+		tcpfwd.Run(ctx, vlessDeps, vlessParams, peer, cfg.Listen, cfg.N, cfg.VLESSBond)
 		return
 	}
 
@@ -170,7 +170,7 @@ func main() {
 	}
 
 	// Shared Worker Pool Queue for Aggregation
-	inboundChan := make(chan *udpproxy.Packet, 2000)
+	inboundChan := make(chan *udprelay.Packet, 2000)
 
 	go func() {
 		// Pointer-cache for the last seen local peer addr. Avoids the
@@ -182,8 +182,8 @@ func main() {
 		var lastAddr net.Addr
 		var lastAddrStr string
 		for {
-			pktIface := udpproxy.Pool.Get()
-			pkt, ok := pktIface.(*udpproxy.Packet)
+			pktIface := udprelay.Pool.Get()
+			pkt, ok := pktIface.(*udprelay.Packet)
 			if !ok {
 				log.Printf("packetPool returned unexpected type: %T", pktIface)
 				continue
@@ -208,7 +208,7 @@ func main() {
 			case inboundChan <- pkt:
 			default:
 				// Drop the packet only if the global queue is completely full
-				udpproxy.Pool.Put(pkt)
+				udprelay.Pool.Put(pkt)
 			}
 		}
 	}()
@@ -216,7 +216,7 @@ func main() {
 	wg1 := sync.WaitGroup{}
 	t := time.Tick(200 * time.Millisecond)
 
-	udpDeps := &udpproxy.Deps{
+	udpDeps := &udprelay.Deps{
 		DTLSDialer:       udpDtlsDialer,
 		Auth:             vkAuth,
 		Log:              logger,
@@ -224,22 +224,22 @@ func main() {
 		ConnectedStreams: &connectedStreams,
 		AppCancel:        cancel,
 	}
-	udpParams := &udpproxy.Params{
+	udpParams := &udprelay.Params{
 		Host:     params.host,
 		Port:     params.port,
 		Link:     params.link,
 		UDP:      params.udp,
 		WrapKey:  params.wrapKey,
-		GetCreds: udpproxy.GetCredsFunc(params.getCreds),
+		GetCreds: udprelay.GetCredsFunc(params.getCreds),
 	}
 
 	okchan := make(chan struct{})
 	connchan := make(chan net.PacketConn)
 	wg1.Go(func() {
-		udpproxy.DTLSLoop(ctx, udpDeps, peer, listenConn, inboundChan, connchan, okchan, 1)
+		udprelay.DTLSLoop(ctx, udpDeps, peer, listenConn, inboundChan, connchan, okchan, 1)
 	})
 	wg1.Go(func() {
-		udpproxy.TURNLoop(ctx, udpDeps, udpParams, peer, connchan, t, 1)
+		udprelay.TURNLoop(ctx, udpDeps, udpParams, peer, connchan, t, 1)
 	})
 
 	select {
@@ -251,10 +251,10 @@ func main() {
 		cchan := make(chan net.PacketConn)
 		streamID := i
 		wg1.Go(func() {
-			udpproxy.DTLSLoop(ctx, udpDeps, peer, listenConn, inboundChan, cchan, nil, streamID)
+			udprelay.DTLSLoop(ctx, udpDeps, peer, listenConn, inboundChan, cchan, nil, streamID)
 		})
 		wg1.Go(func() {
-			udpproxy.TURNLoop(ctx, udpDeps, udpParams, peer, cchan, t, streamID)
+			udprelay.TURNLoop(ctx, udpDeps, udpParams, peer, cchan, t, streamID)
 		})
 	}
 

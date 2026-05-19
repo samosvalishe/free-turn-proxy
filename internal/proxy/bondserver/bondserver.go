@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/bond"
 	"github.com/cacggghp/vk-turn-proxy/internal/logx"
+	"github.com/cacggghp/vk-turn-proxy/internal/wire/bondframe"
 	"github.com/xtaci/smux"
 )
 
@@ -56,12 +56,12 @@ func NewRegistry(deps Deps) *Registry {
 // already been consumed (server-side multiplex pre-peek), reads the Hello,
 // attaches as a lane, and blocks until the underlying bond connection is done.
 func (r *Registry) HandleStreamAfterMagic(ctx context.Context, stream *smux.Stream, connectAddr string, magic [4]byte) {
-	r.handleStream(ctx, stream, connectAddr, func(rd io.Reader) (bond.Hello, error) {
-		return bond.ReadHelloAfterMagic(rd, magic)
+	r.handleStream(ctx, stream, connectAddr, func(rd io.Reader) (bondframe.Hello, error) {
+		return bondframe.ReadHelloAfterMagic(rd, magic)
 	})
 }
 
-func (r *Registry) handleStream(ctx context.Context, stream *smux.Stream, connectAddr string, readHello func(io.Reader) (bond.Hello, error)) {
+func (r *Registry) handleStream(ctx context.Context, stream *smux.Stream, connectAddr string, readHello func(io.Reader) (bondframe.Hello, error)) {
 	defer func() {
 		if err := stream.Close(); err != nil && err != smux.ErrGoAway {
 			log.Printf("failed to close bond smux stream: %v", err)
@@ -101,7 +101,7 @@ func (r *Registry) get(ctx context.Context, id uint64, connectAddr string) *serv
 		cancel:      cancel,
 		done:        make(chan struct{}),
 		ready:       make(chan struct{}, 1),
-		recvCh:      make(chan bond.Frame, 1024),
+		recvCh:      make(chan bondframe.Frame, 1024),
 	}
 	r.conns[id] = c
 	go func() {
@@ -134,7 +134,7 @@ type serverConn struct {
 	want    uint16
 	ready   chan struct{}
 
-	recvCh chan bond.Frame
+	recvCh chan bondframe.Frame
 	once   sync.Once
 }
 
@@ -179,7 +179,7 @@ func (c *serverConn) removeLane(l *serverLane) int {
 }
 
 func (c *serverConn) waitForInitialLanes() {
-	timer := time.NewTimer(bond.LaneAttachTimeout)
+	timer := time.NewTimer(bondframe.LaneAttachTimeout)
 	defer timer.Stop()
 	for {
 		c.lanesMu.RLock()
@@ -202,7 +202,7 @@ func (c *serverConn) waitForInitialLanes() {
 
 func (c *serverConn) readLane(l *serverLane) {
 	for {
-		f, err := bond.ReadFrame(l.stream)
+		f, err := bondframe.ReadFrame(l.stream)
 		if err != nil {
 			left := c.removeLane(l)
 			select {
@@ -272,7 +272,7 @@ func (c *serverConn) copyBondToBackend(backendConn net.Conn) {
 
 	for {
 		if finSeq != nil && expect == *finSeq {
-			bond.CloseWrite(backendConn, c.deps.log().Debugf)
+			bondframe.CloseWrite(backendConn, c.deps.log().Debugf)
 			c.deps.log().Debugf("[bond %d] upload to backend finished chunks=%d", c.id, expect)
 			return
 		}
@@ -282,9 +282,9 @@ func (c *serverConn) copyBondToBackend(backendConn net.Conn) {
 			return
 		case f := <-c.recvCh:
 			switch f.Type {
-			case bond.FrameData:
+			case bondframe.FrameData:
 				pending[f.Seq] = f.Data
-			case bond.FrameFIN:
+			case bondframe.FrameFIN:
 				v := f.Seq
 				if finSeq == nil || v < *finSeq {
 					finSeq = &v
@@ -313,7 +313,7 @@ func (c *serverConn) copyBondToBackend(backendConn net.Conn) {
 }
 
 func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
-	buf := make([]byte, bond.MaxChunk)
+	buf := make([]byte, bondframe.MaxChunk)
 	var seq uint64
 	var laneIdx uint64
 	for {
@@ -321,7 +321,7 @@ func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
 		if n > 0 {
 			data := make([]byte, n)
 			copy(data, buf[:n])
-			if writeErr := c.writeToNextLane(bond.FrameData, seq, data, &laneIdx); writeErr != nil {
+			if writeErr := c.writeToNextLane(bondframe.FrameData, seq, data, &laneIdx); writeErr != nil {
 				log.Printf("[bond %d] lane write data error: %v", c.id, writeErr)
 				return
 			}
@@ -331,7 +331,7 @@ func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
 			lanes := c.snapshotLanes()
 			for _, lane := range lanes {
 				lane.mu.Lock()
-				writeErr := bond.WriteFrame(lane.stream, bond.FrameFIN, seq, nil)
+				writeErr := bondframe.WriteFrame(lane.stream, bondframe.FrameFIN, seq, nil)
 				lane.mu.Unlock()
 				if writeErr != nil && c.ctx.Err() == nil {
 					log.Printf("[bond %d] lane %d write FIN error: %v", c.id, lane.index, writeErr)
@@ -355,7 +355,7 @@ func (c *serverConn) writeToNextLane(typ byte, seq uint64, data []byte, laneIdx 
 			lane := lanes[*laneIdx%uint64(len(lanes))]
 			*laneIdx++
 			lane.mu.Lock()
-			err := bond.WriteFrame(lane.stream, typ, seq, data)
+			err := bondframe.WriteFrame(lane.stream, typ, seq, data)
 			lane.mu.Unlock()
 			if err == nil {
 				return nil

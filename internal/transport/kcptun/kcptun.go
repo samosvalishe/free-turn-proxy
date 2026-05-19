@@ -1,14 +1,24 @@
-package tcputil
+package kcptun
 
 import (
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/xtaci/kcp-go/v5"
 	"github.com/xtaci/smux"
+)
+
+var (
+	kcpProfileOnce   sync.Once
+	cachedKCPProfile kcpProfile
+
+	fecOnce         sync.Once
+	cachedFECData   int
+	cachedFECParity int
 )
 
 type kcpProfile struct {
@@ -23,6 +33,13 @@ type kcpProfile struct {
 }
 
 func selectedKCPProfile() kcpProfile {
+	kcpProfileOnce.Do(func() {
+		cachedKCPProfile = loadKCPProfile()
+	})
+	return cachedKCPProfile
+}
+
+func loadKCPProfile() kcpProfile {
 	profile := strings.ToLower(strings.TrimSpace(os.Getenv("VK_TURN_KCP_PROFILE")))
 	var cfg kcpProfile
 	switch profile {
@@ -98,6 +115,13 @@ func envInt(name string, fallback int) int {
 // selectedFEC parses VK_TURN_KCP_FEC as "data:parity" (e.g. "10:3").
 // Returns 0,0 if unset/invalid (FEC disabled). Both sides must match.
 func selectedFEC() (dataShards, parityShards int) {
+	fecOnce.Do(func() {
+		cachedFECData, cachedFECParity = loadFEC()
+	})
+	return cachedFECData, cachedFECParity
+}
+
+func loadFEC() (dataShards, parityShards int) {
 	raw := strings.TrimSpace(os.Getenv("VK_TURN_KCP_FEC"))
 	if raw == "" {
 		return 0, 0

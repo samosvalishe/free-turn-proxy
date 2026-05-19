@@ -1,4 +1,4 @@
-package turnpipe
+package turndial
 
 import (
 	"context"

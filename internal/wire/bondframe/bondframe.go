@@ -1,7 +1,7 @@
 // Package bond contains the wire format used by the VLESS bond multi-lane
 // transport (hello + framed data/FIN). Both the client (initiator) and the
 // server (acceptor) speak the same encoding.
-package bond
+package bondframe
 
 import (
 	"encoding/binary"

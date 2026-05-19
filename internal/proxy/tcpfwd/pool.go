@@ -1,10 +1,10 @@
-// Package vless implements VLESS mode: TCP forwarding over a pool of TURN-tunneled
+// Package tcpfwd implements VLESS mode: TCP forwarding over a pool of TURN-tunneled
 // smux sessions. Each accepted local TCP connection is opened as a smux stream
 // (round-robin across sessions) or, with bond, striped across all live sessions.
 //
 // The package exposes SessionPool/PooledSession so that the bond client half
 // (still living in main during refactor stage 4.2) can operate on them.
-package vless
+package tcpfwd
 
 import (
 	"sync"

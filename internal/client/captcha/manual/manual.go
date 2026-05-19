@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/client/browserprofile"
-	"github.com/cacggghp/vk-turn-proxy/internal/ish"
+	"github.com/cacggghp/vk-turn-proxy/internal/client/ish"
 )
 
 // Debug toggles verbose request/response logging for the proxied browser

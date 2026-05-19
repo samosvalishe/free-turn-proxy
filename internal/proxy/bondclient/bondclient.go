@@ -1,6 +1,6 @@
 // Package bondclient implements the client side of the bonded VLESS lane:
 // a single accepted TCP connection striped (round-robin) across all currently
-// live smux sessions in a vless.SessionPool. Frame wire-format lives in
+// live smux sessions in a tcpfwd.SessionPool. Frame wire-format lives in
 // internal/bond; this package wires the local TCP <-> lanes copy loops.
 package bondclient
 
@@ -16,10 +16,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/bond"
 	"github.com/cacggghp/vk-turn-proxy/internal/logx"
-	"github.com/cacggghp/vk-turn-proxy/internal/proxy/vless"
+	"github.com/cacggghp/vk-turn-proxy/internal/proxy/tcpfwd"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
+	"github.com/cacggghp/vk-turn-proxy/internal/wire/bondframe"
 	"github.com/xtaci/smux"
 )
 
@@ -35,22 +35,22 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-// Handler binds Deps and exposes Handle, matching the vless.BondHandler signature.
+// Handler binds Deps and exposes Handle, matching the tcpfwd.BondHandler signature.
 type Handler struct {
 	Deps Deps
 }
 
 // lane is one striped smux stream within a bonded TCP connection.
 type lane struct {
-	ps     *vless.PooledSession
+	ps     *tcpfwd.PooledSession
 	stream *smux.Stream
 	mu     sync.Mutex
 	dead   atomic.Bool
 }
 
 // Handle stripes the local TCP connection across all live candidate sessions.
-// Signature matches vless.BondHandler.
-func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, candidates []*vless.PooledSession) {
+// Signature matches tcpfwd.BondHandler.
+func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, candidates []*tcpfwd.PooledSession) {
 	defer func() { _ = tcpConn.Close() }()
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -67,7 +67,7 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 			log.Printf("[bond %d] session %d open stream error: %s", connID, ps.ID, err)
 			continue
 		}
-		if err := bond.WriteHello(stream, connID, uint16(i), uint16(len(candidates))); err != nil {
+		if err := bondframe.WriteHello(stream, connID, uint16(i), uint16(len(candidates))); err != nil {
 			log.Printf("[bond %d] session %d hello error: %s", connID, ps.ID, err)
 			_ = stream.Close()
 			continue
@@ -106,12 +106,12 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 		}
 	}()
 
-	recvCh := make(chan bond.Frame, 1024)
+	recvCh := make(chan bondframe.Frame, 1024)
 	var readWG sync.WaitGroup
 	for _, l := range lanes {
 		readWG.Go(func() {
 			for {
-				f, err := bond.ReadFrame(l.stream)
+				f, err := bondframe.ReadFrame(l.stream)
 				if err != nil {
 					l.dead.Store(true)
 					select {
@@ -123,7 +123,7 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 					}
 					return
 				}
-				if f.Type == bond.FrameData {
+				if f.Type == bondframe.FrameData {
 					l.ps.FromSession.Add(uint64(len(f.Data)))
 				}
 				select {
@@ -151,13 +151,13 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 }
 
 func (h *Handler) copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.Conn, lanes []*lane) {
-	buf := make([]byte, bond.MaxChunk)
+	buf := make([]byte, bondframe.MaxChunk)
 	var seq uint64
 	var laneIdx uint64
 	for {
 		n, err := tcpConn.Read(buf)
 		if n > 0 {
-			l, writeErr := writeBondFrameToNextLane(ctx, lanes, bond.FrameData, seq, buf[:n], &laneIdx)
+			l, writeErr := writeBondFrameToNextLane(ctx, lanes, bondframe.FrameData, seq, buf[:n], &laneIdx)
 			if writeErr != nil {
 				log.Printf("[bond %d] write data error: %v", connID, writeErr)
 				return
@@ -174,7 +174,7 @@ func (h *Handler) copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.
 					continue
 				}
 				l.mu.Lock()
-				writeErr := bond.WriteFrame(l.stream, bond.FrameFIN, seq, nil)
+				writeErr := bondframe.WriteFrame(l.stream, bondframe.FrameFIN, seq, nil)
 				l.mu.Unlock()
 				if writeErr != nil && ctx.Err() == nil {
 					log.Printf("[bond %d] session %d write FIN error: %v", connID, l.ps.ID, writeErr)
@@ -200,7 +200,7 @@ func writeBondFrameToNextLane(ctx context.Context, lanes []*lane, typ byte, seq 
 			continue
 		}
 		l.mu.Lock()
-		err := bond.WriteFrame(l.stream, typ, seq, data)
+		err := bondframe.WriteFrame(l.stream, typ, seq, data)
 		l.mu.Unlock()
 		if err == nil {
 			return l, nil
@@ -216,14 +216,14 @@ func writeBondFrameToNextLane(ctx context.Context, lanes []*lane, typ byte, seq 
 	return nil, fmt.Errorf("no live bond lanes")
 }
 
-func (h *Handler) copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.Conn, recvCh <-chan bond.Frame) {
+func (h *Handler) copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.Conn, recvCh <-chan bondframe.Frame) {
 	pending := make(map[uint64][]byte)
 	var expect uint64
 	var finSeq *uint64
 
 	for {
 		if finSeq != nil && expect == *finSeq {
-			bond.CloseWrite(tcpConn, h.Deps.log().Debugf)
+			bondframe.CloseWrite(tcpConn, h.Deps.log().Debugf)
 			h.Deps.log().Debugf("[bond %d] download finished chunks=%d", connID, expect)
 			return
 		}
@@ -236,13 +236,13 @@ func (h *Handler) copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.
 				return
 			}
 			switch f.Type {
-			case bond.FrameData:
+			case bondframe.FrameData:
 				if len(pending) >= 1024 {
 					log.Printf("[bond %d] pending map overflow (>1024), closing", connID)
 					return
 				}
 				pending[f.Seq] = f.Data
-			case bond.FrameFIN:
+			case bondframe.FrameFIN:
 				v := f.Seq
 				if finSeq == nil || v < *finSeq {
 					finSeq = &v
