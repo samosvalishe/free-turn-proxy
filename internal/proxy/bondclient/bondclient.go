@@ -8,7 +8,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strconv"
 	"strings"
@@ -64,11 +63,11 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 		}
 		stream, err := ps.Sess.OpenStream()
 		if err != nil {
-			log.Printf("[bond %d] session %d open stream error: %s", connID, ps.ID, err)
+			h.Deps.log().Errorf("[bond %d] session %d open stream error: %s", connID, ps.ID, err)
 			continue
 		}
 		if err := bondframe.WriteHello(stream, connID, uint16(i), uint16(len(candidates))); err != nil {
-			log.Printf("[bond %d] session %d hello error: %s", connID, ps.ID, err)
+			h.Deps.log().Errorf("[bond %d] session %d hello error: %s", connID, ps.ID, err)
 			_ = stream.Close()
 			continue
 		}
@@ -79,7 +78,7 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 	}
 
 	if len(lanes) == 0 {
-		log.Printf("[bond %d] no usable lanes, rejecting TCP from %s", connID, tcpConn.RemoteAddr())
+		h.Deps.log().Errorf("[bond %d] no usable lanes, rejecting TCP from %s", connID, tcpConn.RemoteAddr())
 		return
 	}
 	context.AfterFunc(ctx, func() {
@@ -159,7 +158,7 @@ func (h *Handler) copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.
 		if n > 0 {
 			l, writeErr := writeBondFrameToNextLane(ctx, lanes, bondframe.FrameData, seq, buf[:n], &laneIdx)
 			if writeErr != nil {
-				log.Printf("[bond %d] write data error: %v", connID, writeErr)
+				h.Deps.log().Errorf("[bond %d] write data error: %v", connID, writeErr)
 				return
 			}
 			l.ps.ToSession.Add(uint64(n))
@@ -177,7 +176,7 @@ func (h *Handler) copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.
 				writeErr := bondframe.WriteFrame(l.stream, bondframe.FrameFIN, seq, nil)
 				l.mu.Unlock()
 				if writeErr != nil && ctx.Err() == nil {
-					log.Printf("[bond %d] session %d write FIN error: %v", connID, l.ps.ID, writeErr)
+					h.Deps.log().Errorf("[bond %d] session %d write FIN error: %v", connID, l.ps.ID, writeErr)
 				}
 			}
 			h.Deps.log().Debugf("[bond %d] upload finished chunks=%d", connID, seq)
@@ -238,7 +237,7 @@ func (h *Handler) copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.
 			switch f.Type {
 			case bondframe.FrameData:
 				if len(pending) >= 1024 {
-					log.Printf("[bond %d] pending map overflow (>1024), closing", connID)
+					h.Deps.log().Errorf("[bond %d] pending map overflow (>1024), closing", connID)
 					return
 				}
 				pending[f.Seq] = f.Data
@@ -248,7 +247,7 @@ func (h *Handler) copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.
 					finSeq = &v
 				}
 			default:
-				log.Printf("[bond %d] unknown frame type %d", connID, f.Type)
+				h.Deps.log().Errorf("[bond %d] unknown frame type %d", connID, f.Type)
 				return
 			}
 
@@ -260,7 +259,7 @@ func (h *Handler) copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.
 				delete(pending, expect)
 				if len(data) > 0 {
 					if _, err := tcpConn.Write(data); err != nil {
-						log.Printf("[bond %d] local TCP write error: %v", connID, err)
+						h.Deps.log().Errorf("[bond %d] local TCP write error: %v", connID, err)
 						return
 					}
 				}

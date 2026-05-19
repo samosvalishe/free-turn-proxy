@@ -7,7 +7,6 @@ package tcpfwdserver
 import (
 	"context"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -37,24 +36,24 @@ func Handle(ctx context.Context, logger logx.Logger, registry *bondserver.Regist
 
 	kcpSess, err := kcptun.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, true)
 	if err != nil {
-		log.Printf("KCP session error: %s", err)
+		logger.Errorf("tcpfwdserver: KCP session: %s", err)
 		return
 	}
 	defer func() {
 		if closeErr := kcpSess.Close(); closeErr != nil {
-			log.Printf("failed to close KCP session: %v", closeErr)
+			logger.Errorf("tcpfwdserver: close KCP session: %v", closeErr)
 		}
 	}()
 	logger.Debugf("KCP session established (server)")
 
 	smuxSess, err := smux.Server(kcpSess, kcptun.DefaultSmuxConfig())
 	if err != nil {
-		log.Printf("smux server error: %s", err)
+		logger.Errorf("tcpfwdserver: smux server: %s", err)
 		return
 	}
 	defer func() {
 		if err := smuxSess.Close(); err != nil {
-			log.Printf("failed to close smux session: %v", err)
+			logger.Errorf("tcpfwdserver: close smux session: %v", err)
 		}
 	}()
 	logger.Debugf("smux session established (server)")
@@ -66,7 +65,7 @@ func Handle(ctx context.Context, logger logx.Logger, registry *bondserver.Regist
 			select {
 			case <-ctx.Done():
 			default:
-				log.Printf("smux accept error: %s", err)
+				logger.Errorf("tcpfwdserver: smux accept: %s", err)
 			}
 			break
 		}
@@ -83,7 +82,7 @@ func handleStream(ctx context.Context, logger logx.Logger, registry *bondserver.
 	var prefix [4]byte
 	if _, err := io.ReadFull(s, prefix[:]); err != nil {
 		if err != io.EOF && err != io.ErrUnexpectedEOF {
-			log.Printf("smux stream prefix read error: %v", err)
+			logger.Errorf("tcpfwdserver: smux stream prefix read: %v", err)
 		}
 		_ = s.Close()
 		return
@@ -96,18 +95,18 @@ func handleStream(ctx context.Context, logger logx.Logger, registry *bondserver.
 
 	defer func() {
 		if err := s.Close(); err != nil && err != smux.ErrGoAway {
-			log.Printf("failed to close smux stream: %v", err)
+			logger.Errorf("tcpfwdserver: close smux stream: %v", err)
 		}
 	}()
 
 	backendConn, err := net.DialTimeout("tcp", connectAddr, 10*time.Second)
 	if err != nil {
-		log.Printf("backend dial error: %s", err)
+		logger.Errorf("tcpfwdserver: backend dial: %s", err)
 		return
 	}
 	defer func() {
 		if err := backendConn.Close(); err != nil {
-			log.Printf("failed to close backend connection: %v", err)
+			logger.Errorf("tcpfwdserver: close backend connection: %v", err)
 		}
 	}()
 

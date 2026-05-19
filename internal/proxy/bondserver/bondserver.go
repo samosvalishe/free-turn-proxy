@@ -7,7 +7,6 @@ package bondserver
 import (
 	"context"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -64,13 +63,13 @@ func (r *Registry) HandleStreamAfterMagic(ctx context.Context, stream *smux.Stre
 func (r *Registry) handleStream(ctx context.Context, stream *smux.Stream, connectAddr string, readHello func(io.Reader) (bondframe.Hello, error)) {
 	defer func() {
 		if err := stream.Close(); err != nil && err != smux.ErrGoAway {
-			log.Printf("failed to close bond smux stream: %v", err)
+			r.deps.log().Errorf("bondserver: close smux stream: %v", err)
 		}
 	}()
 
 	hello, err := readHello(stream)
 	if err != nil {
-		log.Printf("bond hello error: %v", err)
+		r.deps.log().Errorf("bondserver: bond hello: %v", err)
 		return
 	}
 
@@ -233,22 +232,22 @@ func (c *serverConn) run() {
 
 	backendConn, err := net.DialTimeout("tcp", c.connectAddr, 10*time.Second)
 	if err != nil {
-		log.Printf("[bond %d] backend dial error: %s", c.id, err)
+		c.deps.log().Errorf("[bond %d] backend dial: %s", c.id, err)
 		return
 	}
 	defer func() {
 		if err := backendConn.Close(); err != nil {
-			log.Printf("[bond %d] failed to close backend connection: %v", c.id, err)
+			c.deps.log().Errorf("[bond %d] close backend connection: %v", c.id, err)
 		}
 	}()
 	context.AfterFunc(c.ctx, func() {
 		now := time.Now()
 		if err := backendConn.SetDeadline(now); err != nil {
-			log.Printf("[bond %d] backend deadline error: %v", c.id, err)
+			c.deps.log().Errorf("[bond %d] backend deadline: %v", c.id, err)
 		}
 		for _, lane := range c.snapshotLanes() {
 			if err := lane.stream.SetDeadline(now); err != nil {
-				log.Printf("[bond %d] lane %d deadline error: %v", c.id, lane.index, err)
+				c.deps.log().Errorf("[bond %d] lane %d deadline: %v", c.id, lane.index, err)
 			}
 		}
 	})
@@ -287,7 +286,7 @@ func (c *serverConn) copyBondToBackend(backendConn net.Conn) {
 				// that emits seq with permanent gaps cannot exhaust memory.
 				// Matches bondclient.copyBondToTCP.
 				if len(pending) >= 1024 {
-					log.Printf("[bond %d] pending map overflow (>1024), closing", c.id)
+					c.deps.log().Errorf("[bond %d] pending map overflow (>1024), closing", c.id)
 					return
 				}
 				pending[f.Seq] = f.Data
@@ -297,7 +296,7 @@ func (c *serverConn) copyBondToBackend(backendConn net.Conn) {
 					finSeq = &v
 				}
 			default:
-				log.Printf("[bond %d] unknown frame type %d", c.id, f.Type)
+				c.deps.log().Errorf("[bond %d] unknown frame type %d", c.id, f.Type)
 				return
 			}
 
@@ -309,7 +308,7 @@ func (c *serverConn) copyBondToBackend(backendConn net.Conn) {
 				delete(pending, expect)
 				if len(data) > 0 {
 					if _, err := backendConn.Write(data); err != nil {
-						log.Printf("[bond %d] backend write error: %v", c.id, err)
+						c.deps.log().Errorf("[bond %d] backend write error: %v", c.id, err)
 						return
 					}
 				}
@@ -329,7 +328,7 @@ func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
 			data := make([]byte, n)
 			copy(data, buf[:n])
 			if writeErr := c.writeToNextLane(bondframe.FrameData, seq, data, &laneIdx); writeErr != nil {
-				log.Printf("[bond %d] lane write data error: %v", c.id, writeErr)
+				c.deps.log().Errorf("[bond %d] lane write data error: %v", c.id, writeErr)
 				return
 			}
 			seq++
@@ -341,7 +340,7 @@ func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
 				writeErr := bondframe.WriteFrame(lane.stream, bondframe.FrameFIN, seq, nil)
 				lane.mu.Unlock()
 				if writeErr != nil && c.ctx.Err() == nil {
-					log.Printf("[bond %d] lane %d write FIN error: %v", c.id, lane.index, writeErr)
+					c.deps.log().Errorf("[bond %d] lane %d write FIN error: %v", c.id, lane.index, writeErr)
 				}
 			}
 			c.deps.log().Debugf("[bond %d] download from backend finished chunks=%d", c.id, seq)
@@ -368,7 +367,7 @@ func (c *serverConn) writeToNextLane(typ byte, seq uint64, data []byte, laneIdx 
 				return nil
 			}
 			left := c.removeLane(lane)
-			log.Printf("[bond %d] lane %d write error: %v (lanes=%d)", c.id, lane.index, err, left)
+			c.deps.log().Errorf("[bond %d] lane %d write error: %v (lanes=%d)", c.id, lane.index, err, left)
 			if left == 0 {
 				return err
 			}

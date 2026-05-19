@@ -91,7 +91,7 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	}
 	context.AfterFunc(ctx, func() {
 		if closeErr := listenConn.Close(); closeErr != nil {
-			log.Printf("Failed to close local connection: %s", closeErr)
+			logger.Errorf("udprelay: close local connection: %s", closeErr)
 		}
 	})
 
@@ -240,7 +240,7 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 
 			if err := <-c; err != nil {
 				if errors.Is(err, vkauth.ErrFatalCaptchaNoStreams) {
-					log.Printf("[STREAM %d] Fatal manual captcha error. Shutting down application.", streamID)
+					deps.log().Errorf("[STREAM %d] Fatal manual captcha error. Shutting down application.", streamID)
 					if deps.AppCancel != nil {
 						deps.AppCancel()
 					}
@@ -248,7 +248,7 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 				}
 				if errors.Is(err, vkauth.ErrCaptchaWaitRequired) {
 					if !errors.Is(err, vkauth.ErrLockoutActive) {
-						log.Printf("[STREAM %d] Backing off for 60 seconds to avoid IP ban...", streamID)
+						deps.log().Errorf("[STREAM %d] Backing off for 60 seconds to avoid IP ban...", streamID)
 						select {
 						case <-ctx.Done():
 							return
@@ -267,7 +267,7 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 						}
 					}
 				} else {
-					log.Printf("[STREAM %d] %s", streamID, err)
+					deps.log().Errorf("[STREAM %d] %s", streamID, err)
 					time.Sleep(2 * time.Second)
 				}
 			}
@@ -301,11 +301,11 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 	var dtlsConn net.Conn = dtlsRaw
 	defer func() {
 		if closeErr := dtlsConn.Close(); closeErr != nil {
-			log.Printf("[STREAM %d] failed to close DTLS connection: %s", streamID, closeErr)
+			deps.log().Errorf("[STREAM %d] failed to close DTLS connection: %s", streamID, closeErr)
 		}
-		log.Printf("[STREAM %d] Closed DTLS connection\n", streamID)
+		deps.log().Errorf("[STREAM %d] Closed DTLS connection\n", streamID)
 	}()
-	log.Printf("[STREAM %d] Established DTLS connection!\n", streamID)
+	deps.log().Errorf("[STREAM %d] Established DTLS connection!\n", streamID)
 
 	if okchan != nil {
 		go func() {
@@ -319,7 +319,7 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 	wg := sync.WaitGroup{}
 	context.AfterFunc(dtlsctx, func() {
 		if err := dtlsConn.SetDeadline(time.Now()); err != nil {
-			log.Printf("[STREAM %d] Warning: SetDeadline failed: %v", streamID, err)
+			deps.log().Errorf("[STREAM %d] Warning: SetDeadline failed: %v", streamID, err)
 		}
 	})
 
@@ -348,7 +348,7 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 			if peerAddr := deps.ActiveLocalPeer.Load(); peerAddr != nil {
 				if addr, ok := peerAddr.(net.Addr); ok {
 					if _, err := listenConn.WriteTo(buf[:n], addr); err != nil {
-						log.Printf("[STREAM %d] failed to forward packet to local peer: %v", streamID, err)
+						deps.log().Errorf("[STREAM %d] failed to forward packet to local peer: %v", streamID, err)
 					}
 				}
 			}
@@ -357,7 +357,7 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 
 	wg.Wait()
 	if err := dtlsConn.SetDeadline(time.Time{}); err != nil {
-		log.Printf("[STREAM %d] Failed to clear DTLS deadline: %s", streamID, err)
+		deps.log().Errorf("[STREAM %d] Failed to clear DTLS deadline: %s", streamID, err)
 	}
 	return nil
 }
@@ -388,7 +388,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	}()
 
 	if deps.log().DebugEnabled() {
-		log.Printf("[STREAM %d] relayed-address=%s", streamID, relayConn.LocalAddr().String())
+		deps.log().Errorf("[STREAM %d] relayed-address=%s", streamID, relayConn.LocalAddr().String())
 	}
 
 	wg := sync.WaitGroup{}
@@ -398,13 +398,13 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 
 	context.AfterFunc(turnctx, func() {
 		if err := relayConn.SetDeadline(time.Now()); err != nil {
-			log.Printf("Failed to set relay deadline: %s", err)
+			deps.log().Errorf("Failed to set relay deadline: %s", err)
 		}
 	})
 	var internalPipeAddr atomic.Value
 	wc, wcErr := common.NewClientWrap(params.WrapKey)
 	if wcErr != nil {
-		log.Printf("[STREAM %d] WRAP init failed: %v", streamID, wcErr)
+		deps.log().Errorf("[STREAM %d] WRAP init failed: %v", streamID, wcErr)
 		turncancel()
 		return
 	}
@@ -434,7 +434,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 			if wc != nil {
 				written, wrapErr := wc.WrapInto(wireBuf, out)
 				if wrapErr != nil {
-					log.Printf("[STREAM %d] WRAP failed: %v", streamID, wrapErr)
+					deps.log().Errorf("[STREAM %d] WRAP failed: %v", streamID, wrapErr)
 					return
 				}
 				out = wireBuf[:written]
@@ -471,7 +471,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 				if wc != nil {
 					m, wrapErr := wc.Unwrap(payload, plain)
 					if wrapErr != nil {
-						log.Printf("[STREAM %d] UNWRAP failed: %v (n=%d)", streamID, wrapErr, n)
+						deps.log().Errorf("[STREAM %d] UNWRAP failed: %v (n=%d)", streamID, wrapErr, n)
 						continue
 					}
 					payload = plain[:m]
@@ -486,6 +486,6 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 
 	wg.Wait()
 	if err := relayConn.SetDeadline(time.Time{}); err != nil {
-		log.Printf("Failed to clear relay deadline: %s", err)
+		deps.log().Errorf("Failed to clear relay deadline: %s", err)
 	}
 }

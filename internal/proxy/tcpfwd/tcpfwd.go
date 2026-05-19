@@ -70,7 +70,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 		})
 	}
 
-	log.Printf("VLESS mode: waiting for sessions to connect (total: %d)...", numSessions)
+	deps.log().Errorf("VLESS mode: waiting for sessions to connect (total: %d)...", numSessions)
 	for {
 		select {
 		case <-ctx.Done():
@@ -90,15 +90,15 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 
 	wrappedListener, err := ish.WrapListener(listener)
 	if err != nil {
-		log.Printf("Warning: failed to wrap listener: %v", err)
+		deps.log().Errorf("Warning: failed to wrap listener: %v", err)
 		wrappedListener = listener
 	}
 
 	context.AfterFunc(ctx, func() { _ = wrappedListener.Close() })
 	if useBond {
-		log.Printf("VLESS bond mode: listening on %s (striping each TCP connection across active sessions)", listenAddr)
+		deps.log().Errorf("VLESS bond mode: listening on %s (striping each TCP connection across active sessions)", listenAddr)
 	} else {
-		log.Printf("VLESS mode: listening on %s (round-robin across %d sessions)", listenAddr, numSessions)
+		deps.log().Errorf("VLESS mode: listening on %s (round-robin across %d sessions)", listenAddr, numSessions)
 	}
 
 	var wgConn sync.WaitGroup
@@ -112,20 +112,20 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 				return
 			default:
 			}
-			log.Printf("TCP accept error: %s", err)
+			deps.log().Errorf("TCP accept error: %s", err)
 			continue
 		}
 
 		if useBond {
 			if deps.BondHandler == nil {
-				log.Printf("bond requested but no BondHandler set, rejecting")
+				deps.log().Errorf("bond requested but no BondHandler set, rejecting")
 				_ = tcpConn.Close()
 				continue
 			}
 			connID := (uint64(time.Now().UnixNano()) << 16) ^ pool.NextConnID()
 			lanes := pool.Snapshot()
 			if len(lanes) == 0 {
-				log.Printf("No active sessions, rejecting connection")
+				deps.log().Errorf("No active sessions, rejecting connection")
 				_ = tcpConn.Close()
 				continue
 			}
@@ -139,7 +139,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 
 		ps := pool.Pick()
 		if ps == nil || ps.Sess.IsClosed() {
-			log.Printf("No active sessions, rejecting connection")
+			deps.log().Errorf("No active sessions, rejecting connection")
 			_ = tcpConn.Close()
 			continue
 		}
@@ -163,7 +163,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 
 			stream, err := sessRef.Sess.OpenStream()
 			if err != nil {
-				log.Printf("[session %d] smux open stream error for TCP #%d: %s", sessRef.ID, cid, err)
+				deps.log().Errorf("[session %d] smux open stream error for TCP #%d: %s", sessRef.ID, cid, err)
 				return
 			}
 			defer func() { _ = stream.Close() }()
@@ -188,7 +188,7 @@ func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.
 
 		smuxSess, cleanup, err := createSmuxSession(ctx, deps, params, peer, id)
 		if err != nil {
-			log.Printf("[session %d] setup error: %s, retrying...", id, err)
+			deps.log().Errorf("[session %d] setup error: %s, retrying...", id, err)
 			select {
 			case <-ctx.Done():
 				return
@@ -198,7 +198,7 @@ func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.
 		}
 
 		ps := pool.Add(id, smuxSess)
-		log.Printf("[session %d] connected (active: %d)", id, pool.Count())
+		deps.log().Errorf("[session %d] connected (active: %d)", id, pool.Count())
 
 		for !smuxSess.IsClosed() {
 			select {
@@ -212,7 +212,7 @@ func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.
 
 		pool.Remove(ps)
 		cleanup()
-		log.Printf("[session %d] disconnected (active: %d), reconnecting...", id, pool.Count())
+		deps.log().Errorf("[session %d] disconnected (active: %d), reconnecting...", id, pool.Count())
 
 		select {
 		case <-ctx.Done():
@@ -285,10 +285,10 @@ func pipe(deps *Deps, ctx context.Context, c1, c2 net.Conn) (int64, int64) {
 	ctx2, cancel := context.WithCancel(ctx)
 	context.AfterFunc(ctx2, func() {
 		if err := c1.SetDeadline(time.Now()); err != nil {
-			log.Printf("pipe: failed to set deadline c1: %v", err)
+			deps.log().Errorf("pipe: failed to set deadline c1: %v", err)
 		}
 		if err := c2.SetDeadline(time.Now()); err != nil {
-			log.Printf("pipe: failed to set deadline c2: %v", err)
+			deps.log().Errorf("pipe: failed to set deadline c2: %v", err)
 		}
 	})
 
@@ -300,7 +300,7 @@ func pipe(deps *Deps, ctx context.Context, c1, c2 net.Conn) (int64, int64) {
 		n, err := io.Copy(c1, c2)
 		c1FromC2 = n
 		if err != nil && deps.log().DebugEnabled() {
-			log.Printf("pipe: c1<-c2 copy error: %v", err)
+			deps.log().Errorf("pipe: c1<-c2 copy error: %v", err)
 		}
 	})
 	wg.Go(func() {
@@ -308,15 +308,15 @@ func pipe(deps *Deps, ctx context.Context, c1, c2 net.Conn) (int64, int64) {
 		n, err := io.Copy(c2, c1)
 		c2FromC1 = n
 		if err != nil && deps.log().DebugEnabled() {
-			log.Printf("pipe: c2<-c1 copy error: %v", err)
+			deps.log().Errorf("pipe: c2<-c1 copy error: %v", err)
 		}
 	})
 	wg.Wait()
 	if err := c1.SetDeadline(time.Time{}); err != nil && deps.log().DebugEnabled() {
-		log.Printf("pipe: failed to reset deadline c1: %v", err)
+		deps.log().Errorf("pipe: failed to reset deadline c1: %v", err)
 	}
 	if err := c2.SetDeadline(time.Time{}); err != nil && deps.log().DebugEnabled() {
-		log.Printf("pipe: failed to reset deadline c2: %v", err)
+		deps.log().Errorf("pipe: failed to reset deadline c2: %v", err)
 	}
 	return c1FromC2, c2FromC1
 }

@@ -5,7 +5,6 @@ package udpserver
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -24,12 +23,12 @@ const (
 func Handle(ctx context.Context, logger logx.Logger, conn net.Conn, connectAddr string) {
 	serverConn, err := net.Dial("udp", connectAddr)
 	if err != nil {
-		log.Println(err)
+		logger.Errorf("udpserver: dial backend: %v", err)
 		return
 	}
 	defer func() {
 		if err = serverConn.Close(); err != nil {
-			log.Printf("failed to close outgoing connection: %s", err)
+			logger.Errorf("udpserver: close outgoing connection: %s", err)
 		}
 	}()
 
@@ -46,28 +45,28 @@ func Handle(ctx context.Context, logger logx.Logger, conn net.Conn, connectAddr 
 
 	context.AfterFunc(ctx2, func() {
 		if err := conn.SetDeadline(time.Now()); err != nil {
-			log.Printf("failed to set incoming deadline: %s", err)
+			logger.Errorf("udpserver: set incoming deadline: %s", err)
 		}
 		if err := serverConn.SetDeadline(time.Now()); err != nil {
-			log.Printf("failed to set outgoing deadline: %s", err)
+			logger.Errorf("udpserver: set outgoing deadline: %s", err)
 		}
 	})
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		defer cancel()
-		copyOne(ctx2, conn, serverConn, st.AddTx)
+		copyOne(ctx2, logger, conn, serverConn, st.AddTx)
 	})
 	wg.Go(func() {
 		defer cancel()
-		copyOne(ctx2, serverConn, conn, st.AddRx)
+		copyOne(ctx2, logger, serverConn, conn, st.AddRx)
 	})
 	wg.Wait()
 }
 
 // copyOne reads from src and writes to dst until ctx fires or either side errors.
 // Each read/write resets an idle timeout so a stuck side closes instead of hanging.
-func copyOne(ctx context.Context, src, dst net.Conn, count func(int)) {
+func copyOne(ctx context.Context, logger logx.Logger, src, dst net.Conn, count func(int)) {
 	buf := make([]byte, udpRelayBufSize)
 	for {
 		select {
@@ -76,22 +75,22 @@ func copyOne(ctx context.Context, src, dst net.Conn, count func(int)) {
 		default:
 		}
 		if err := src.SetReadDeadline(time.Now().Add(udpIdleTimeout)); err != nil {
-			log.Printf("Failed: %s", err)
+			logger.Errorf("udpserver: set read deadline: %s", err)
 			return
 		}
 		n, err := src.Read(buf)
 		if err != nil {
-			log.Printf("Failed: %s", err)
+			logger.Debugf("udpserver: read: %s", err)
 			return
 		}
 		if werr := dst.SetWriteDeadline(time.Now().Add(udpIdleTimeout)); werr != nil {
-			log.Printf("Failed: %s", werr)
+			logger.Errorf("udpserver: set write deadline: %s", werr)
 			return
 		}
 		written, werr := dst.Write(buf[:n])
 		count(written)
 		if werr != nil {
-			log.Printf("Failed: %s", werr)
+			logger.Debugf("udpserver: write: %s", werr)
 			return
 		}
 	}
