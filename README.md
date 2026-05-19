@@ -273,7 +273,9 @@ docker build -t vk-turn-proxy .
 ./client -listen 127.0.0.1:9000 -peer <ip-vps>:56000 -vk-link "<vk-call-link>" -wrap -wrap-key <64-hex-key>
 ```
 
-`-wrap` нельзя использовать вместе с `-no-dtls`.
+> **Breaking change (V2-0):** флаги `-no-dtls` (клиент) и `-vless-bond` (сервер) удалены.
+> `-no-dtls` помечался DO NOT USE и в проде не работал (VK дропает пакеты без DTLS-handshake).
+> Серверный `-vless-bond` больше не нужен: сервер автоопределяет bond по magic-префиксу в каждом стриме.
 
 ## Настройка KCP (VLESS)
 
@@ -313,7 +315,6 @@ docker build -t vk-turn-proxy .
 | `-manual-captcha` | `false` | сразу использовать ручное прохождение captcha |
 | `-streams-per-cred` | `10` | сколько потоков используют один кеш TURN-учетных данных |
 | `-debug` | `false` | подробные логи |
-| `-no-dtls` | `false` | прямой режим без DTLS, не рекомендуется |
 
 ## Флаги Сервера
 
@@ -321,8 +322,7 @@ docker build -t vk-turn-proxy .
 | --- | --- | --- |
 | `-listen` | `0.0.0.0:56000` | адрес прослушивания |
 | `-connect` | обязательный | backend-адрес, например `127.0.0.1:51820` или `127.0.0.1:443` |
-| `-vless` | `false` | TCP/VLESS режим |
-| `-vless-bond` | `false` | bonding для VLESS |
+| `-vless` | `false` | TCP/VLESS режим (bond распознаётся автоматически по magic-префиксу) |
 | `-wrap` | `false` | включить WRAP-обфускацию |
 | `-wrap-key` | пусто | 32-байтный ключ в hex, 64 символа |
 | `-gen-wrap-key` | `false` | напечатать новый WRAP-ключ и выйти |
