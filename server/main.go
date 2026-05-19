@@ -17,6 +17,7 @@ import (
 
 	"github.com/cacggghp/vk-turn-proxy/internal/bond"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
+	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
 	"github.com/cacggghp/vk-turn-proxy/tcputil"
 	"github.com/pion/dtls/v3"
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
@@ -44,7 +45,7 @@ func main() {
 	isDebug = *debugFlag
 
 	if *genWrapKey {
-		key := make([]byte, wrapKeyLen)
+		key := make([]byte, wrap.KeyLen)
 		if _, err := rand.Read(key); err != nil {
 			log.Panicf("gen-wrap-key: rand.Read: %v", err)
 		}
@@ -80,8 +81,8 @@ func main() {
 		if err != nil {
 			log.Panicf("-wrap-key invalid hex: %v", err)
 		}
-		if len(wrapKey) != wrapKeyLen {
-			log.Panicf("-wrap-key must decode to %d bytes (got %d)", wrapKeyLen, len(wrapKey))
+		if len(wrapKey) != wrap.KeyLen {
+			log.Panicf("-wrap-key must decode to %d bytes (got %d)", wrap.KeyLen, len(wrapKey))
 		}
 	}
 	log.Printf("Starting server listen=%s connect=%s vless=%t vless-bond=%t wrap=%t bond-autodetect=true", *listen, *connect, *vlessMode, *vlessBond, *wrapMode)
@@ -104,7 +105,7 @@ func main() {
 	var listener net.Listener
 	if *wrapMode {
 		log.Printf("WRAP mode enabled: listener only accepts clients with matching -wrap-key")
-		wrapListener, werr := listenWrapped(addr, wrapKey)
+		wrapListener, werr := wrap.Listen(addr, wrapKey)
 		if werr != nil {
 			panic(werr)
 		}
