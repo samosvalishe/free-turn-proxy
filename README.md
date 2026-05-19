@@ -252,7 +252,7 @@ docker build -t vk-turn-proxy .
 С bonding:
 
 ```bash
-./server -listen 0.0.0.0:56000 -connect 127.0.0.1:443 -vless -vless-bond
+./server -listen 0.0.0.0:56000 -connect 127.0.0.1:443 -vless
 ./client -listen 127.0.0.1:9000 -peer <ip-vps>:56000 -vk-link "<vk-call-link>" -vless -vless-bond -n 4
 ```
 
@@ -343,17 +343,44 @@ docker build -t vk-turn-proxy .
 Нужен Go 1.25.x.
 
 ```bash
-go build -o client ./client
-go build -o server ./server
+go build -o client ./cmd/vk-turn-client
+go build -o server ./cmd/vk-turn-server
 go test ./...
 ```
 
 Кросс-сборка примера для Linux amd64:
 
 ```bash
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o server-linux-amd64 ./server
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o client-linux-amd64 ./client
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o server-linux-amd64 ./cmd/vk-turn-server
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o client-linux-amd64 ./cmd/vk-turn-client
 ```
+
+Android arm64 клиент как `.so` для упаковки в приложение (PowerShell):
+
+```powershell
+$env:GOOS="android"; $env:GOARCH="arm64"; $env:CGO_ENABLED="0"; go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn.so .\cmd\vk-turn-client
+```
+
+То же из bash:
+
+```bash
+GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn.so ./cmd/vk-turn-client
+```
+
+Linux arm64 клиент как `.so` (для упаковки в Android-приложение в обход NDK; ABI совпадает):
+
+```bash
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn.so ./cmd/vk-turn-client
+```
+
+Linux amd64 клиент/сервер как `.so`:
+
+```bash
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn-client.so ./cmd/vk-turn-client
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn-server.so ./cmd/vk-turn-server
+```
+
+Все `.so` выше — обычные ELF-бинари под `.so`-именем (`CGO_ENABLED=0`, не настоящий shared library). Если нужен настоящий `c-shared` — `CGO_ENABLED=1` + NDK toolchain (см. `.github/workflows/release.yml`).
 
 ## Решение Проблем
 

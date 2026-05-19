@@ -3,7 +3,7 @@ FROM golang:1.25-alpine AS builder
 WORKDIR /build
 
 COPY . .
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o vk-turn-proxy ./server
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o vk-turn-proxy ./cmd/vk-turn-server
 
 FROM alpine:3.23
 

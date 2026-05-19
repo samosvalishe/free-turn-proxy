@@ -22,7 +22,7 @@ import (
 	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
 
-	"github.com/cacggghp/vk-turn-proxy/client/internal/browserprofile"
+	"github.com/cacggghp/vk-turn-proxy/internal/client/browserprofile"
 )
 
 const (

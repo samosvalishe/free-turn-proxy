@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/client/internal/browserprofile"
-	"github.com/cacggghp/vk-turn-proxy/client/internal/captcha"
-	"github.com/cacggghp/vk-turn-proxy/client/internal/namegen"
+	"github.com/cacggghp/vk-turn-proxy/internal/client/browserprofile"
+	"github.com/cacggghp/vk-turn-proxy/internal/client/captcha"
+	"github.com/cacggghp/vk-turn-proxy/internal/client/namegen"
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"

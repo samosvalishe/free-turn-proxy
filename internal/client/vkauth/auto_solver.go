@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/cacggghp/vk-turn-proxy/client/internal/browserprofile"
-	"github.com/cacggghp/vk-turn-proxy/client/internal/captcha"
+	"github.com/cacggghp/vk-turn-proxy/internal/client/browserprofile"
+	"github.com/cacggghp/vk-turn-proxy/internal/client/captcha"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
 )

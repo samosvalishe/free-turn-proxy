@@ -41,7 +41,7 @@ var Pool = sync.Pool{
 type GetCredsFunc func(ctx context.Context, link string, streamID int) (string, string, string, error)
 
 // AuthHandler is the subset of vkauth.Client this package needs. Keeping it as
-// an interface lets internal/proxy/udp stay outside client/internal/.
+// an interface lets internal/proxy/udp avoid importing internal/client/vkauth.
 type AuthHandler interface {
 	IsAuthError(err error) bool
 	HandleAuthError(streamID int) bool

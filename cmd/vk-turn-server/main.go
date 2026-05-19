@@ -64,7 +64,7 @@ func main() {
 		panic(err)
 	}
 	wrapKey := cfg.WrapKey
-	log.Printf("Starting server listen=%s connect=%s vless=%t vless-bond=%t wrap=%t bond-autodetect=true", cfg.Listen, cfg.Connect, cfg.VLESSMode, cfg.VLESSBond, cfg.WrapMode)
+	log.Printf("Starting server listen=%s connect=%s vless=%t wrap=%t bond-autodetect=true", cfg.Listen, cfg.Connect, cfg.VLESSMode, cfg.WrapMode)
 	// Generate a certificate and private key to secure the connection
 	certificate, genErr := selfsign.GenerateSelfSigned()
 	if genErr != nil {
@@ -142,7 +142,7 @@ func main() {
 			debugf("Handshake done")
 
 			if cfg.VLESSMode {
-				handleVLESSConnection(ctx, dtlsConn, cfg.Connect, cfg.VLESSBond)
+				handleVLESSConnection(ctx, dtlsConn, cfg.Connect)
 			} else {
 				handleUDPConnection(ctx, conn, cfg.Connect)
 			}
@@ -267,7 +267,7 @@ func handleUDPConnection(ctx context.Context, conn net.Conn, connectAddr string)
 
 // handleVLESSConnection creates a KCP+smux session over DTLS and forwards
 // each smux stream as a TCP connection to the backend (Xray/VLESS).
-func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr string, useBond bool) {
+func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr string) {
 	// 1. Create KCP session over DTLS
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	defer statsCancel()
@@ -332,9 +332,6 @@ func handleVLESSConnection(ctx context.Context, dtlsConn net.Conn, connectAddr s
 				debugf("auto-detected bond smux stream")
 				globalBondRegistry.HandleStreamAfterMagic(ctx, s, connectAddr, prefix)
 				return
-			}
-			if useBond {
-				log.Printf("non-bond smux stream accepted while -vless-bond is enabled")
 			}
 
 			defer func() {
