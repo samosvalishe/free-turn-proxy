@@ -1,6 +1,6 @@
 //go:build linux && 386
 
-package main
+package ish
 
 import (
 	"io"
@@ -11,15 +11,15 @@ import (
 	"unsafe"
 )
 
-type ishListener struct {
+type listener struct {
 	net.Listener
 	f  *os.File
 	fd int
 }
 
-// wrapISHListener overrides the standard net.Listener with a legacy syscall listener
+// WrapListener overrides the standard net.Listener with a legacy syscall listener
 // designed specifically for the iSH simulator on iOS, which lacks modern `accept4`.
-func wrapISHListener(ln net.Listener) (net.Listener, error) {
+func WrapListener(ln net.Listener) (net.Listener, error) {
 	tl, ok := ln.(*net.TCPListener)
 	if !ok {
 		return ln, nil
@@ -30,10 +30,10 @@ func wrapISHListener(ln net.Listener) (net.Listener, error) {
 	}
 
 	// Keep a reference to *os.File so the garbage collector doesn't close the FD.
-	return &ishListener{Listener: ln, f: f, fd: int(f.Fd())}, nil
+	return &listener{Listener: ln, f: f, fd: int(f.Fd())}, nil
 }
 
-func (l *ishListener) Accept() (net.Conn, error) {
+func (l *listener) Accept() (net.Conn, error) {
 	// Set the listener socket to blocking mode. Go makes it non-blocking by default.
 	// This avoids using time.Sleep in a spin-loop, which triggers futex_time64 SIGSYS in modern Go on iSH.
 	if err := syscall.SetNonblock(l.fd, false); err != nil {
@@ -70,7 +70,7 @@ func (l *ishListener) Accept() (net.Conn, error) {
 	}
 }
 
-func (l *ishListener) Close() error {
+func (l *listener) Close() error {
 	// Close both the duplicated FD and the original listener.
 	err1 := l.f.Close()
 	err2 := l.Listener.Close()

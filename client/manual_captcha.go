@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/cacggghp/vk-turn-proxy/client/internal/browserprofile"
+	"github.com/cacggghp/vk-turn-proxy/internal/ish"
 )
 
 const captchaListenPort = "8765"
@@ -503,7 +504,7 @@ func startCaptchaServer(srv *http.Server, logPrefix string) error {
 			continue
 		}
 		listening = true
-		wrappedListener, err := wrapISHListener(listener)
+		wrappedListener, err := ish.WrapListener(listener)
 		if err != nil {
 			log.Printf("%s: failed to wrap listener for iSH: %v", logPrefix, err)
 			wrappedListener = listener
