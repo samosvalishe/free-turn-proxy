@@ -77,14 +77,6 @@ func TestParseClient_InvalidDNS(t *testing.T) {
 	}
 }
 
-func TestParseClient_WrapDirectConflict(t *testing.T) {
-	args := append(validClientArgs(), "-wrap", "-no-dtls", "-wrap-key", strings.Repeat("aa", 32))
-	_, err := ParseClient(args, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "-wrap requires DTLS") {
-		t.Errorf("expected wrap/direct conflict, got %v", err)
-	}
-}
-
 func TestParseClient_WrapMissingKey(t *testing.T) {
 	args := append(validClientArgs(), "-wrap")
 	_, err := ParseClient(args, io.Discard)

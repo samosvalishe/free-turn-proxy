@@ -15,8 +15,9 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
 )
 
-// Mirrors of constants defined in client/internal packages, duplicated here
-// because internal/config cannot import client/internal/*.
+// Mirrors of constants defined in internal/client/* packages, duplicated here
+// because internal/config cannot import internal/client/* (those packages
+// import internal/config indirectly through dependents — avoid the cycle).
 const (
 	dnsModeUDP             = "udp"
 	dnsModeDoH             = "doh"
@@ -33,7 +34,6 @@ type Client struct {
 	Peer           string
 	N              int
 	UDP            bool
-	Direct         bool
 	VLESSMode      bool
 	VLESSBond      bool
 	WrapMode       bool
@@ -51,7 +51,6 @@ type Server struct {
 	Listen     string
 	Connect    string
 	VLESSMode  bool
-	VLESSBond  bool
 	WrapMode   bool
 	WrapKey    []byte
 	GenWrapKey bool
@@ -73,7 +72,6 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	peerAddr := fs.String("peer", "", "peer server address (host:port)")
 	n := fs.Int("n", 10, "connections to TURN")
 	udp := fs.Bool("udp", false, "connect to TURN with UDP")
-	direct := fs.Bool("no-dtls", false, "connect without obfuscation. DO NOT USE")
 	vlessMode := fs.Bool("vless", false, "VLESS mode: forward TCP connections (for VLESS) instead of UDP packets")
 	vlessBond := fs.Bool("vless-bond", false, "bond one VLESS TCP connection across all active smux sessions")
 	wrapMode := fs.Bool("wrap", false, "WRAP mode: ChaCha20-XOR obfuscate DTLS packets before they reach TURN ChannelData")
@@ -96,7 +94,6 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 		Peer:           *peerAddr,
 		N:              *n,
 		UDP:            *udp,
-		Direct:         *direct,
 		VLESSMode:      *vlessMode,
 		VLESSBond:      *vlessBond,
 		WrapMode:       *wrapMode,
@@ -127,9 +124,6 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	}
 	if *vklink == "" {
 		return nil, errors.New("need vk-link")
-	}
-	if c.WrapMode && c.Direct {
-		return nil, fmt.Errorf("-wrap requires DTLS; remove -no-dtls")
 	}
 	key, err := wrap.DecodeKey(c.WrapMode, *wrapKeyHex)
 	if err != nil {
@@ -163,7 +157,6 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 	listen := fs.String("listen", "0.0.0.0:56000", "listen on ip:port")
 	connect := fs.String("connect", "", "connect to ip:port")
 	vlessMode := fs.Bool("vless", false, "VLESS mode: forward TCP connections (for VLESS) instead of UDP packets")
-	vlessBond := fs.Bool("vless-bond", false, "bond one VLESS TCP connection across all active smux sessions")
 	wrapMode := fs.Bool("wrap", false, "WRAP mode: ChaCha20-XOR obfuscate DTLS packets before they reach TURN ChannelData")
 	wrapKeyHex := fs.String("wrap-key", "", "32-byte hex-encoded shared key for -wrap (64 hex chars)")
 	genWrapKey := fs.Bool("gen-wrap-key", false, "print a fresh 64-character hex key for -wrap-key and exit")
@@ -177,7 +170,6 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 		Listen:     *listen,
 		Connect:    *connect,
 		VLESSMode:  *vlessMode,
-		VLESSBond:  *vlessBond,
 		WrapMode:   *wrapMode,
 		GenWrapKey: *genWrapKey,
 		Debug:      *debugFlag,
