@@ -19,8 +19,16 @@ func (r *RelayPacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	if r.Conn == nil {
 		return r.Relay.ReadFrom(b)
 	}
-	buf := make([]byte, MaxWire(len(b)))
-	n, addr, err := r.Relay.ReadFrom(buf)
+	bp := bufPool.Get().(*[]byte) //nolint:errcheck // pool New always returns *[]byte
+	buf := *bp
+	need := MaxWire(len(b))
+	if cap(buf) < need {
+		buf = make([]byte, need)
+		*bp = buf
+	}
+	defer bufPool.Put(bp)
+
+	n, addr, err := r.Relay.ReadFrom(buf[:cap(buf)])
 	if err != nil {
 		return 0, addr, err
 	}
@@ -35,7 +43,17 @@ func (r *RelayPacketConn) WriteTo(b []byte, _ net.Addr) (int, error) {
 	if r.Conn == nil {
 		return r.Relay.WriteTo(b, r.Peer)
 	}
-	out := make([]byte, MaxWire(len(b)))
+	wireLen := MaxWire(len(b))
+
+	bp := bufPool.Get().(*[]byte) //nolint:errcheck // pool New always returns *[]byte
+	out := *bp
+	if cap(out) < wireLen {
+		out = make([]byte, wireLen)
+		*bp = out
+	}
+	out = out[:wireLen]
+	defer bufPool.Put(bp)
+
 	n, err := r.Conn.WrapInto(out, b)
 	if err != nil {
 		return 0, err

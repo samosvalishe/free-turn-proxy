@@ -1,7 +1,7 @@
 // Package bondserver implements the server side of the bonded VLESS lane:
 // a single backend TCP connection multiplexed across N smux streams that all
-// share a ConnID. Frame wire-format lives in internal/bond; this package wires
-// the backend TCP <-> lanes copy loops and the per-ConnID registry.
+// share a ConnID. Frame wire-format lives in internal/wire/bondframe; this package
+// wires the backend TCP <-> lanes copy loops and the per-ConnID registry.
 package bondserver
 
 import (
@@ -283,6 +283,13 @@ func (c *serverConn) copyBondToBackend(backendConn net.Conn) {
 		case f := <-c.recvCh:
 			switch f.Type {
 			case bondframe.FrameData:
+				// Bound the reorder buffer so a malicious or buggy peer
+				// that emits seq with permanent gaps cannot exhaust memory.
+				// Matches bondclient.copyBondToTCP.
+				if len(pending) >= 1024 {
+					log.Printf("[bond %d] pending map overflow (>1024), closing", c.id)
+					return
+				}
 				pending[f.Seq] = f.Data
 			case bondframe.FrameFIN:
 				v := f.Seq

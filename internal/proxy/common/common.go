@@ -1,7 +1,7 @@
-// Package common holds small helpers shared between udprelay and tcpfwd. The
-// two proxy modes layer DTLS and srtpmimicry differently (see V2-6 decision
-// in notes/AUDIT_2026-05-19_V2.md), so a full Engine/Handler abstraction was
-// rejected. This package only collects the bits that are genuinely identical.
+// Package common holds the few helpers shared by udprelay and tcpfwd
+// (TURN dial + wrap codec construction). The two proxy modes layer DTLS and
+// srtpmimicry differently, so a full Engine/Handler abstraction is intentionally
+// avoided — this package only collects what is genuinely identical.
 package common
 
 import (

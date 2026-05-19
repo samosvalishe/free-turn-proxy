@@ -1,7 +1,7 @@
 // Package bondclient implements the client side of the bonded VLESS lane:
 // a single accepted TCP connection striped (round-robin) across all currently
 // live smux sessions in a tcpfwd.SessionPool. Frame wire-format lives in
-// internal/bond; this package wires the local TCP <-> lanes copy loops.
+// internal/wire/bondframe; this package wires the local TCP <-> lanes copy loops.
 package bondclient
 
 import (

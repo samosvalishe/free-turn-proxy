@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -124,11 +123,11 @@ func TestFetchShortCircuitsOnCaptchaWait(t *testing.T) {
 	var calls atomic.Int32
 	c := newTestClient(t, func(_ context.Context, _ string, _ int, _ VKCredentials, _ tlsclient.CookieJar) (string, string, []string, error) {
 		calls.Add(1)
-		return "", "", nil, errors.New(ErrCaptchaWaitRequired)
+		return "", "", nil, ErrCaptchaWaitRequired
 	})
 
 	_, _, _, err := c.GetCredentials(context.Background(), "L", 0)
-	if err == nil || !strings.Contains(err.Error(), ErrCaptchaWaitRequired) {
+	if err == nil || !errors.Is(err, ErrCaptchaWaitRequired) {
 		t.Fatalf("expected CAPTCHA_WAIT_REQUIRED, got %v", err)
 	}
 	if calls.Load() != 1 {
@@ -184,7 +183,7 @@ func TestLockoutBlocksFetch(t *testing.T) {
 	}
 
 	_, _, _, err := c.GetCredentials(context.Background(), "L", 0)
-	if err == nil || !strings.Contains(err.Error(), "global lockout active") {
+	if err == nil || !errors.Is(err, ErrLockoutActive) {
 		t.Fatalf("expected lockout error, got %v", err)
 	}
 }

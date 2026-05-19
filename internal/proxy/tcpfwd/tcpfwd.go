@@ -35,8 +35,7 @@ type Params struct {
 
 // BondHandler stripes one accepted TCP connection across all currently-live
 // pool sessions. Nil disables bond mode (callers will then use round-robin).
-// Bond client lives in main during stage 4.2; it will move to internal/bond/client
-// in stage 5.1.
+// The bond client implementation lives in internal/proxy/bondclient.
 type BondHandler func(ctx context.Context, tcpConn net.Conn, connID uint64, lanes []*PooledSession)
 
 // Deps groups host-process dependencies needed by the VLESS loop.

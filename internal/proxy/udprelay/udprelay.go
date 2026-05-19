@@ -7,15 +7,16 @@ package udprelay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/cacggghp/vk-turn-proxy/internal/client/vkauth"
 	"github.com/cacggghp/vk-turn-proxy/internal/logx"
 	"github.com/cacggghp/vk-turn-proxy/internal/proxy/common"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
@@ -50,8 +51,7 @@ type AuthHandler interface {
 	LockoutUntilUnix() int64
 }
 
-// Params is the per-stream TURN/wrap configuration shared by the DTLS and TURN
-// loops. Equivalent of the old client/main.go turnParams.
+// Params is the per-stream TURN/wrap configuration shared by the DTLS and TURN loops.
 type Params struct {
 	Host     string
 	Port     string
@@ -92,10 +92,18 @@ func DTLSLoop(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net
 			return
 		default:
 			err := oneDTLS(ctx, deps, peer, listenConn, inboundChan, connchan, okchan, streamID)
-			if err != nil {
-				if time.Now().Unix() < deps.Auth.LockoutUntilUnix() && strings.Contains(err.Error(), "context deadline exceeded") {
-					continue
+			// During captcha lockout the handshake deadline fires before
+			// auth retries can succeed; back off briefly to avoid a tight
+			// retry spin until the lockout clears.
+			if err != nil && time.Now().Unix() < deps.Auth.LockoutUntilUnix() && errors.Is(err, context.DeadlineExceeded) {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Duration(1+rand.Intn(2)) * time.Second):
 				}
+				continue
+			}
+			if err != nil {
 				select {
 				case <-ctx.Done():
 					return
@@ -124,15 +132,15 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 			go oneTURN(ctx, deps, params, peer, conn2, streamID, c)
 
 			if err := <-c; err != nil {
-				if strings.Contains(err.Error(), "FATAL_CAPTCHA") {
+				if errors.Is(err, vkauth.ErrFatalCaptchaNoStreams) {
 					log.Printf("[STREAM %d] Fatal manual captcha error. Shutting down application.", streamID)
 					if deps.AppCancel != nil {
 						deps.AppCancel()
 					}
 					return
 				}
-				if strings.Contains(err.Error(), "CAPTCHA_WAIT_REQUIRED") {
-					if !strings.Contains(err.Error(), "global lockout active") {
+				if errors.Is(err, vkauth.ErrCaptchaWaitRequired) {
+					if !errors.Is(err, vkauth.ErrLockoutActive) {
 						log.Printf("[STREAM %d] Backing off for 60 seconds to avoid IP ban...", streamID)
 						select {
 						case <-ctx.Done():
@@ -167,6 +175,9 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 	defer dtlscancel()
 
 	conn1, conn2 := connutil.AsyncPacketPipe()
+	// TURNLoop may restart oneTURN several times within a single DTLS lifetime,
+	// re-reading conn2 on each restart; keep publishing until the DTLS attempt
+	// itself ends.
 	go func() {
 		for {
 			select {
@@ -178,7 +189,7 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 	}()
 	dtlsRaw, err1 := deps.DTLSDialer.Dial(dtlsctx, conn1, peer)
 	if err1 != nil {
-		return fmt.Errorf("failed to connect DTLS: %s", err1)
+		return fmt.Errorf("failed to connect DTLS: %w", err1)
 	}
 	var dtlsConn net.Conn = dtlsRaw
 	defer func() {

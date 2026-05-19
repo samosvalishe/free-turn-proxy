@@ -2,6 +2,7 @@ package vkauth
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math/rand"
@@ -211,7 +212,7 @@ func (c *Client) fetchSerialized(ctx context.Context, link string, streamID int)
 // fetch loops over c.credentials, returning on first success or terminal error.
 func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, string, []string, error) {
 	if time.Now().Unix() < c.lockout.Load() {
-		return "", "", nil, fmt.Errorf("CAPTCHA_WAIT_REQUIRED: global lockout active")
+		return "", "", nil, fmt.Errorf("%w: %w", ErrCaptchaWaitRequired, ErrLockoutActive)
 	}
 
 	var lastErr error
@@ -227,10 +228,10 @@ func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, 
 		lastErr = err
 		log.Printf("[STREAM %d] [VK Auth] Failed with client_id=%s: %v", streamID, creds.ClientID, err)
 
-		es := err.Error()
-		if strings.Contains(es, ErrCaptchaWaitRequired) || strings.Contains(es, "FATAL_CAPTCHA") {
+		if errors.Is(err, ErrCaptchaWaitRequired) || errors.Is(err, ErrFatalCaptchaNoStreams) {
 			return "", "", nil, err
 		}
+		es := err.Error()
 		if strings.Contains(es, "error_code:29") || strings.Contains(es, "error_code: 29") || strings.Contains(es, "Rate limit") {
 			log.Printf("[STREAM %d] [VK Auth] Rate limit detected, trying next credentials...", streamID)
 		}

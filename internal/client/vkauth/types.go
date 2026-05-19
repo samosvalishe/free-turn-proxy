@@ -1,6 +1,9 @@
 package vkauth
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // VKCredentials is one app_id/app_secret pair used to obtain anonymous tokens.
 type VKCredentials struct {
@@ -35,10 +38,10 @@ const (
 	DefaultStreamsPerCache = 10
 )
 
-// Sentinel error message fragments produced by the auth flow. Consumers match
-// on substring to preserve wire compatibility with the existing caller logic.
-const (
-	ErrCaptchaWaitRequired   = "CAPTCHA_WAIT_REQUIRED"
-	ErrFatalCaptchaNoStreams = "FATAL_CAPTCHA_FAILED_NO_STREAMS"
-	ErrLockoutActiveSuffix   = "global lockout active"
+// Sentinel errors produced by the auth flow. Callers use errors.Is.
+// The string forms remain stable for log output.
+var (
+	ErrCaptchaWaitRequired   = errors.New("CAPTCHA_WAIT_REQUIRED")
+	ErrFatalCaptchaNoStreams = errors.New("FATAL_CAPTCHA_FAILED_NO_STREAMS")
+	ErrLockoutActive         = errors.New("global lockout active")
 )

@@ -135,9 +135,9 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 					c.engageLockout(60 * time.Second)
 					if c.streamsFn() == 0 {
 						log.Printf("[STREAM %d] [FATAL] 0 connected streams and captcha solve modes exhausted.", streamID)
-						return "", "", nil, errors.New(ErrFatalCaptchaNoStreams)
+						return "", "", nil, ErrFatalCaptchaNoStreams
 					}
-					return "", "", nil, errors.New(ErrCaptchaWaitRequired)
+					return "", "", nil, ErrCaptchaWaitRequired
 				}
 
 				var successToken string
@@ -164,8 +164,11 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 						break
 					}
 					log.Printf("[STREAM %d] [Captcha] Triggering manual captcha fallback...", streamID)
-					// Background ctx so a short parent deadline doesn't cut user solve time.
-					manualCtx, manualCancel := context.WithTimeout(context.Background(), 3*time.Minute)
+					// Manual solver gets its own 3-min budget so a tight parent
+					// deadline doesn't cut user solve time. We still propagate
+					// parent cancellation (app shutdown) so the in-flight solver
+					// goroutine doesn't outlive the process.
+					manualCtx, manualCancel := context.WithTimeout(ctx, 3*time.Minute)
 
 					type manualRes struct {
 						token string
@@ -193,7 +196,7 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 							log.Printf("[STREAM %d] [Captcha] manual solver returned error: %v", streamID, solveErr)
 						}
 					case <-manualCtx.Done():
-						if manualCtx.Err() == context.DeadlineExceeded {
+						if errors.Is(manualCtx.Err(), context.DeadlineExceeded) {
 							solveErr = fmt.Errorf("manual captcha timed out after 3m")
 						} else {
 							solveErr = fmt.Errorf("manual captcha interrupted: %w", manualCtx.Err())
@@ -212,9 +215,9 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 					c.engageLockout(60 * time.Second)
 					if c.streamsFn() == 0 {
 						log.Printf("[STREAM %d] [FATAL] 0 connected streams and manual captcha failed/timed out.", streamID)
-						return "", "", nil, errors.New(ErrFatalCaptchaNoStreams)
+						return "", "", nil, ErrFatalCaptchaNoStreams
 					}
-					return "", "", nil, errors.New(ErrCaptchaWaitRequired)
+					return "", "", nil, ErrCaptchaWaitRequired
 				}
 
 				if captchaErr.CaptchaAttempt == "0" || captchaErr.CaptchaAttempt == "" {

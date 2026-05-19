@@ -2,8 +2,8 @@
 // smux sessions. Each accepted local TCP connection is opened as a smux stream
 // (round-robin across sessions) or, with bond, striped across all live sessions.
 //
-// The package exposes SessionPool/PooledSession so that the bond client half
-// (still living in main during refactor stage 4.2) can operate on them.
+// SessionPool/PooledSession are exported so the bond client (internal/proxy/bondclient)
+// can stripe a single TCP connection across multiple live sessions.
 package tcpfwd
 
 import (

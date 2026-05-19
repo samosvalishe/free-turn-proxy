@@ -1,2 +1,4 @@
 .idea
 .claude
+*.exe
+*.so

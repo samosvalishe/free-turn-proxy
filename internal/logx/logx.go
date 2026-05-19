@@ -1,7 +1,6 @@
-// Package logx is a minimal leveled logger over stdlib log. It replaces the
-// per-package Deps{Debug bool, Debugf func} pair: callers receive a Logger and
-// call Debugf/Infof/Warnf/Errorf directly. Output format is bit-compatible with
-// the previous `log.Printf`-gated-by-isDebug pattern.
+// Package logx is a minimal leveled logger over stdlib log. Callers receive a
+// Logger and call Debugf/Infof/Warnf/Errorf directly; Debugf is gated by a
+// debug flag, the other levels always print via stdlib log.
 package logx
 
 import "log"
@@ -24,7 +23,7 @@ type stdLogger struct {
 }
 
 // New returns a Logger that prints via stdlib log. If debug is false, Debugf is
-// a no-op (matches the legacy `if isDebug { log.Printf(...) }` shape).
+// a no-op.
 func New(debug bool) Logger {
 	return &stdLogger{debug: debug}
 }

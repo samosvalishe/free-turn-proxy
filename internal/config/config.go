@@ -4,10 +4,8 @@
 // wrap key, but do not touch the network, DNS, or process state. main() is
 // responsible for wiring those side effects after Parse* returns.
 //
-// V2-7: options are grouped by domain (TURN, Obf, Proxy, VK, DNS, Log) so the
-// struct shape mirrors the conceptual layers of the proxy instead of being a
-// flat bag of bools. CLI flag names, defaults, and behavior are bit-exact
-// compatible with the pre-V2-7 surface.
+// Options are grouped by domain (TURN, Obf, Proxy, VK, DNS, Log) so the struct
+// shape mirrors the conceptual layers of the proxy.
 package config
 
 import (
