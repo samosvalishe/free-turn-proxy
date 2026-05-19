@@ -16,6 +16,15 @@ import (
 	"github.com/xtaci/smux"
 )
 
+// laneStream is the subset of *smux.Stream that serverLane needs. Defined as
+// an interface so unit tests can inject in-memory pipes without spinning up a
+// real smux session.
+type laneStream interface {
+	io.Reader
+	io.Writer
+	SetDeadline(time.Time) error
+}
+
 // Deps groups host-process dependencies needed by the bond server.
 type Deps struct {
 	Debug  bool
@@ -107,7 +116,7 @@ func (r *Registry) get(ctx context.Context, id uint64, connectAddr string) *serv
 
 type serverLane struct {
 	index  uint16
-	stream *smux.Stream
+	stream laneStream
 	mu     sync.Mutex
 }
 
