@@ -5,13 +5,11 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -21,6 +19,7 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/client/internal/dnsdial"
 	"github.com/cacggghp/vk-turn-proxy/client/internal/vkauth"
 	bondclient "github.com/cacggghp/vk-turn-proxy/internal/bond/client"
+	"github.com/cacggghp/vk-turn-proxy/internal/config"
 	"github.com/cacggghp/vk-turn-proxy/internal/dtlsdial"
 	udpproxy "github.com/cacggghp/vk-turn-proxy/internal/proxy/udp"
 	"github.com/cacggghp/vk-turn-proxy/internal/proxy/vless"
@@ -91,102 +90,56 @@ func main() {
 		log.Fatalf("Exit...\n")
 	}()
 
-	host := flag.String("turn", "", "override TURN server ip")
-	port := flag.String("port", "", "override TURN port")
-	listen := flag.String("listen", "127.0.0.1:9000", "listen on ip:port")
-	vklink := flag.String("vk-link", "", "VK calls invite link \"https://vk.com/call/join/...\"")
-	peerAddr := flag.String("peer", "", "peer server address (host:port)")
-	n := flag.Int("n", 10, "connections to TURN")
-	udp := flag.Bool("udp", false, "connect to TURN with UDP")
-	direct := flag.Bool("no-dtls", false, "connect without obfuscation. DO NOT USE")
-	vlessMode := flag.Bool("vless", false, "VLESS mode: forward TCP connections (for VLESS) instead of UDP packets")
-	vlessBond := flag.Bool("vless-bond", false, "bond one VLESS TCP connection across all active smux sessions")
-	wrapMode := flag.Bool("wrap", false, "WRAP mode: ChaCha20-XOR obfuscate DTLS packets before they reach TURN ChannelData")
-	wrapKeyHex := flag.String("wrap-key", "", "32-byte hex-encoded shared key for -wrap (64 hex chars)")
-	genWrapKey := flag.Bool("gen-wrap-key", false, "print a fresh 64-character hex key for -wrap-key and exit")
-	streamsPerCredFlag := flag.Int("streams-per-cred", vkauth.DefaultStreamsPerCache, "number of TURN streams sharing one VK credential cache")
-	debugFlag := flag.Bool("debug", false, "enable debug logging")
-	manualCaptchaFlag := flag.Bool("manual-captcha", false, "skip auto captcha solving, use manual mode immediately")
-	dnsFlag := flag.String("dns", dnsdial.DNSModeAuto, "DNS resolution mode: udp | doh | auto (auto tries UDP/53 first, sticky-fallback to DoH on total failure)")
-	dnsServersFlag := flag.String("dns-servers", "", "comma-separated UDP/53 DNS servers to use instead of built-in defaults (e.g. carrier resolvers from Android LinkProperties). Format: ip[:port][,ip[:port]...].")
-	flag.Parse()
+	cfg, err := config.ParseClient(os.Args[1:], os.Stderr)
+	if err != nil {
+		log.Panicf("%v", err)
+	}
 
-	switch *dnsFlag {
-	case dnsdial.DNSModeUDP, dnsdial.DNSModeDoH, dnsdial.DNSModeAuto:
-	default:
-		log.Panicf("invalid -dns value %q: must be udp | doh | auto", *dnsFlag)
+	if cfg.DNSServers != nil {
+		dnsdial.SetUDPDNSServers(cfg.DNSServers)
+		log.Printf("[DNS] using custom UDP servers: %v", cfg.DNSServers)
 	}
-	if *dnsServersFlag != "" {
-		servers := strings.Split(*dnsServersFlag, ",")
-		dnsdial.SetUDPDNSServers(servers)
-		log.Printf("[DNS] using custom UDP servers: %v", servers)
-	}
-	appDialer = dnsdial.AppDialer(*dnsFlag)
-	dnsdial.InstallGlobalResolver(*dnsFlag)
-	if *genWrapKey {
-		key, err := wrap.GenKeyHex()
-		if err != nil {
-			log.Panicf("%v", err)
+	appDialer = dnsdial.AppDialer(cfg.DNSMode)
+	dnsdial.InstallGlobalResolver(cfg.DNSMode)
+	if cfg.GenWrapKey {
+		key, gerr := wrap.GenKeyHex()
+		if gerr != nil {
+			log.Panicf("%v", gerr)
 		}
 		fmt.Println(key)
 		return
 	}
-	if *peerAddr == "" {
-		log.Panicf("Need peer address!")
-	}
-	peer, err := net.ResolveUDPAddr("udp", *peerAddr)
+	peer, err := net.ResolveUDPAddr("udp", cfg.Peer)
 	if err != nil {
 		panic(err)
 	}
-	if *vklink == "" {
-		log.Panicf("Need vk-link!")
-	}
-	if *wrapMode && *direct {
-		log.Panicf("-wrap requires DTLS; remove -no-dtls")
-	}
-	wrapKey, err := wrap.DecodeKey(*wrapMode, *wrapKeyHex)
-	if err != nil {
-		log.Panicf("%v", err)
-	}
-	if *wrapMode {
+	if cfg.WrapMode {
 		log.Printf("WRAP mode enabled: peer server must use matching -wrap-key")
 	}
-	if *streamsPerCredFlag <= 0 {
-		log.Panicf("-streams-per-cred must be positive")
-	}
 
-	isDebug = *debugFlag
+	isDebug = cfg.Debug
 
 	vkAuth = vkauth.New(vkauth.Config{
 		Dialer:          appDialer,
-		ManualOnly:      *manualCaptchaFlag,
-		StreamsPerCache: *streamsPerCredFlag,
+		ManualOnly:      cfg.ManualCaptcha,
+		StreamsPerCache: cfg.StreamsPerCred,
 		StreamsAlive:    func() int32 { return connectedStreams.Load() },
 		ManualSolver:    manualCaptchaSolver,
 		Debugf:          debugf,
 	})
 
-	parts := strings.Split(*vklink, "join/")
-	link := parts[len(parts)-1]
-
 	getCreds := getCredsFunc(vkAuth.GetCredentials)
-	if *n <= 0 {
-		*n = 10
-	}
-	if idx := strings.IndexAny(link, "/?#"); idx != -1 {
-		link = link[:idx]
-	}
 
 	params := &turnParams{
-		host:     *host,
-		port:     *port,
-		link:     link,
-		udp:      *udp,
-		wrapKey:  wrapKey,
+		host:     cfg.Host,
+		port:     cfg.Port,
+		link:     cfg.VKLink,
+		udp:      cfg.UDP,
+		wrapKey:  cfg.WrapKey,
 		getCreds: getCreds,
 	}
 
-	if *vlessMode {
+	if cfg.VLESSMode {
 		bondH := &bondclient.Handler{Deps: bondclient.Deps{Debug: isDebug, Debugf: debugf}}
 		vlessDeps := &vless.Deps{
 			DTLSDialer:  vlessDtlsDialer,
@@ -202,11 +155,11 @@ func main() {
 			WrapKey:  params.wrapKey,
 			GetCreds: vless.GetCredsFunc(params.getCreds),
 		}
-		vless.Run(ctx, vlessDeps, vlessParams, peer, *listen, *n, *vlessBond)
+		vless.Run(ctx, vlessDeps, vlessParams, peer, cfg.Listen, cfg.N, cfg.VLESSBond)
 		return
 	}
 
-	listenConn, err := net.ListenPacket("udp", *listen)
+	listenConn, err := net.ListenPacket("udp", cfg.Listen)
 	if err != nil {
 		log.Panicf("Failed to listen: %s", err)
 	}
@@ -216,7 +169,7 @@ func main() {
 		}
 	})
 
-	numStreams := *n
+	numStreams := cfg.N
 	if numStreams <= 0 {
 		numStreams = 1
 	}
@@ -268,7 +221,7 @@ func main() {
 	wg1 := sync.WaitGroup{}
 	t := time.Tick(200 * time.Millisecond)
 
-	if *direct {
+	if cfg.Direct {
 		log.Panicf("Direct mode not supported with dispatcher")
 	}
 

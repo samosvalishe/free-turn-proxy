@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -17,6 +14,7 @@ import (
 
 	"github.com/cacggghp/vk-turn-proxy/internal/bond"
 	bondserver "github.com/cacggghp/vk-turn-proxy/internal/bond/server"
+	"github.com/cacggghp/vk-turn-proxy/internal/config"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
 	"github.com/cacggghp/vk-turn-proxy/tcputil"
@@ -34,23 +32,18 @@ func debugf(format string, v ...any) {
 }
 
 func main() {
-	listen := flag.String("listen", "0.0.0.0:56000", "listen on ip:port")
-	connect := flag.String("connect", "", "connect to ip:port")
-	vlessMode := flag.Bool("vless", false, "VLESS mode: forward TCP connections (for VLESS) instead of UDP packets")
-	vlessBond := flag.Bool("vless-bond", false, "bond one VLESS TCP connection across all active smux sessions")
-	wrapMode := flag.Bool("wrap", false, "WRAP mode: ChaCha20-XOR obfuscate DTLS packets before they reach TURN ChannelData")
-	wrapKeyHex := flag.String("wrap-key", "", "32-byte hex-encoded shared key for -wrap (64 hex chars)")
-	genWrapKey := flag.Bool("gen-wrap-key", false, "print a fresh 64-character hex key for -wrap-key and exit")
-	debugFlag := flag.Bool("debug", false, "enable debug logging")
-	flag.Parse()
-	isDebug = *debugFlag
+	cfg, err := config.ParseServer(os.Args[1:], os.Stderr)
+	if err != nil {
+		log.Panicf("%v", err)
+	}
+	isDebug = cfg.Debug
 
-	if *genWrapKey {
-		key := make([]byte, wrap.KeyLen)
-		if _, err := rand.Read(key); err != nil {
-			log.Panicf("gen-wrap-key: rand.Read: %v", err)
+	if cfg.GenWrapKey {
+		key, gerr := wrap.GenKeyHex()
+		if gerr != nil {
+			log.Panicf("gen-wrap-key: %v", gerr)
 		}
-		fmt.Println(hex.EncodeToString(key))
+		fmt.Println(key)
 		return
 	}
 
@@ -66,27 +59,12 @@ func main() {
 		log.Fatalf("Exit...\n")
 	}()
 
-	addr, err := net.ResolveUDPAddr("udp", *listen)
+	addr, err := net.ResolveUDPAddr("udp", cfg.Listen)
 	if err != nil {
 		panic(err)
 	}
-	if len(*connect) == 0 {
-		log.Panicf("server address is required")
-	}
-	var wrapKey []byte
-	if *wrapMode {
-		if *wrapKeyHex == "" {
-			log.Panicf("-wrap requires -wrap-key")
-		}
-		wrapKey, err = hex.DecodeString(*wrapKeyHex)
-		if err != nil {
-			log.Panicf("-wrap-key invalid hex: %v", err)
-		}
-		if len(wrapKey) != wrap.KeyLen {
-			log.Panicf("-wrap-key must decode to %d bytes (got %d)", wrap.KeyLen, len(wrapKey))
-		}
-	}
-	log.Printf("Starting server listen=%s connect=%s vless=%t vless-bond=%t wrap=%t bond-autodetect=true", *listen, *connect, *vlessMode, *vlessBond, *wrapMode)
+	wrapKey := cfg.WrapKey
+	log.Printf("Starting server listen=%s connect=%s vless=%t vless-bond=%t wrap=%t bond-autodetect=true", cfg.Listen, cfg.Connect, cfg.VLESSMode, cfg.VLESSBond, cfg.WrapMode)
 	// Generate a certificate and private key to secure the connection
 	certificate, genErr := selfsign.GenerateSelfSigned()
 	if genErr != nil {
@@ -104,7 +82,7 @@ func main() {
 		dtls.WithConnectionIDGenerator(dtls.RandomCIDGenerator(8)),
 	}
 	var listener net.Listener
-	if *wrapMode {
+	if cfg.WrapMode {
 		log.Printf("WRAP mode enabled: listener only accepts clients with matching -wrap-key")
 		wrapListener, werr := wrap.Listen(addr, wrapKey)
 		if werr != nil {
@@ -163,10 +141,10 @@ func main() {
 			}
 			debugf("Handshake done")
 
-			if *vlessMode {
-				handleVLESSConnection(ctx, dtlsConn, *connect, *vlessBond)
+			if cfg.VLESSMode {
+				handleVLESSConnection(ctx, dtlsConn, cfg.Connect, cfg.VLESSBond)
 			} else {
-				handleUDPConnection(ctx, conn, *connect)
+				handleUDPConnection(ctx, conn, cfg.Connect)
 			}
 
 			debugf("Connection closed: %s\n", conn.RemoteAddr())
