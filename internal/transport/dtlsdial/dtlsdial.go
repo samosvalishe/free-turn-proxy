@@ -5,7 +5,9 @@ package dtlsdial
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/pion/dtls/v3"
@@ -19,16 +21,25 @@ type Dialer struct {
 	// HandshakeSem, if non-nil, gates concurrent handshakes (Dial blocks
 	// until a slot is available or ctx fires).
 	HandshakeSem chan struct{}
+
+	certOnce sync.Once
+	cert     tls.Certificate
+	certErr  error
 }
 
-// Dial generates a fresh self-signed cert, acquires the optional handshake
-// slot, and performs a DTLS client handshake over pc to peer. On success
-// returns the connected *dtls.Conn. Caller closes it.
+// Dial acquires the optional handshake slot and performs a DTLS client
+// handshake over pc to peer. On success returns the connected *dtls.Conn.
+// Caller closes it. The self-signed cert is generated once per Dialer and
+// reused across handshakes (DTLS is used here for obfuscation, not auth —
+// see internal/transport/dtlsdial/doc.go).
 func (d *Dialer) Dial(ctx context.Context, pc net.PacketConn, peer *net.UDPAddr) (*dtls.Conn, error) {
-	certificate, err := selfsign.GenerateSelfSigned()
-	if err != nil {
-		return nil, err
+	d.certOnce.Do(func() {
+		d.cert, d.certErr = selfsign.GenerateSelfSigned()
+	})
+	if d.certErr != nil {
+		return nil, d.certErr
 	}
+	certificate := d.cert
 	if d.HandshakeSem != nil {
 		select {
 		case d.HandshakeSem <- struct{}{}:

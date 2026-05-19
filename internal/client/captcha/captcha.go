@@ -463,15 +463,20 @@ func solveCaptchaPoW(ctx context.Context, input string, difficulty int) string {
 		return ""
 	}
 	target := strings.Repeat("0", difficulty)
+	// ctx-check every 1024 iterations keeps cancel latency under a few ms
+	// even on weak ARM (was every 4096).
+	buf := make([]byte, 0, len(input)+20)
+	buf = append(buf, input...)
 	for nonce := 1; nonce <= 10_000_000; nonce++ {
-		if nonce%4096 == 0 {
+		if nonce&1023 == 0 {
 			select {
 			case <-ctx.Done():
 				return ""
 			default:
 			}
 		}
-		sum := sha256.Sum256([]byte(input + strconv.Itoa(nonce)))
+		buf = strconv.AppendInt(buf[:len(input)], int64(nonce), 10)
+		sum := sha256.Sum256(buf)
 		hashHex := hex.EncodeToString(sum[:])
 		if strings.HasPrefix(hashHex, target) {
 			return hashHex

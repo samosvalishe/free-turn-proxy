@@ -1,8 +1,7 @@
 // Package udprelay implements the UDP-mode proxy loop: it terminates DTLS from a
 // local peer (WireGuard) and relays its packets through a per-stream TURN
-// allocation back to a remote peer. It owns oneDtlsConnection /
-// oneTurnConnection and their retry loops; wiring (flag parsing, listener,
-// inbound dispatch) stays in main.
+// allocation back to a remote peer. Run is the entrypoint; it owns the local
+// listener, the inbound dispatch fan-in, and the per-stream DTLS/TURN loops.
 package udprelay
 
 import (
@@ -32,9 +31,9 @@ type Packet struct {
 	N    int
 }
 
-// Pool reuses Packet buffers across the inbound hot path. Buffer size matches
-// the 2048-byte default the listener loop expects.
-var Pool = sync.Pool{
+// packetPool reuses Packet buffers across the inbound hot path. Buffer size
+// matches the 2048-byte default the listener loop expects.
+var packetPool = sync.Pool{
 	New: func() any { return &Packet{Data: make([]byte, 2048)} },
 }
 
@@ -61,9 +60,9 @@ type Params struct {
 	GetCreds GetCredsFunc
 }
 
-// Deps groups everything the loops need from the host process. ActiveLocalPeer
-// is read concurrently with the listener that writes it; ConnectedStreams is
-// the live-stream counter the auth layer queries.
+// Deps groups everything the loops need from the host process. The atomics
+// are owned by Run and exposed here so DTLSLoop/TURNLoop can share them when
+// called directly (Run wires them automatically).
 type Deps struct {
 	DTLSDialer       *dtlsdial.Dialer
 	Auth             AuthHandler
@@ -78,6 +77,114 @@ func (d *Deps) log() logx.Logger {
 		return logx.Nop()
 	}
 	return d.Log
+}
+
+// Run is the UDP-mode entrypoint. It binds listenAddr, fans inbound packets
+// into a shared queue, and spawns numStreams pairs of (DTLSLoop, TURNLoop).
+// connectedStreams is owned by the caller (vkauth reads it via StreamsAlive)
+// and incremented/decremented by oneTURN.
+// Returns after all stream loops exit (i.e. when ctx is cancelled).
+func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, appCancel context.CancelFunc, params *Params, peer *net.UDPAddr, listenAddr string, numStreams int) {
+	listenConn, err := net.ListenPacket("udp", listenAddr)
+	if err != nil {
+		log.Panicf("Failed to listen: %s", err)
+	}
+	context.AfterFunc(ctx, func() {
+		if closeErr := listenConn.Close(); closeErr != nil {
+			log.Printf("Failed to close local connection: %s", closeErr)
+		}
+	})
+
+	if numStreams <= 0 {
+		numStreams = 1
+	}
+
+	var activeLocalPeer atomic.Value
+	deps := &Deps{
+		DTLSDialer:       dtlsDialer,
+		Auth:             auth,
+		Log:              logger,
+		ActiveLocalPeer:  &activeLocalPeer,
+		ConnectedStreams: connectedStreams,
+		AppCancel:        appCancel,
+	}
+
+	inboundChan := make(chan *Packet, inboundQueueCap)
+	go runListener(ctx, listenConn, &activeLocalPeer, inboundChan)
+
+	wg := sync.WaitGroup{}
+	t := time.Tick(200 * time.Millisecond)
+
+	okchan := make(chan struct{})
+	connchan := make(chan net.PacketConn)
+	wg.Go(func() {
+		DTLSLoop(ctx, deps, peer, listenConn, inboundChan, connchan, okchan, 1)
+	})
+	wg.Go(func() {
+		TURNLoop(ctx, deps, params, peer, connchan, t, 1)
+	})
+
+	select {
+	case <-okchan:
+	case <-ctx.Done():
+	}
+
+	for i := 1; i < numStreams; i++ {
+		cchan := make(chan net.PacketConn)
+		streamID := i
+		wg.Go(func() {
+			DTLSLoop(ctx, deps, peer, listenConn, inboundChan, cchan, nil, streamID)
+		})
+		wg.Go(func() {
+			TURNLoop(ctx, deps, params, peer, cchan, t, streamID)
+		})
+	}
+
+	wg.Wait()
+}
+
+const inboundQueueCap = 2000
+
+// runListener reads packets from listenConn, refreshes the active-peer cache,
+// and posts each packet to inboundChan. Packets are dropped when the channel
+// is full to keep the read loop wait-free.
+func runListener(ctx context.Context, listenConn net.PacketConn, activeLocalPeer *atomic.Value, inboundChan chan<- *Packet) {
+	// Pointer-cache for the last seen local peer addr. Avoids the
+	// per-packet addr.String() allocation pair on the hot WG ingest path:
+	// most packets come from the same UDPAddr instance, so a pointer
+	// equality check covers the fast path. The slow path (new instance
+	// from ReadFrom for the same ip:port) does one String compare and
+	// then refreshes the cache.
+	var lastAddr net.Addr
+	var lastAddrStr string
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		pktIface := packetPool.Get()
+		pkt := pktIface.(*Packet) //nolint:errcheck // pool New always returns *Packet
+		nRead, addr, err := listenConn.ReadFrom(pkt.Data)
+		if err != nil {
+			return
+		}
+
+		if addr != lastAddr {
+			s := addr.String()
+			if s != lastAddrStr {
+				activeLocalPeer.Store(addr)
+				lastAddrStr = s
+			}
+			lastAddr = addr
+		}
+
+		pkt.N = nRead
+
+		select {
+		case inboundChan <- pkt:
+		default:
+			packetPool.Put(pkt)
+		}
+	}
 }
 
 // DTLSLoop keeps a single DTLS termination alive for streamID, restarting it
@@ -224,7 +331,7 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 				return
 			case pkt := <-inboundChan:
 				_, _ = dtlsConn.Write(pkt.Data[:pkt.N])
-				Pool.Put(pkt)
+				packetPool.Put(pkt)
 			}
 		}
 	})
