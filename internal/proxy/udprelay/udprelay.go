@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/logx"
+	"github.com/cacggghp/vk-turn-proxy/internal/proxy/common"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/internal/transport/dtlsdial"
-	"github.com/cacggghp/vk-turn-proxy/internal/transport/turndial"
 	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
 	"github.com/cbeuw/connutil"
 )
@@ -37,12 +37,12 @@ var Pool = sync.Pool{
 	New: func() any { return &Packet{Data: make([]byte, 2048)} },
 }
 
-// GetCredsFunc resolves VK TURN credentials for a (link, streamID) pair.
-// Matches vkauth.Client.GetCredentials.
-type GetCredsFunc func(ctx context.Context, link string, streamID int) (string, string, string, error)
+// GetCredsFunc is an alias of common.GetCredsFunc kept for cmd/main wiring
+// stability.
+type GetCredsFunc = common.GetCredsFunc
 
 // AuthHandler is the subset of vkauth.Client this package needs. Keeping it as
-// an interface lets internal/proxy/udp avoid importing internal/client/vkauth.
+// an interface lets internal/proxy/udprelay avoid importing internal/client/vkauth.
 type AuthHandler interface {
 	IsAuthError(err error) bool
 	HandleAuthError(streamID int) bool
@@ -248,16 +248,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	time.Sleep(time.Duration(rand.Intn(400)+100) * time.Millisecond)
 	var err error
 	defer func() { c <- err }()
-	user, pass, urlTarget, err1 := params.GetCreds(ctx, params.Link, streamID)
-	if err1 != nil {
-		err = fmt.Errorf("failed to get TURN credentials: %s", err1)
-		return
-	}
-	stream, err1 := turndial.Open(ctx, turndial.Config{
-		HostOverride: params.Host,
-		PortOverride: params.Port,
-		UDP:          params.UDP,
-	}, peer, user, pass, urlTarget)
+	stream, err1 := common.DialTURN(ctx, params.Host, params.Port, params.UDP, peer, params.Link, streamID, params.GetCreds)
 	if err1 != nil {
 		if deps.Auth.IsAuthError(err1) {
 			deps.Auth.HandleAuthError(streamID)
@@ -293,15 +284,11 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		}
 	})
 	var internalPipeAddr atomic.Value
-	var wc *srtpmimicry.Conn
-	if len(params.WrapKey) == srtpmimicry.KeyLen {
-		var wcErr error
-		wc, wcErr = srtpmimicry.NewConn(params.WrapKey, false)
-		if wcErr != nil {
-			log.Printf("[STREAM %d] WRAP init failed: %v", streamID, wcErr)
-			turncancel()
-			return
-		}
+	wc, wcErr := common.NewClientWrap(params.WrapKey)
+	if wcErr != nil {
+		log.Printf("[STREAM %d] WRAP init failed: %v", streamID, wcErr)
+		turncancel()
+		return
 	}
 
 	go func() {

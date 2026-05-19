@@ -11,16 +11,17 @@ import (
 
 	"github.com/cacggghp/vk-turn-proxy/internal/client/ish"
 	"github.com/cacggghp/vk-turn-proxy/internal/logx"
+	"github.com/cacggghp/vk-turn-proxy/internal/proxy/common"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/internal/transport/dtlsdial"
 	"github.com/cacggghp/vk-turn-proxy/internal/transport/kcptun"
-	"github.com/cacggghp/vk-turn-proxy/internal/transport/turndial"
 	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
 	"github.com/xtaci/smux"
 )
 
-// GetCredsFunc resolves VK TURN credentials for a (link, streamID) pair.
-type GetCredsFunc func(ctx context.Context, link string, streamID int) (string, string, string, error)
+// GetCredsFunc is an alias of common.GetCredsFunc kept for cmd/main wiring
+// stability.
+type GetCredsFunc = common.GetCredsFunc
 
 // Params is the per-pool TURN/wrap configuration.
 type Params struct {
@@ -232,16 +233,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 		}
 	}
 
-	user, pass, rawURL, err := params.GetCreds(ctx, params.Link, id)
-	if err != nil {
-		return nil, nil, fmt.Errorf("get TURN creds: %w", err)
-	}
-
-	stream, err := turndial.Open(ctx, turndial.Config{
-		HostOverride: params.Host,
-		PortOverride: params.Port,
-		UDP:          params.UDP,
-	}, peer, user, pass, rawURL)
+	stream, err := common.DialTURN(ctx, params.Host, params.Port, params.UDP, peer, params.Link, id, params.GetCreds)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -250,13 +242,10 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	deps.log().Debugf("[session %d] TURN server IP: %s", id, stream.ServerUDPAddr.IP)
 	deps.log().Debugf("relayed-address=%s", relayConn.LocalAddr().String())
 
-	var relayWC *srtpmimicry.Conn
-	if len(params.WrapKey) == srtpmimicry.KeyLen {
-		relayWC, err = srtpmimicry.NewConn(params.WrapKey, false)
-		if err != nil {
-			cleanup()
-			return nil, nil, fmt.Errorf("wrap init: %w", err)
-		}
+	relayWC, err := common.NewClientWrap(params.WrapKey)
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("wrap init: %w", err)
 	}
 	dtlsPC := &srtpmimicry.RelayPacketConn{Relay: relayConn, Peer: peer, Conn: relayWC}
 	dtlsConn, err := deps.DTLSDialer.Dial(ctx, dtlsPC, peer)
