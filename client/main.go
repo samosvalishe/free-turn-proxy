@@ -7,12 +7,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,13 +20,11 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/client/internal/captcha"
 	"github.com/cacggghp/vk-turn-proxy/client/internal/dnsdial"
 	"github.com/cacggghp/vk-turn-proxy/client/internal/vkauth"
-	"github.com/cacggghp/vk-turn-proxy/internal/bond"
+	bondclient "github.com/cacggghp/vk-turn-proxy/internal/bond/client"
 	"github.com/cacggghp/vk-turn-proxy/internal/dtlsdial"
 	udpproxy "github.com/cacggghp/vk-turn-proxy/internal/proxy/udp"
 	"github.com/cacggghp/vk-turn-proxy/internal/proxy/vless"
-	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/internal/wrap"
-	"github.com/xtaci/smux"
 )
 
 type getCredsFunc func(ctx context.Context, link string, streamID int) (string, string, string, error)
@@ -191,11 +187,12 @@ func main() {
 	}
 
 	if *vlessMode {
+		bondH := &bondclient.Handler{Deps: bondclient.Deps{Debug: isDebug, Debugf: debugf}}
 		vlessDeps := &vless.Deps{
 			DTLSDialer:  vlessDtlsDialer,
 			Debug:       isDebug,
 			Debugf:      debugf,
-			BondHandler: handleBondedTCP,
+			BondHandler: bondH.Handle,
 		}
 		vlessParams := &vless.Params{
 			Host:     params.host,
@@ -319,234 +316,4 @@ func main() {
 	}
 
 	wg1.Wait()
-}
-
-// bondClientLane is one striped smux stream within a bonded TCP connection.
-// Stays in main during stage 4.2; moves to internal/bond/client in stage 5.1.
-type bondClientLane struct {
-	ps     *vless.PooledSession
-	stream *smux.Stream
-	mu     sync.Mutex
-	dead   atomic.Bool
-}
-
-func handleBondedTCP(ctx context.Context, tcpConn net.Conn, connID uint64, candidates []*vless.PooledSession) {
-	defer func() { _ = tcpConn.Close() }()
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	lanes := make([]*bondClientLane, 0, len(candidates))
-	laneIDs := make([]string, 0, len(candidates))
-	for i, ps := range candidates {
-		if ps.Sess.IsClosed() {
-			continue
-		}
-		stream, err := ps.Sess.OpenStream()
-		if err != nil {
-			log.Printf("[bond %d] session %d open stream error: %s", connID, ps.ID, err)
-			continue
-		}
-		if err := bond.WriteHello(stream, connID, uint16(i), uint16(len(candidates))); err != nil {
-			log.Printf("[bond %d] session %d hello error: %s", connID, ps.ID, err)
-			_ = stream.Close()
-			continue
-		}
-		ps.Opened.Add(1)
-		ps.Active.Add(1)
-		lanes = append(lanes, &bondClientLane{ps: ps, stream: stream})
-		laneIDs = append(laneIDs, strconv.Itoa(ps.ID))
-	}
-
-	if len(lanes) == 0 {
-		log.Printf("[bond %d] no usable lanes, rejecting TCP from %s", connID, tcpConn.RemoteAddr())
-		return
-	}
-	context.AfterFunc(ctx, func() {
-		now := time.Now()
-		if err := tcpConn.SetDeadline(now); err != nil && isDebug {
-			log.Printf("[bond %d] local TCP deadline error: %v", connID, err)
-		}
-		for _, lane := range lanes {
-			if err := lane.stream.SetDeadline(now); err != nil && isDebug {
-				log.Printf("[bond %d] session %d stream deadline error: %v", connID, lane.ps.ID, err)
-			}
-		}
-	})
-
-	debugf("[bond %d] TCP accept from=%s lanes=%d [%s]", connID, tcpConn.RemoteAddr(), len(lanes), strings.Join(laneIDs, ","))
-	defer func() {
-		for _, lane := range lanes {
-			_ = lane.stream.Close()
-			active := lane.ps.Active.Add(-1)
-			closed := lane.ps.Closed.Add(1)
-			debugf("[bond %d] lane session %d close active=%d closed=%d totals: to-session=%s from-session=%s",
-				connID, lane.ps.ID, active, closed,
-				stats.FormatByteCount(lane.ps.ToSession.Load()), stats.FormatByteCount(lane.ps.FromSession.Load()))
-		}
-	}()
-
-	recvCh := make(chan bond.Frame, 1024)
-	var readWG sync.WaitGroup
-	for _, lane := range lanes {
-		l := lane
-		readWG.Go(func() {
-			for {
-				f, err := bond.ReadFrame(l.stream)
-				if err != nil {
-					l.dead.Store(true)
-					select {
-					case <-ctx.Done():
-					default:
-						if err != io.EOF {
-							debugf("[bond %d] session %d read frame error: %v", connID, l.ps.ID, err)
-						}
-					}
-					return
-				}
-				if f.Type == bond.FrameData {
-					l.ps.FromSession.Add(uint64(len(f.Data)))
-				}
-				select {
-				case recvCh <- f:
-				case <-ctx.Done():
-					return
-				}
-			}
-		})
-	}
-	go func() {
-		readWG.Wait()
-		close(recvCh)
-	}()
-
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		copyTCPToBond(ctx, connID, tcpConn, lanes)
-	})
-	wg.Go(func() {
-		copyBondToTCP(ctx, connID, tcpConn, recvCh)
-		cancel()
-	})
-	wg.Wait()
-}
-
-func copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.Conn, lanes []*bondClientLane) {
-	buf := make([]byte, bond.MaxChunk)
-	var seq uint64
-	var laneIdx uint64
-	for {
-		n, err := tcpConn.Read(buf)
-		if n > 0 {
-			lane, writeErr := writeBondFrameToNextLane(ctx, lanes, bond.FrameData, seq, buf[:n], &laneIdx)
-			if writeErr != nil {
-				log.Printf("[bond %d] write data error: %v", connID, writeErr)
-				return
-			}
-			lane.ps.ToSession.Add(uint64(n))
-			seq++
-		}
-		if err != nil {
-			if isDebug && err != io.EOF {
-				log.Printf("[bond %d] local TCP read finished with error: %v", connID, err)
-			}
-			for _, lane := range lanes {
-				if lane.dead.Load() {
-					continue
-				}
-				lane.mu.Lock()
-				writeErr := bond.WriteFrame(lane.stream, bond.FrameFIN, seq, nil)
-				lane.mu.Unlock()
-				if writeErr != nil && ctx.Err() == nil {
-					log.Printf("[bond %d] session %d write FIN error: %v", connID, lane.ps.ID, writeErr)
-				}
-			}
-			debugf("[bond %d] upload finished chunks=%d", connID, seq)
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-	}
-}
-
-func writeBondFrameToNextLane(ctx context.Context, lanes []*bondClientLane, typ byte, seq uint64, data []byte, laneIdx *uint64) (*bondClientLane, error) {
-	for range lanes {
-		idx := *laneIdx % uint64(len(lanes))
-		*laneIdx++
-		lane := lanes[idx]
-		if lane.dead.Load() {
-			continue
-		}
-		lane.mu.Lock()
-		err := bond.WriteFrame(lane.stream, typ, seq, data)
-		lane.mu.Unlock()
-		if err == nil {
-			return lane, nil
-		}
-		lane.dead.Store(true)
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-	}
-	if ctx.Err() != nil {
-		return nil, ctx.Err()
-	}
-	return nil, fmt.Errorf("no live bond lanes")
-}
-
-func copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.Conn, recvCh <-chan bond.Frame) {
-	pending := make(map[uint64][]byte)
-	var expect uint64
-	var finSeq *uint64
-
-	for {
-		if finSeq != nil && expect == *finSeq {
-			bond.CloseWrite(tcpConn, debugf)
-			debugf("[bond %d] download finished chunks=%d", connID, expect)
-			return
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case f, ok := <-recvCh:
-			if !ok {
-				return
-			}
-			switch f.Type {
-			case bond.FrameData:
-				if len(pending) >= 1024 {
-					log.Printf("[bond %d] pending map overflow (>1024), closing", connID)
-					return
-				}
-				pending[f.Seq] = f.Data
-			case bond.FrameFIN:
-				v := f.Seq
-				if finSeq == nil || v < *finSeq {
-					finSeq = &v
-				}
-			default:
-				log.Printf("[bond %d] unknown frame type %d", connID, f.Type)
-				return
-			}
-
-			for {
-				data, ok := pending[expect]
-				if !ok {
-					break
-				}
-				delete(pending, expect)
-				if len(data) > 0 {
-					if _, err := tcpConn.Write(data); err != nil {
-						log.Printf("[bond %d] local TCP write error: %v", connID, err)
-						return
-					}
-				}
-				expect++
-			}
-		}
-	}
 }
