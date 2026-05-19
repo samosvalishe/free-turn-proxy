@@ -21,23 +21,26 @@ func TestParseClient_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if c.Listen != "127.0.0.1:9000" {
-		t.Errorf("Listen default: %q", c.Listen)
+	if c.Proxy.Listen != "127.0.0.1:9000" {
+		t.Errorf("Proxy.Listen default: %q", c.Proxy.Listen)
 	}
-	if c.N != 10 {
-		t.Errorf("N default: %d", c.N)
+	if c.TURN.N != 10 {
+		t.Errorf("TURN.N default: %d", c.TURN.N)
 	}
-	if c.DNSMode != "auto" {
-		t.Errorf("DNSMode default: %q", c.DNSMode)
+	if c.DNS.Mode != "auto" {
+		t.Errorf("DNS.Mode default: %q", c.DNS.Mode)
 	}
-	if c.StreamsPerCred != defaultStreamsPerCache {
-		t.Errorf("StreamsPerCred default: %d", c.StreamsPerCred)
+	if c.VK.StreamsPerCred != defaultStreamsPerCache {
+		t.Errorf("VK.StreamsPerCred default: %d", c.VK.StreamsPerCred)
 	}
-	if c.VKLink != "abcdef" {
-		t.Errorf("VKLink: %q (expected abcdef)", c.VKLink)
+	if c.VK.Link != "abcdef" {
+		t.Errorf("VK.Link: %q (expected abcdef)", c.VK.Link)
 	}
-	if c.WrapKey != nil {
-		t.Errorf("WrapKey should be nil when -wrap absent")
+	if c.Obf.WrapKey != nil {
+		t.Errorf("Obf.WrapKey should be nil when -wrap absent")
+	}
+	if c.Proxy.Mode != ProxyModeUDP {
+		t.Errorf("Proxy.Mode default: %q (expected udp)", c.Proxy.Mode)
 	}
 }
 
@@ -50,8 +53,8 @@ func TestParseClient_VKLinkStrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.VKLink != "CODE123" {
-		t.Errorf("VKLink: %q (expected CODE123)", c.VKLink)
+	if c.VK.Link != "CODE123" {
+		t.Errorf("VK.Link: %q (expected CODE123)", c.VK.Link)
 	}
 }
 
@@ -91,8 +94,8 @@ func TestParseClient_WrapKeyOK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.WrapKey) != 32 {
-		t.Errorf("WrapKey len: %d", len(c.WrapKey))
+	if len(c.Obf.WrapKey) != 32 {
+		t.Errorf("Obf.WrapKey len: %d", len(c.Obf.WrapKey))
 	}
 }
 
@@ -110,8 +113,8 @@ func TestParseClient_NClampedToTen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.N != 10 {
-		t.Errorf("N: %d (expected 10)", c.N)
+	if c.TURN.N != 10 {
+		t.Errorf("TURN.N: %d (expected 10)", c.TURN.N)
 	}
 }
 
@@ -121,8 +124,8 @@ func TestParseClient_DNSServersSplit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.DNSServers) != 2 || c.DNSServers[0] != "1.1.1.1" || c.DNSServers[1] != "8.8.8.8:53" {
-		t.Errorf("DNSServers: %v", c.DNSServers)
+	if len(c.DNS.Servers) != 2 || c.DNS.Servers[0] != "1.1.1.1" || c.DNS.Servers[1] != "8.8.8.8:53" {
+		t.Errorf("DNS.Servers: %v", c.DNS.Servers)
 	}
 }
 
@@ -131,8 +134,8 @@ func TestParseClient_GenWrapKeySkipsPeerCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gen-wrap-key should not require peer/vk-link: %v", err)
 	}
-	if !c.GenWrapKey {
-		t.Errorf("GenWrapKey not set")
+	if !c.Obf.GenWrapKey {
+		t.Errorf("Obf.GenWrapKey not set")
 	}
 }
 
@@ -144,16 +147,44 @@ func TestParseClient_HelpReturnsErrHelp(t *testing.T) {
 	}
 }
 
+func TestParseClient_ProxyMode(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want ProxyMode
+	}{
+		{"default-udp", nil, ProxyModeUDP},
+		{"vless", []string{"-vless"}, ProxyModeTCPFwd},
+		{"vless-bond", []string{"-vless", "-vless-bond"}, ProxyModeTCPFwdBond},
+		{"bond-without-vless-ignored", []string{"-vless-bond"}, ProxyModeUDP},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args := append(validClientArgs(), tc.args...)
+			c, err := ParseClient(args, io.Discard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Proxy.Mode != tc.want {
+				t.Errorf("Proxy.Mode = %q, want %q", c.Proxy.Mode, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseServer_Defaults(t *testing.T) {
 	s, err := ParseServer([]string{"-connect", "backend:1234"}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Listen != "0.0.0.0:56000" {
-		t.Errorf("Listen default: %q", s.Listen)
+	if s.Proxy.Listen != "0.0.0.0:56000" {
+		t.Errorf("Proxy.Listen default: %q", s.Proxy.Listen)
 	}
-	if s.Connect != "backend:1234" {
-		t.Errorf("Connect: %q", s.Connect)
+	if s.Proxy.Connect != "backend:1234" {
+		t.Errorf("Proxy.Connect: %q", s.Proxy.Connect)
+	}
+	if s.Proxy.Mode != ProxyModeUDP {
+		t.Errorf("Proxy.Mode default: %q", s.Proxy.Mode)
 	}
 }
 
@@ -183,8 +214,8 @@ func TestParseServer_WrapKeyOK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.WrapKey) != 32 {
-		t.Errorf("WrapKey len: %d", len(s.WrapKey))
+	if len(s.Obf.WrapKey) != 32 {
+		t.Errorf("Obf.WrapKey len: %d", len(s.Obf.WrapKey))
 	}
 }
 
@@ -193,7 +224,17 @@ func TestParseServer_GenWrapKeySkipsConnectCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gen-wrap-key should not require -connect: %v", err)
 	}
-	if !s.GenWrapKey {
-		t.Errorf("GenWrapKey not set")
+	if !s.Obf.GenWrapKey {
+		t.Errorf("Obf.GenWrapKey not set")
+	}
+}
+
+func TestParseServer_ProxyMode(t *testing.T) {
+	s, err := ParseServer([]string{"-connect", "x:1", "-vless"}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Proxy.Mode != ProxyModeTCPFwd {
+		t.Errorf("Proxy.Mode = %q, want tcpfwd", s.Proxy.Mode)
 	}
 }

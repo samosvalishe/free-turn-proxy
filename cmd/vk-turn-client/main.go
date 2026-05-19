@@ -90,13 +90,13 @@ func main() {
 		log.Panicf("%v", err)
 	}
 
-	if cfg.DNSServers != nil {
-		dnsdial.SetUDPDNSServers(cfg.DNSServers)
-		log.Printf("[DNS] using custom UDP servers: %v", cfg.DNSServers)
+	if cfg.DNS.Servers != nil {
+		dnsdial.SetUDPDNSServers(cfg.DNS.Servers)
+		log.Printf("[DNS] using custom UDP servers: %v", cfg.DNS.Servers)
 	}
-	appDialer = dnsdial.AppDialer(cfg.DNSMode)
-	dnsdial.InstallGlobalResolver(cfg.DNSMode)
-	if cfg.GenWrapKey {
+	appDialer = dnsdial.AppDialer(cfg.DNS.Mode)
+	dnsdial.InstallGlobalResolver(cfg.DNS.Mode)
+	if cfg.Obf.GenWrapKey {
 		key, gerr := srtpmimicry.GenKeyHex()
 		if gerr != nil {
 			log.Panicf("%v", gerr)
@@ -104,21 +104,21 @@ func main() {
 		fmt.Println(key)
 		return
 	}
-	peer, err := net.ResolveUDPAddr("udp", cfg.Peer)
+	peer, err := net.ResolveUDPAddr("udp", cfg.Proxy.Peer)
 	if err != nil {
 		panic(err)
 	}
-	if cfg.WrapMode {
+	if cfg.Obf.WrapMode {
 		log.Printf("WRAP mode enabled: peer server must use matching -wrap-key")
 	}
 
-	logger := logx.New(cfg.Debug)
-	manualcaptcha.Debug = cfg.Debug
+	logger := logx.New(cfg.Log.Debug)
+	manualcaptcha.Debug = cfg.Log.Debug
 
 	vkAuth = vkauth.New(vkauth.Config{
 		Dialer:          appDialer,
-		ManualOnly:      cfg.ManualCaptcha,
-		StreamsPerCache: cfg.StreamsPerCred,
+		ManualOnly:      cfg.VK.ManualCaptcha,
+		StreamsPerCache: cfg.VK.StreamsPerCred,
 		StreamsAlive:    func() int32 { return connectedStreams.Load() },
 		ManualSolver:    manualCaptchaSolver,
 		Log:             logger,
@@ -127,15 +127,15 @@ func main() {
 	getCreds := getCredsFunc(vkAuth.GetCredentials)
 
 	params := &turnParams{
-		host:     cfg.Host,
-		port:     cfg.Port,
-		link:     cfg.VKLink,
-		udp:      cfg.UDP,
-		wrapKey:  cfg.WrapKey,
+		host:     cfg.TURN.Host,
+		port:     cfg.TURN.Port,
+		link:     cfg.VK.Link,
+		udp:      cfg.TURN.UDP,
+		wrapKey:  cfg.Obf.WrapKey,
 		getCreds: getCreds,
 	}
 
-	if cfg.VLESSMode {
+	if cfg.Proxy.Mode != config.ProxyModeUDP {
 		bondH := &bondclient.Handler{Deps: bondclient.Deps{Log: logger}}
 		vlessDeps := &tcpfwd.Deps{
 			DTLSDialer:  vlessDtlsDialer,
@@ -150,11 +150,11 @@ func main() {
 			WrapKey:  params.wrapKey,
 			GetCreds: tcpfwd.GetCredsFunc(params.getCreds),
 		}
-		tcpfwd.Run(ctx, vlessDeps, vlessParams, peer, cfg.Listen, cfg.N, cfg.VLESSBond)
+		tcpfwd.Run(ctx, vlessDeps, vlessParams, peer, cfg.Proxy.Listen, cfg.TURN.N, (cfg.Proxy.Mode == config.ProxyModeTCPFwdBond))
 		return
 	}
 
-	listenConn, err := net.ListenPacket("udp", cfg.Listen)
+	listenConn, err := net.ListenPacket("udp", cfg.Proxy.Listen)
 	if err != nil {
 		log.Panicf("Failed to listen: %s", err)
 	}
@@ -164,7 +164,7 @@ func main() {
 		}
 	})
 
-	numStreams := cfg.N
+	numStreams := cfg.TURN.N
 	if numStreams <= 0 {
 		numStreams = 1
 	}

@@ -3,6 +3,11 @@
 // Parse* functions are side-effect free: they validate inputs and decode the
 // wrap key, but do not touch the network, DNS, or process state. main() is
 // responsible for wiring those side effects after Parse* returns.
+//
+// V2-7: options are grouped by domain (TURN, Obf, Proxy, VK, DNS, Log) so the
+// struct shape mirrors the conceptual layers of the proxy instead of being a
+// flat bag of bools. CLI flag names, defaults, and behavior are bit-exact
+// compatible with the pre-V2-7 surface.
 package config
 
 import (
@@ -15,9 +20,6 @@ import (
 	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
 )
 
-// Mirrors of constants defined in internal/client/* packages, duplicated here
-// because internal/config cannot import internal/client/* (those packages
-// import internal/config indirectly through dependents — avoid the cycle).
 const (
 	dnsModeUDP             = "udp"
 	dnsModeDoH             = "doh"
@@ -25,36 +27,73 @@ const (
 	defaultStreamsPerCache = 10
 )
 
+// ProxyMode selects the app-layer payload carried over the TURN tunnel.
+// On the client it can be all three; on the server only UDP / TCPFwd
+// (bond is auto-detected per stream by the magic prefix).
+type ProxyMode string
+
+const (
+	ProxyModeUDP        ProxyMode = "udp"         // -vless=false: UDP packet relay (WireGuard)
+	ProxyModeTCPFwd     ProxyMode = "tcpfwd"      // -vless=true: TCP forwarder over smux
+	ProxyModeTCPFwdBond ProxyMode = "tcpfwd-bond" // -vless=true -vless-bond=true: bonded TCP across N smux sessions
+)
+
+// TURNOpts groups TURN-server-side options (where and how to reach TURN).
+type TURNOpts struct {
+	Host string // -turn: override the TURN server IP/host
+	Port string // -port: override the TURN port
+	UDP  bool   // -udp: dial TURN via UDP (default: TCP/TLS)
+	N    int    // -n: number of TURN streams (client only)
+}
+
+// ObfOpts groups TURN-payload obfuscation options (SRTP-mimicry wrap).
+type ObfOpts struct {
+	WrapMode   bool   // -wrap: enable SRTP-mimicry AEAD wrap on TURN payload
+	WrapKey    []byte // -wrap-key (decoded): 32-byte shared key; nil unless WrapMode
+	GenWrapKey bool   // -gen-wrap-key: print a fresh key and exit
+}
+
+// ProxyOpts groups app-layer proxy options.
+type ProxyOpts struct {
+	Mode    ProxyMode // udp | tcpfwd | tcpfwd-bond (server: udp | tcpfwd)
+	Listen  string    // -listen: local bind addr (client: WG/TCP entry; server: TURN entry)
+	Connect string    // -connect: upstream backend addr (server only)
+	Peer    string    // -peer: server-side proxy addr the client dials (client only)
+}
+
+// VKOpts groups VK-credentials and captcha options (client only).
+type VKOpts struct {
+	Link           string // -vk-link (sanitized to the join-code suffix)
+	StreamsPerCred int    // -streams-per-cred
+	ManualCaptcha  bool   // -manual-captcha
+}
+
+// DNSOpts groups DNS-resolution options (client only).
+type DNSOpts struct {
+	Mode    string   // -dns: udp | doh | auto
+	Servers []string // -dns-servers (comma-split); nil when flag empty
+}
+
+// LogOpts groups logging options.
+type LogOpts struct {
+	Debug bool // -debug
+}
+
 // Client holds parsed and validated client CLI options.
 type Client struct {
-	Host           string
-	Port           string
-	Listen         string
-	VKLink         string // sanitized: stripped past "join/" and trimmed at /?#
-	Peer           string
-	N              int
-	UDP            bool
-	VLESSMode      bool
-	VLESSBond      bool
-	WrapMode       bool
-	WrapKey        []byte // nil unless WrapMode
-	GenWrapKey     bool
-	StreamsPerCred int
-	Debug          bool
-	ManualCaptcha  bool
-	DNSMode        string
-	DNSServers     []string // nil when -dns-servers empty
+	TURN  TURNOpts
+	Obf   ObfOpts
+	Proxy ProxyOpts
+	VK    VKOpts
+	DNS   DNSOpts
+	Log   LogOpts
 }
 
 // Server holds parsed and validated server CLI options.
 type Server struct {
-	Listen     string
-	Connect    string
-	VLESSMode  bool
-	WrapMode   bool
-	WrapKey    []byte
-	GenWrapKey bool
-	Debug      bool
+	Obf   ObfOpts
+	Proxy ProxyOpts
+	Log   LogOpts
 }
 
 // ParseClient parses args (excluding program name) into a Client.
@@ -88,53 +127,62 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	}
 
 	c := &Client{
-		Host:           *host,
-		Port:           *port,
-		Listen:         *listen,
-		Peer:           *peerAddr,
-		N:              *n,
-		UDP:            *udp,
-		VLESSMode:      *vlessMode,
-		VLESSBond:      *vlessBond,
-		WrapMode:       *wrapMode,
-		GenWrapKey:     *genWrapKey,
-		StreamsPerCred: *streamsPerCredFlag,
-		Debug:          *debugFlag,
-		ManualCaptcha:  *manualCaptchaFlag,
-		DNSMode:        *dnsFlag,
+		TURN: TURNOpts{
+			Host: *host,
+			Port: *port,
+			UDP:  *udp,
+			N:    *n,
+		},
+		Obf: ObfOpts{
+			WrapMode:   *wrapMode,
+			GenWrapKey: *genWrapKey,
+		},
+		Proxy: ProxyOpts{
+			Mode:   clientProxyMode(*vlessMode, *vlessBond),
+			Listen: *listen,
+			Peer:   *peerAddr,
+		},
+		VK: VKOpts{
+			StreamsPerCred: *streamsPerCredFlag,
+			ManualCaptcha:  *manualCaptchaFlag,
+		},
+		DNS: DNSOpts{
+			Mode: *dnsFlag,
+		},
+		Log: LogOpts{
+			Debug: *debugFlag,
+		},
 	}
 
-	switch c.DNSMode {
+	switch c.DNS.Mode {
 	case dnsModeUDP, dnsModeDoH, dnsModeAuto:
 	default:
-		return nil, fmt.Errorf("invalid -dns value %q: must be udp | doh | auto", c.DNSMode)
+		return nil, fmt.Errorf("invalid -dns value %q: must be udp | doh | auto", c.DNS.Mode)
 	}
 	if *dnsServersFlag != "" {
-		c.DNSServers = strings.Split(*dnsServersFlag, ",")
+		c.DNS.Servers = strings.Split(*dnsServersFlag, ",")
 	}
 
-	// gen-wrap-key short-circuits: caller emits the key and exits, so skip
-	// the rest of validation (no peer / vk-link needed for key gen).
-	if c.GenWrapKey {
+	if c.Obf.GenWrapKey {
 		return c, nil
 	}
 
-	if c.Peer == "" {
+	if c.Proxy.Peer == "" {
 		return nil, errors.New("need peer address")
 	}
 	if *vklink == "" {
 		return nil, errors.New("need vk-link")
 	}
-	key, err := srtpmimicry.DecodeKey(c.WrapMode, *wrapKeyHex)
+	key, err := srtpmimicry.DecodeKey(c.Obf.WrapMode, *wrapKeyHex)
 	if err != nil {
 		return nil, err
 	}
-	c.WrapKey = key
-	if c.StreamsPerCred <= 0 {
+	c.Obf.WrapKey = key
+	if c.VK.StreamsPerCred <= 0 {
 		return nil, fmt.Errorf("-streams-per-cred must be positive")
 	}
-	if c.N <= 0 {
-		c.N = 10
+	if c.TURN.N <= 0 {
+		c.TURN.N = 10
 	}
 
 	parts := strings.Split(*vklink, "join/")
@@ -142,7 +190,7 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	if idx := strings.IndexAny(link, "/?#"); idx != -1 {
 		link = link[:idx]
 	}
-	c.VKLink = link
+	c.VK.Link = link
 
 	return c, nil
 }
@@ -167,26 +215,50 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 	}
 
 	s := &Server{
-		Listen:     *listen,
-		Connect:    *connect,
-		VLESSMode:  *vlessMode,
-		WrapMode:   *wrapMode,
-		GenWrapKey: *genWrapKey,
-		Debug:      *debugFlag,
+		Obf: ObfOpts{
+			WrapMode:   *wrapMode,
+			GenWrapKey: *genWrapKey,
+		},
+		Proxy: ProxyOpts{
+			Mode:    serverProxyMode(*vlessMode),
+			Listen:  *listen,
+			Connect: *connect,
+		},
+		Log: LogOpts{
+			Debug: *debugFlag,
+		},
 	}
 
-	if s.GenWrapKey {
+	if s.Obf.GenWrapKey {
 		return s, nil
 	}
 
-	if s.Connect == "" {
+	if s.Proxy.Connect == "" {
 		return nil, fmt.Errorf("server address is required")
 	}
-	key, err := srtpmimicry.DecodeKey(s.WrapMode, *wrapKeyHex)
+	key, err := srtpmimicry.DecodeKey(s.Obf.WrapMode, *wrapKeyHex)
 	if err != nil {
 		return nil, err
 	}
-	s.WrapKey = key
+	s.Obf.WrapKey = key
 
 	return s, nil
+}
+
+func clientProxyMode(vless, bond bool) ProxyMode {
+	switch {
+	case vless && bond:
+		return ProxyModeTCPFwdBond
+	case vless:
+		return ProxyModeTCPFwd
+	default:
+		return ProxyModeUDP
+	}
+}
+
+func serverProxyMode(vless bool) ProxyMode {
+	if vless {
+		return ProxyModeTCPFwd
+	}
+	return ProxyModeUDP
 }

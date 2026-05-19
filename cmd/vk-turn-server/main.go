@@ -34,10 +34,10 @@ func main() {
 	if err != nil {
 		log.Panicf("%v", err)
 	}
-	logger = logx.New(cfg.Debug)
+	logger = logx.New(cfg.Log.Debug)
 	globalBondRegistry = bondserver.NewRegistry(bondserver.Deps{Log: logger})
 
-	if cfg.GenWrapKey {
+	if cfg.Obf.GenWrapKey {
 		key, gerr := srtpmimicry.GenKeyHex()
 		if gerr != nil {
 			log.Panicf("gen-wrap-key: %v", gerr)
@@ -58,12 +58,12 @@ func main() {
 		log.Fatalf("Exit...\n")
 	}()
 
-	addr, err := net.ResolveUDPAddr("udp", cfg.Listen)
+	addr, err := net.ResolveUDPAddr("udp", cfg.Proxy.Listen)
 	if err != nil {
 		panic(err)
 	}
-	wrapKey := cfg.WrapKey
-	log.Printf("Starting server listen=%s connect=%s vless=%t wrap=%t bond-autodetect=true", cfg.Listen, cfg.Connect, cfg.VLESSMode, cfg.WrapMode)
+	wrapKey := cfg.Obf.WrapKey
+	log.Printf("Starting server listen=%s connect=%s vless=%t wrap=%t bond-autodetect=true", cfg.Proxy.Listen, cfg.Proxy.Connect, (cfg.Proxy.Mode == config.ProxyModeTCPFwd), cfg.Obf.WrapMode)
 	// Generate a certificate and private key to secure the connection
 	certificate, genErr := selfsign.GenerateSelfSigned()
 	if genErr != nil {
@@ -81,7 +81,7 @@ func main() {
 		dtls.WithConnectionIDGenerator(dtls.RandomCIDGenerator(8)),
 	}
 	var listener net.Listener
-	if cfg.WrapMode {
+	if cfg.Obf.WrapMode {
 		log.Printf("WRAP mode enabled: listener only accepts clients with matching -wrap-key")
 		wrapListener, werr := srtpmimicry.Listen(addr, wrapKey)
 		if werr != nil {
@@ -140,10 +140,10 @@ func main() {
 			}
 			logger.Debugf("Handshake done")
 
-			if cfg.VLESSMode {
-				handleVLESSConnection(ctx, dtlsConn, cfg.Connect)
+			if cfg.Proxy.Mode == config.ProxyModeTCPFwd {
+				handleVLESSConnection(ctx, dtlsConn, cfg.Proxy.Connect)
 			} else {
-				handleUDPConnection(ctx, conn, cfg.Connect)
+				handleUDPConnection(ctx, conn, cfg.Proxy.Connect)
 			}
 
 			logger.Debugf("Connection closed: %s\n", conn.RemoteAddr())
