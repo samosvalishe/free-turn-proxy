@@ -20,6 +20,11 @@ const Anonymous TenantID = ""
 // A nil error with [Anonymous] means the connection is accepted in
 // non-multi-tenant mode. Any non-nil error must be treated as a rejection
 // and the caller must close conn.
+//
+// This interface is stream-oriented: it consumes a net.Conn and is intended
+// for bondserver/tcpfwdserver wiring. UDP-mode auth (when needed) will get
+// a separate interface taking a token []byte read out-of-band from the
+// handshake, since udpserver has no per-tenant stream abstraction.
 type Authenticator interface {
 	Authenticate(ctx context.Context, conn net.Conn) (TenantID, error)
 }
