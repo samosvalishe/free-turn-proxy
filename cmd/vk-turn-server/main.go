@@ -28,7 +28,6 @@ func main() {
 		log.Fatalf("%v", err)
 	}
 	logger := logx.New(cfg.Log.Debug)
-	registry := bondserver.NewRegistry(bondserver.Deps{Log: logger})
 
 	if cfg.Obf.GenWrapKey {
 		key, gerr := srtpmimicry.GenKeyHex()
@@ -48,7 +47,10 @@ func main() {
 		<-signalChan
 		logger.Infof("Terminating...")
 		cancel()
-		<-signalChan
+		select {
+		case <-signalChan:
+		case <-time.After(5 * time.Second):
+		}
 		logger.Errorf("Exit...")
 		os.Exit(1)
 	}()
@@ -60,6 +62,9 @@ func main() {
 	}
 	logger.Infof("Starting server listen=%s connect=%s vless=%t wrap=%t bond-autodetect=true",
 		cfg.Proxy.Listen, cfg.Proxy.Connect, cfg.Proxy.Mode == config.ProxyModeTCPFwd, cfg.Obf.WrapMode)
+	if !cfg.Obf.WrapMode {
+		logger.Warnf("running without -wrap: any client reaching %s can relay to %s (no shared-key auth)", cfg.Proxy.Listen, cfg.Proxy.Connect)
+	}
 
 	certificate, genErr := selfsign.GenerateSelfSigned()
 	if genErr != nil {
@@ -96,6 +101,8 @@ func main() {
 	})
 
 	logger.Infof("Listening on %s", cfg.Proxy.Listen)
+
+	registry := bondserver.NewRegistry(bondserver.Deps{Log: logger})
 
 	var wg sync.WaitGroup
 	for {
