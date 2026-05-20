@@ -27,9 +27,15 @@ import (
 
 // Log is the package-level logger. Defaults to no-op; main wires it via
 // SetLogger so DNS-mode output respects the global -debug flag and levels.
+//
+// Deprecated: dnsdial is a procedural package with global state; a future
+// refactor should thread a logger through AppDialer/InstallGlobalResolver.
+// SetLogger remains for backward compatibility.
 var Log logx.Logger = logx.Nop()
 
 // SetLogger installs a logger for this package.
+//
+// Deprecated: prefer threading a logx.Logger through AppDialer.
 func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
 
 const (

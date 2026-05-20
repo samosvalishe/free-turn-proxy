@@ -35,9 +35,14 @@ var Debug bool
 
 // Log is the package-level logger; defaults to no-op. main wires it via
 // SetLogger so manual-captcha output respects -debug and levels.
+//
+// Deprecated: future refactoring should inject the logger via a Solver struct.
+// SetLogger remains for backward compatibility.
 var Log logx.Logger = logx.Nop()
 
 // SetLogger installs a logger for this package.
+//
+// Deprecated: prefer a Solver struct with an explicit Logger field.
 func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
 
 const captchaListenPort = "8765"

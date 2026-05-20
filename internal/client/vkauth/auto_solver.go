@@ -20,7 +20,8 @@ func DefaultAutoSolve(
 	client tlsclient.HttpClient,
 	profile browserprofile.Profile,
 ) (string, error) {
-	captcha.Log.Infof("[STREAM %d] [Captcha] Solving captcha...", streamID)
+	log := captcha.Log
+	log.Infof("[STREAM %d] [Captcha] Solving captcha...", streamID)
 
 	if captchaErr.SessionToken == "" {
 		return "", fmt.Errorf("no session_token in redirect_uri for auto-solve")
@@ -31,15 +32,15 @@ func DefaultAutoSolve(
 
 	var savedProfile *browserprofile.Saved
 	if sp, err := browserprofile.Load(); err == nil {
-		captcha.Log.Infof("[STREAM %d] [Captcha] Using saved real browser profile", streamID)
+		log.Infof("[STREAM %d] [Captcha] Using saved real browser profile", streamID)
 		savedProfile = sp
 		profile = sp.Profile
 	}
 
-	successToken, err := captcha.Solve(ctx, captchaErr, streamID, client, profile, savedProfile)
+	successToken, err := captcha.Solve(ctx, captchaErr, streamID, client, profile, savedProfile, log)
 	if err != nil {
 		return "", err
 	}
-	captcha.Log.Infof("[STREAM %d] [Captcha] solver succeeded", streamID)
+	log.Infof("[STREAM %d] [Captcha] solver succeeded", streamID)
 	return successToken, nil
 }
