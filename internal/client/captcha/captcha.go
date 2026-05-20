@@ -21,8 +21,8 @@ import (
 	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/client/browserprofile"
-	"github.com/cacggghp/vk-turn-proxy/internal/logx"
+	"github.com/samosvalishe/btp/internal/client/browserprofile"
+	"github.com/samosvalishe/btp/internal/logx"
 )
 
 // Log is the package-level logger. Defaults to no-op; main wires it via

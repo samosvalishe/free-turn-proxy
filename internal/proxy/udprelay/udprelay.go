@@ -14,12 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/client/vkauth"
-	"github.com/cacggghp/vk-turn-proxy/internal/logx"
-	"github.com/cacggghp/vk-turn-proxy/internal/proxy/common"
-	"github.com/cacggghp/vk-turn-proxy/internal/stats"
-	"github.com/cacggghp/vk-turn-proxy/internal/transport/dtlsdial"
-	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
+	"github.com/samosvalishe/btp/internal/client/vkauth"
+	"github.com/samosvalishe/btp/internal/logx"
+	"github.com/samosvalishe/btp/internal/proxy/common"
+	"github.com/samosvalishe/btp/internal/stats"
+	"github.com/samosvalishe/btp/internal/transport/dtlsdial"
+	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 	"github.com/cbeuw/connutil"
 )
 

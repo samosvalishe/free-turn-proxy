@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/logx"
-	"github.com/cacggghp/vk-turn-proxy/internal/stats"
+	"github.com/samosvalishe/btp/internal/logx"
+	"github.com/samosvalishe/btp/internal/stats"
 )
 
 const (

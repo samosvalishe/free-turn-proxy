@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/wire/bondframe"
+	"github.com/samosvalishe/btp/internal/wire/bondframe"
 )
 
 // fakeStream implements laneStream over an in-memory ring; reads block when

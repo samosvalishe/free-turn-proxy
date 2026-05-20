@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/transport/turndial"
-	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
+	"github.com/samosvalishe/btp/internal/transport/turndial"
+	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 )
 
 // GetCredsFunc resolves VK TURN credentials for a (link, streamID) pair.

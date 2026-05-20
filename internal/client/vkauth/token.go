@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/client/browserprofile"
-	"github.com/cacggghp/vk-turn-proxy/internal/client/captcha"
-	"github.com/cacggghp/vk-turn-proxy/internal/client/namegen"
+	"github.com/samosvalishe/btp/internal/client/browserprofile"
+	"github.com/samosvalishe/btp/internal/client/captcha"
+	"github.com/samosvalishe/btp/internal/client/namegen"
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"

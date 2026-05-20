@@ -15,8 +15,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/transport/kcptun"
-	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
+	"github.com/samosvalishe/btp/internal/transport/kcptun"
+	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 )
 
 const (

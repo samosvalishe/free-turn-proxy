@@ -1,4 +1,4 @@
-# Глоссарий vk-turn-proxy
+# Глоссарий btp
 
 Один абзац на термин. Если читаешь код и не понял слово — сюда.
 
@@ -54,7 +54,7 @@ VK content-filter дропает payload, который не похож на le
 Один набор VK creds (полученный через VK API) обслуживает группу TURN streams. Флаг `-streams-per-cred` (default 10). В коде иногда называется `streamsPerCache`. То есть «cred» (одна credential) = «cache» (одна запись в `StreamCredentialsCache`).
 
 ### Client (4 разных)
-1. `cmd/vk-turn-client/` — наш клиентский бинарь.
+1. `cmd/client/` — наш клиентский бинарь.
 2. `vkauth.Client` — HTTP-клиент к VK API.
 3. `bondclient.Handler` — наша клиент-сторона bond.
 4. `turn.NewClient` — TURN-protocol-клиент (`pion/turn`).
@@ -87,7 +87,7 @@ Conn wrappers (DirectNet, ConnectedUDPConn, SplitFirstWriteConn). Имя не о
 ### captcha (auto / manual)
 Один домен, два пути:
 - **auto** (`internal/client/captcha`): VK slider-puzzle решается программно через `client/internal/captcha`.
-- **manual** (пока в `cmd/vk-turn-client/manual_captcha.go`, package main): HTTP-сервер на 127.0.0.1:8765, запуск браузера, gzip-rewrite VK-страниц. Запланирован вынос в `internal/client/captcha/manual` на V2-2.
+- **manual** (пока в `cmd/client/manual_captcha.go`, package main): HTTP-сервер на 127.0.0.1:8765, запуск браузера, gzip-rewrite VK-страниц. Запланирован вынос в `internal/client/captcha/manual` на V2-2.
 
 Переключение: `vkauth.Client` пробует auto, при провале → manual fallback. Флаг `-manual-captcha` сразу идёт в manual.
 
@@ -95,7 +95,7 @@ Conn wrappers (DirectNet, ConnectedUDPConn, SplitFirstWriteConn). Имя не о
 Мобильная (Android) сборка клиента в виде shared library. Собирается **вручную** разработчиком и переносится в Android-приложение. CI не строит. Внешних `//export`-функций нет — `package main` ← buildmode определяется на стороне разработчика.
 
 ### globalBondRegistry
-Server-side глобал, держит активные bond-сессии. Инициализируется на package init — известная фрагильность (`isDebug` ещё false), работает только потому что bondserver `Debug`-поле не читается. Переедет в локальную переменную `cmd/vk-turn-server/main.go` на V2-3.
+Server-side глобал, держит активные bond-сессии. Инициализируется на package init — известная фрагильность (`isDebug` ещё false), работает только потому что bondserver `Debug`-поле не читается. Переедет в локальную переменную `cmd/server/main.go` на V2-3.
 
 ### `-no-dtls` (УДАЛЕНО)
 Был помечен DO NOT USE — в проде не работал, VK content-filter дропает payload без DTLS-handshake. Удалён в V2-0.

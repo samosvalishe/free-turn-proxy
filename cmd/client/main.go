@@ -11,17 +11,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/client/captcha"
-	manualcaptcha "github.com/cacggghp/vk-turn-proxy/internal/client/captcha/manual"
-	"github.com/cacggghp/vk-turn-proxy/internal/client/dnsdial"
-	"github.com/cacggghp/vk-turn-proxy/internal/client/vkauth"
-	"github.com/cacggghp/vk-turn-proxy/internal/config"
-	"github.com/cacggghp/vk-turn-proxy/internal/logx"
-	"github.com/cacggghp/vk-turn-proxy/internal/proxy/bondclient"
-	"github.com/cacggghp/vk-turn-proxy/internal/proxy/tcpfwd"
-	"github.com/cacggghp/vk-turn-proxy/internal/proxy/udprelay"
-	"github.com/cacggghp/vk-turn-proxy/internal/transport/dtlsdial"
-	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
+	"github.com/samosvalishe/btp/internal/client/captcha"
+	manualcaptcha "github.com/samosvalishe/btp/internal/client/captcha/manual"
+	"github.com/samosvalishe/btp/internal/client/dnsdial"
+	"github.com/samosvalishe/btp/internal/client/vkauth"
+	"github.com/samosvalishe/btp/internal/config"
+	"github.com/samosvalishe/btp/internal/logx"
+	"github.com/samosvalishe/btp/internal/proxy/bondclient"
+	"github.com/samosvalishe/btp/internal/proxy/tcpfwd"
+	"github.com/samosvalishe/btp/internal/proxy/udprelay"
+	"github.com/samosvalishe/btp/internal/transport/dtlsdial"
+	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 )
 
 // manualCaptchaSolver bridges the vkauth.ManualSolveFunc contract to the

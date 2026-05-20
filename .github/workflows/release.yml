@@ -134,12 +134,12 @@ jobs:
           GOOS=$GOOS GOARCH=$GOARCH GOARM=$GOARM GOMIPS=$GOMIPS \
           go build -ldflags "-s -w -checklinkname=0" -trimpath \
             -o "dist/client-${GOOS}-${GOARCH}${EXT}" \
-            ./cmd/vk-turn-client
+            ./cmd/client
 
           GOOS=$GOOS GOARCH=$GOARCH GOARM=$GOARM GOMIPS=$GOMIPS \
           go build -ldflags "-s -w -checklinkname=0" -trimpath \
             -o "dist/server-${GOOS}-${GOARCH}${EXT}" \
-            ./cmd/vk-turn-server
+            ./cmd/server
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6

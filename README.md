@@ -71,7 +71,7 @@ WireGuard client -> 127.0.0.1:9000 -> VK TURN Proxy client
 Скачайте бинарник для Linux amd64:
 
 ```bash
-curl -L -o server https://github.com/cacggghp/vk-turn-proxy/releases/latest/download/server-linux-amd64
+curl -L -o server https://github.com/samosvalishe/btp/releases/latest/download/server-linux-amd64
 chmod +x server
 ```
 
@@ -99,7 +99,7 @@ MTU = 1280
 Linux:
 
 ```bash
-curl -L -o client https://github.com/cacggghp/vk-turn-proxy/releases/latest/download/client-linux-amd64
+curl -L -o client https://github.com/samosvalishe/btp/releases/latest/download/client-linux-amd64
 chmod +x client
 ./client -listen 127.0.0.1:9000 -peer <ip-vps>:56000 -vk-link "<vk-call-link>" | ./routes.sh
 ```
@@ -107,14 +107,14 @@ chmod +x client
 Windows PowerShell от администратора:
 
 ```powershell
-Invoke-WebRequest -Uri https://github.com/cacggghp/vk-turn-proxy/releases/latest/download/client-windows-amd64.exe -OutFile client.exe
+Invoke-WebRequest -Uri https://github.com/samosvalishe/btp/releases/latest/download/client-windows-amd64.exe -OutFile client.exe
 .\client.exe -listen 127.0.0.1:9000 -peer <ip-vps>:56000 -vk-link "<vk-call-link>" | .\routes.ps1
 ```
 
 macOS:
 
 ```bash
-curl -L -o client https://github.com/cacggghp/vk-turn-proxy/releases/latest/download/client-darwin-arm64
+curl -L -o client https://github.com/samosvalishe/btp/releases/latest/download/client-darwin-arm64
 chmod +x client
 ./client -listen 127.0.0.1:9000 -peer <ip-vps>:56000 -vk-link "<vk-call-link>" | ./routes-macos.sh
 ```
@@ -132,7 +132,7 @@ chmod +x client
 
 ```bash
 termux-wake-lock
-curl -L -o client https://github.com/cacggghp/vk-turn-proxy/releases/latest/download/client-android-arm64
+curl -L -o client https://github.com/samosvalishe/btp/releases/latest/download/client-android-arm64
 chmod +x client
 ./client -listen 127.0.0.1:9000 -peer <ip-vps>:56000 -vk-link "<vk-call-link>"
 ```
@@ -150,7 +150,7 @@ termux-wake-unlock
 ```bash
 apk update
 apk add curl
-curl -L -o client https://github.com/cacggghp/vk-turn-proxy/releases/latest/download/client-linux-386
+curl -L -o client https://github.com/samosvalishe/btp/releases/latest/download/client-linux-386
 chmod +x client
 GOMAXPROCS=1 GODEBUG=asyncpreemptoff=1 ./client -listen 127.0.0.1:9000 -peer <ip-vps>:56000 -vk-link "<vk-call-link>"
 ```
@@ -163,7 +163,7 @@ cat /dev/location > /dev/null &
 
 ## Сервер Как systemd-Сервис
 
-Пример `/etc/systemd/system/vk-turn-proxy.service`:
+Пример `/etc/systemd/system/btp.service`:
 
 ```ini
 [Unit]
@@ -172,7 +172,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/opt/vk-turn-proxy/server -listen 0.0.0.0:56000 -connect 127.0.0.1:51820
+ExecStart=/opt/btp/server -listen 0.0.0.0:56000 -connect 127.0.0.1:51820
 Restart=always
 RestartSec=5
 User=nobody
@@ -186,8 +186,8 @@ WantedBy=multi-user.target
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now vk-turn-proxy.service
-sudo systemctl status vk-turn-proxy.service
+sudo systemctl enable --now btp.service
+sudo systemctl status btp.service
 ```
 
 ## Docker
@@ -195,7 +195,7 @@ sudo systemctl status vk-turn-proxy.service
 Образ публикуется в GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/cacggghp/vk-turn-proxy:latest
+docker pull ghcr.io/samosvalishe/btp:latest
 ```
 
 Если backend слушает на хосте, удобнее использовать host network:
@@ -203,7 +203,7 @@ docker pull ghcr.io/cacggghp/vk-turn-proxy:latest
 ```bash
 docker run --rm --network host \
   -e CONNECT_ADDR=127.0.0.1:51820 \
-  ghcr.io/cacggghp/vk-turn-proxy:latest
+  ghcr.io/samosvalishe/btp:latest
 ```
 
 Bridge mode:
@@ -211,7 +211,7 @@ Bridge mode:
 ```bash
 docker run --rm -p 56000:56000/udp \
   -e CONNECT_ADDR=<host-ip>:51820 \
-  ghcr.io/cacggghp/vk-turn-proxy:latest
+  ghcr.io/samosvalishe/btp:latest
 ```
 
 Переменные окружения:
@@ -230,7 +230,7 @@ docker run --rm -p 56000:56000/udp \
 Сборка образа вручную:
 
 ```bash
-docker build -t vk-turn-proxy .
+docker build -t btp .
 ```
 
 ## VLESS / Xray
@@ -346,41 +346,41 @@ docker build -t vk-turn-proxy .
 Нужен Go 1.25.x.
 
 ```bash
-go build -o client ./cmd/vk-turn-client
-go build -o server ./cmd/vk-turn-server
+go build -o client ./cmd/client
+go build -o server ./cmd/server
 go test ./...
 ```
 
 Кросс-сборка примера для Linux amd64:
 
 ```bash
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o server-linux-amd64 ./cmd/vk-turn-server
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o client-linux-amd64 ./cmd/vk-turn-client
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o server-linux-amd64 ./cmd/server
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o client-linux-amd64 ./cmd/client
 ```
 
 Android arm64 клиент как `.so` для упаковки в приложение (PowerShell):
 
 ```powershell
-$env:GOOS="android"; $env:GOARCH="arm64"; $env:CGO_ENABLED="0"; go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn.so .\cmd\vk-turn-client
+$env:GOOS="android"; $env:GOARCH="arm64"; $env:CGO_ENABLED="0"; go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn.so .\cmd\client
 ```
 
 То же из bash:
 
 ```bash
-GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn.so ./cmd/vk-turn-client
+GOOS=android GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn.so ./cmd/client
 ```
 
 Linux arm64 клиент как `.so` (для упаковки в Android-приложение в обход NDK; ABI совпадает):
 
 ```bash
-GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn.so ./cmd/vk-turn-client
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn.so ./cmd/client
 ```
 
 Linux amd64 клиент/сервер как `.so`:
 
 ```bash
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn-client.so ./cmd/vk-turn-client
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn-server.so ./cmd/vk-turn-server
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn-client.so ./cmd/client
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0" -trimpath -o libvkturn-server.so ./cmd/server
 ```
 
 Все `.so` выше — обычные ELF-бинари под `.so`-именем (`CGO_ENABLED=0`, не настоящий shared library). Если нужен настоящий `c-shared` — `CGO_ENABLED=1` + NDK toolchain (см. `.github/workflows/release.yml`).

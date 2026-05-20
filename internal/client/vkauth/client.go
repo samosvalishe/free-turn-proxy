@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/logx"
+	"github.com/samosvalishe/btp/internal/logx"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
 )

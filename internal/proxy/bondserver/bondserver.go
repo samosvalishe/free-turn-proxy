@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/logx"
-	"github.com/cacggghp/vk-turn-proxy/internal/wire/bondframe"
+	"github.com/samosvalishe/btp/internal/logx"
+	"github.com/samosvalishe/btp/internal/wire/bondframe"
 	"github.com/xtaci/smux"
 )
 

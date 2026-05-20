@@ -13,7 +13,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/netconn"
+	"github.com/samosvalishe/btp/internal/netconn"
 	"github.com/pion/logging"
 	"github.com/pion/turn/v5"
 )

@@ -19,7 +19,7 @@ import (
 
 	"github.com/miekg/dns"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/logx"
+	"github.com/samosvalishe/btp/internal/logx"
 
 	// Embedded Mozilla CA roots for CGO_ENABLED=0 builds (Android).
 	_ "golang.org/x/crypto/x509roots/fallback"

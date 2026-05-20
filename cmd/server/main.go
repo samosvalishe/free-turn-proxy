@@ -11,12 +11,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/config"
-	"github.com/cacggghp/vk-turn-proxy/internal/logx"
-	"github.com/cacggghp/vk-turn-proxy/internal/proxy/bondserver"
-	"github.com/cacggghp/vk-turn-proxy/internal/proxy/tcpfwdserver"
-	"github.com/cacggghp/vk-turn-proxy/internal/proxy/udpserver"
-	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
+	"github.com/samosvalishe/btp/internal/config"
+	"github.com/samosvalishe/btp/internal/logx"
+	"github.com/samosvalishe/btp/internal/proxy/bondserver"
+	"github.com/samosvalishe/btp/internal/proxy/tcpfwdserver"
+	"github.com/samosvalishe/btp/internal/proxy/udpserver"
+	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 	"github.com/pion/dtls/v3"
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
 )

@@ -4,8 +4,8 @@ import (
 	"context"
 	"net"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/client/browserprofile"
-	"github.com/cacggghp/vk-turn-proxy/internal/client/captcha"
+	"github.com/samosvalishe/btp/internal/client/browserprofile"
+	"github.com/samosvalishe/btp/internal/client/captcha"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
 )

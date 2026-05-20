@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cacggghp/vk-turn-proxy/internal/logx"
-	"github.com/cacggghp/vk-turn-proxy/internal/netconn"
-	"github.com/cacggghp/vk-turn-proxy/internal/proxy/bondserver"
-	"github.com/cacggghp/vk-turn-proxy/internal/stats"
-	"github.com/cacggghp/vk-turn-proxy/internal/transport/kcptun"
-	"github.com/cacggghp/vk-turn-proxy/internal/wire/bondframe"
+	"github.com/samosvalishe/btp/internal/logx"
+	"github.com/samosvalishe/btp/internal/netconn"
+	"github.com/samosvalishe/btp/internal/proxy/bondserver"
+	"github.com/samosvalishe/btp/internal/stats"
+	"github.com/samosvalishe/btp/internal/transport/kcptun"
+	"github.com/samosvalishe/btp/internal/wire/bondframe"
 	"github.com/xtaci/smux"
 )
 
