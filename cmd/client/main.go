@@ -104,7 +104,10 @@ func main() {
 	})
 
 	if cfg.Proxy.Mode != config.ProxyModeUDP {
-		vlessDtlsDialer := &dtlsdial.Dialer{HandshakeTimeout: 30 * time.Second}
+		vlessDtlsDialer := &dtlsdial.Dialer{
+			HandshakeTimeout: 30 * time.Second,
+			HandshakeSem:     make(chan struct{}, 3),
+		}
 		bondH := &bondclient.Handler{Deps: bondclient.Deps{Log: logger}}
 		vlessDeps := &tcpfwd.Deps{
 			DTLSDialer:  vlessDtlsDialer,
