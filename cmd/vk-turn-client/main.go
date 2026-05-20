@@ -111,12 +111,14 @@ func main() {
 			BondHandler: bondH.Handle,
 		}
 		vlessParams := &tcpfwd.Params{
-			Host:     cfg.TURN.Host,
-			Port:     cfg.TURN.Port,
-			Link:     cfg.VK.Link,
-			UDP:      cfg.TURN.UDP,
-			WrapKey:  cfg.Obf.WrapKey,
-			GetCreds: tcpfwd.GetCredsFunc(vkAuth.GetCredentials),
+			Host:       cfg.TURN.Host,
+			Port:       cfg.TURN.Port,
+			Link:       cfg.VK.Link,
+			UDP:        cfg.TURN.UDP,
+			WrapKey:    cfg.Obf.WrapKey,
+			GetCreds:   tcpfwd.GetCredsFunc(vkAuth.GetCredentials),
+			KCPProfile: cfg.KCP.Profile,
+			KCPFEC:     cfg.KCP.FEC,
 		}
 		if err := tcpfwd.Run(ctx, vlessDeps, vlessParams, peer, cfg.Proxy.Listen, cfg.TURN.N, cfg.Proxy.Mode == config.ProxyModeTCPFwdBond); err != nil {
 			logger.Errorf("tcpfwd: %v", err)

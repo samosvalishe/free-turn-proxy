@@ -24,12 +24,14 @@ type GetCredsFunc = common.GetCredsFunc
 
 // Params is the per-pool TURN/wrap configuration.
 type Params struct {
-	Host     string
-	Port     string
-	Link     string
-	UDP      bool
-	WrapKey  []byte
-	GetCreds GetCredsFunc
+	Host       string
+	Port       string
+	Link       string
+	UDP        bool
+	WrapKey    []byte
+	GetCreds   GetCredsFunc
+	KCPProfile kcptun.Profile
+	KCPFEC     kcptun.FEC
 }
 
 // BondHandler stripes one accepted TCP connection across all currently-live
@@ -254,7 +256,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	st := stats.New(deps.log().DebugEnabled())
 	go st.LogEvery(statsCtx, deps.log().Debugf, fmt.Sprintf("[session %d] VLESS", id), "to-turn", "from-turn")
 
-	kcpSess, err := kcptun.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, false)
+	kcpSess, err := kcptun.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, false, params.KCPProfile, params.KCPFEC)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("KCP session: %w", err)

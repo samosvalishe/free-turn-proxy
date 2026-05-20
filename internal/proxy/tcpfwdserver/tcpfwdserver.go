@@ -22,7 +22,7 @@ import (
 // Handle wraps dtlsConn in KCP+smux and forwards each accepted stream as a TCP
 // connection to connectAddr. Streams whose first 4 bytes match the bond magic
 // are handed off to registry.
-func Handle(ctx context.Context, logger logx.Logger, registry *bondserver.Registry, dtlsConn net.Conn, connectAddr string) {
+func Handle(ctx context.Context, logger logx.Logger, registry *bondserver.Registry, dtlsConn net.Conn, connectAddr string, kcpProfile kcptun.Profile, kcpFEC kcptun.FEC) {
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	defer statsCancel()
 	st := stats.New(logger.DebugEnabled())
@@ -34,7 +34,7 @@ func Handle(ctx context.Context, logger logx.Logger, registry *bondserver.Regist
 		"from-client",
 	)
 
-	kcpSess, err := kcptun.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, true)
+	kcpSess, err := kcptun.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, true, kcpProfile, kcpFEC)
 	if err != nil {
 		logger.Errorf("tcpfwdserver: KCP session: %s", err)
 		return

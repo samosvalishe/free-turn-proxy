@@ -147,7 +147,7 @@ func handleAccepted(ctx context.Context, logger logx.Logger, registry *bondserve
 	logger.Debugf("Handshake done")
 
 	if cfg.Proxy.Mode == config.ProxyModeTCPFwd {
-		tcpfwdserver.Handle(ctx, logger, registry, dtlsConn, cfg.Proxy.Connect)
+		tcpfwdserver.Handle(ctx, logger, registry, dtlsConn, cfg.Proxy.Connect, cfg.KCP.Profile, cfg.KCP.FEC)
 	} else {
 		udpserver.Handle(ctx, logger, conn, cfg.Proxy.Connect)
 	}

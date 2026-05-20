@@ -15,6 +15,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/cacggghp/vk-turn-proxy/internal/transport/kcptun"
 	"github.com/cacggghp/vk-turn-proxy/internal/wire/srtpmimicry"
 )
 
@@ -77,6 +78,13 @@ type LogOpts struct {
 	Debug bool // -debug
 }
 
+// KCPOpts groups KCP tunnel options. Both sides of a tunnel must agree on
+// Profile and FEC; values currently come from VK_TURN_KCP_* env vars.
+type KCPOpts struct {
+	Profile kcptun.Profile
+	FEC     kcptun.FEC
+}
+
 // Client holds parsed and validated client CLI options.
 type Client struct {
 	TURN  TURNOpts
@@ -85,6 +93,7 @@ type Client struct {
 	VK    VKOpts
 	DNS   DNSOpts
 	Log   LogOpts
+	KCP   KCPOpts
 }
 
 // Server holds parsed and validated server CLI options.
@@ -92,6 +101,7 @@ type Server struct {
 	Obf   ObfOpts
 	Proxy ProxyOpts
 	Log   LogOpts
+	KCP   KCPOpts
 }
 
 // ParseClient parses args (excluding program name) into a Client.
@@ -149,6 +159,10 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 		},
 		Log: LogOpts{
 			Debug: *debugFlag,
+		},
+		KCP: KCPOpts{
+			Profile: kcptun.LoadProfileFromEnv(),
+			FEC:     kcptun.LoadFECFromEnv(),
 		},
 	}
 
@@ -224,6 +238,10 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 		},
 		Log: LogOpts{
 			Debug: *debugFlag,
+		},
+		KCP: KCPOpts{
+			Profile: kcptun.LoadProfileFromEnv(),
+			FEC:     kcptun.LoadFECFromEnv(),
 		},
 	}
 

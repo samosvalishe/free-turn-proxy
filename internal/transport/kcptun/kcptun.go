@@ -5,99 +5,87 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/xtaci/kcp-go/v5"
 	"github.com/xtaci/smux"
 )
 
-var (
-	kcpProfileOnce   sync.Once
-	cachedKCPProfile kcpProfile
-
-	fecOnce         sync.Once
-	cachedFECData   int
-	cachedFECParity int
-)
-
-type kcpProfile struct {
-	nodelay    int
-	interval   int
-	resend     int
-	nc         int
-	sndWnd     int
-	rcvWnd     int
-	mtu        int
-	ackNoDelay bool
+// Profile holds the tunable KCP parameters. Both sides of a tunnel must agree.
+type Profile struct {
+	NoDelay    int
+	Interval   int
+	Resend     int
+	NC         int
+	SndWnd     int
+	RcvWnd     int
+	MTU        int
+	ACKNoDelay bool
 }
 
-func selectedKCPProfile() kcpProfile {
-	kcpProfileOnce.Do(func() {
-		cachedKCPProfile = loadKCPProfile()
-	})
-	return cachedKCPProfile
+// FEC controls KCP forward-error-correction shards. Zero values disable FEC.
+type FEC struct {
+	Data   int
+	Parity int
 }
 
-func loadKCPProfile() kcpProfile {
-	profile := strings.ToLower(strings.TrimSpace(os.Getenv("VK_TURN_KCP_PROFILE")))
-	var cfg kcpProfile
-	switch profile {
-	case "legacy", "fast":
-		cfg = kcpProfile{
-			nodelay:    1,
-			interval:   10,
-			resend:     2,
-			nc:         1,
-			sndWnd:     4096,
-			rcvWnd:     4096,
-			mtu:        1280,
-			ackNoDelay: true,
-		}
-	case "cc", "balanced":
-		cfg = kcpProfile{
-			nodelay:    1,
-			interval:   20,
-			resend:     2,
-			nc:         0,
-			sndWnd:     512,
-			rcvWnd:     512,
-			mtu:        1200,
-			ackNoDelay: true,
-		}
-	case "slow", "conservative":
-		cfg = kcpProfile{
-			nodelay:    0,
-			interval:   40,
-			resend:     2,
-			nc:         0,
-			sndWnd:     256,
-			rcvWnd:     256,
-			mtu:        1150,
-			ackNoDelay: false,
-		}
-	default:
-		cfg = kcpProfile{
-			nodelay:    1,
-			interval:   20,
-			resend:     2,
-			nc:         1,
-			sndWnd:     512,
-			rcvWnd:     512,
-			mtu:        1200,
-			ackNoDelay: true,
-		}
+// DefaultProfile mirrors the historical balanced profile shipped with the proxy.
+func DefaultProfile() Profile {
+	return Profile{
+		NoDelay:    1,
+		Interval:   20,
+		Resend:     2,
+		NC:         1,
+		SndWnd:     512,
+		RcvWnd:     512,
+		MTU:        1200,
+		ACKNoDelay: true,
 	}
+}
 
-	cfg.nodelay = envInt("VK_TURN_KCP_NODELAY", cfg.nodelay)
-	cfg.interval = envInt("VK_TURN_KCP_INTERVAL", cfg.interval)
-	cfg.resend = envInt("VK_TURN_KCP_RESEND", cfg.resend)
-	cfg.nc = envInt("VK_TURN_KCP_NC", cfg.nc)
-	cfg.sndWnd = envInt("VK_TURN_KCP_SNDWND", cfg.sndWnd)
-	cfg.rcvWnd = envInt("VK_TURN_KCP_RCVWND", cfg.rcvWnd)
-	cfg.mtu = envInt("VK_TURN_KCP_MTU", cfg.mtu)
-	cfg.ackNoDelay = envBool("VK_TURN_KCP_ACK_NODELAY", cfg.ackNoDelay)
-	return cfg
+// LoadProfileFromEnv reads VK_TURN_KCP_PROFILE and per-field VK_TURN_KCP_*
+// overrides. Unknown profile name → DefaultProfile.
+func LoadProfileFromEnv() Profile {
+	name := strings.ToLower(strings.TrimSpace(os.Getenv("VK_TURN_KCP_PROFILE")))
+	var p Profile
+	switch name {
+	case "legacy", "fast":
+		p = Profile{NoDelay: 1, Interval: 10, Resend: 2, NC: 1, SndWnd: 4096, RcvWnd: 4096, MTU: 1280, ACKNoDelay: true}
+	case "cc", "balanced":
+		p = Profile{NoDelay: 1, Interval: 20, Resend: 2, NC: 0, SndWnd: 512, RcvWnd: 512, MTU: 1200, ACKNoDelay: true}
+	case "slow", "conservative":
+		p = Profile{NoDelay: 0, Interval: 40, Resend: 2, NC: 0, SndWnd: 256, RcvWnd: 256, MTU: 1150, ACKNoDelay: false}
+	default:
+		p = DefaultProfile()
+	}
+	p.NoDelay = envInt("VK_TURN_KCP_NODELAY", p.NoDelay)
+	p.Interval = envInt("VK_TURN_KCP_INTERVAL", p.Interval)
+	p.Resend = envInt("VK_TURN_KCP_RESEND", p.Resend)
+	p.NC = envInt("VK_TURN_KCP_NC", p.NC)
+	p.SndWnd = envInt("VK_TURN_KCP_SNDWND", p.SndWnd)
+	p.RcvWnd = envInt("VK_TURN_KCP_RCVWND", p.RcvWnd)
+	p.MTU = envInt("VK_TURN_KCP_MTU", p.MTU)
+	p.ACKNoDelay = envBool("VK_TURN_KCP_ACK_NODELAY", p.ACKNoDelay)
+	return p
+}
+
+// LoadFECFromEnv parses VK_TURN_KCP_FEC as "data:parity" (e.g. "10:3").
+// Empty/invalid → disabled.
+func LoadFECFromEnv() FEC {
+	raw := strings.TrimSpace(os.Getenv("VK_TURN_KCP_FEC"))
+	if raw == "" {
+		return FEC{}
+	}
+	parts := strings.SplitN(raw, ":", 2)
+	if len(parts) != 2 {
+		return FEC{}
+	}
+	d, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	p, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil || d <= 0 || p <= 0 {
+		return FEC{}
+	}
+	return FEC{Data: d, Parity: p}
 }
 
 func envInt(name string, fallback int) int {
@@ -110,32 +98,6 @@ func envInt(name string, fallback int) int {
 		return fallback
 	}
 	return value
-}
-
-// selectedFEC parses VK_TURN_KCP_FEC as "data:parity" (e.g. "10:3").
-// Returns 0,0 if unset/invalid (FEC disabled). Both sides must match.
-func selectedFEC() (dataShards, parityShards int) {
-	fecOnce.Do(func() {
-		cachedFECData, cachedFECParity = loadFEC()
-	})
-	return cachedFECData, cachedFECParity
-}
-
-func loadFEC() (dataShards, parityShards int) {
-	raw := strings.TrimSpace(os.Getenv("VK_TURN_KCP_FEC"))
-	if raw == "" {
-		return 0, 0
-	}
-	parts := strings.SplitN(raw, ":", 2)
-	if len(parts) != 2 {
-		return 0, 0
-	}
-	d, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
-	p, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err1 != nil || err2 != nil || d <= 0 || p <= 0 {
-		return 0, 0
-	}
-	return d, p
 }
 
 func envBool(name string, fallback bool) bool {
@@ -191,7 +153,7 @@ func (d *DtlsPacketConn) SetWriteDeadline(t time.Time) error {
 
 // NewKCPOverDTLS creates a KCP session over a DTLS connection.
 // isServer: true for server-side (listener), false for client-side (dialer).
-func NewKCPOverDTLS(dtlsConn net.Conn, isServer bool) (*kcp.UDPSession, error) {
+func NewKCPOverDTLS(dtlsConn net.Conn, isServer bool, profile Profile, fec FEC) (*kcp.UDPSession, error) {
 	pc := NewDtlsPacketConn(dtlsConn)
 
 	block, err := kcp.NewNoneBlockCrypt(nil) // DTLS already encrypts
@@ -201,14 +163,9 @@ func NewKCPOverDTLS(dtlsConn net.Conn, isServer bool) (*kcp.UDPSession, error) {
 
 	var sess *kcp.UDPSession
 
-	dataShards, parityShards := selectedFEC()
-
 	if isServer {
-		// Server: listen on the PacketConn, accept one session, then drop the
-		// listener (it owns the PacketConn — the accepted session keeps using
-		// it via the shared kcp mux).
 		var listener *kcp.Listener
-		listener, err = kcp.ServeConn(block, dataShards, parityShards, pc)
+		listener, err = kcp.ServeConn(block, fec.Data, fec.Parity, pc)
 		if err != nil {
 			return nil, err
 		}
@@ -222,18 +179,16 @@ func NewKCPOverDTLS(dtlsConn net.Conn, isServer bool) (*kcp.UDPSession, error) {
 			return nil, err
 		}
 	} else {
-		// Client: dial through the PacketConn
-		sess, err = kcp.NewConn2(dtlsConn.RemoteAddr(), block, dataShards, parityShards, pc)
+		sess, err = kcp.NewConn2(dtlsConn.RemoteAddr(), block, fec.Data, fec.Parity, pc)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	profile := selectedKCPProfile()
-	sess.SetNoDelay(profile.nodelay, profile.interval, profile.resend, profile.nc)
-	sess.SetWindowSize(profile.sndWnd, profile.rcvWnd)
-	sess.SetMtu(profile.mtu)
-	sess.SetACKNoDelay(profile.ackNoDelay)
+	sess.SetNoDelay(profile.NoDelay, profile.Interval, profile.Resend, profile.NC)
+	sess.SetWindowSize(profile.SndWnd, profile.RcvWnd)
+	sess.SetMtu(profile.MTU)
+	sess.SetACKNoDelay(profile.ACKNoDelay)
 
 	return sess, nil
 }
