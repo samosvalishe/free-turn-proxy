@@ -216,55 +216,11 @@ func writeBondFrameToNextLane(ctx context.Context, lanes []*lane, typ byte, seq 
 }
 
 func (h *Handler) copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.Conn, recvCh <-chan bondframe.Frame) {
-	pending := make(map[uint64][]byte)
-	var expect uint64
-	var finSeq *uint64
-
-	for {
-		if finSeq != nil && expect == *finSeq {
-			bondframe.CloseWrite(tcpConn, h.Deps.log().Debugf)
-			h.Deps.log().Debugf("[bond %d] download finished chunks=%d", connID, expect)
-			return
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case f, ok := <-recvCh:
-			if !ok {
-				return
-			}
-			switch f.Type {
-			case bondframe.FrameData:
-				if len(pending) >= 1024 {
-					h.Deps.log().Errorf("[bond %d] pending map overflow (>1024), closing", connID)
-					return
-				}
-				pending[f.Seq] = f.Data
-			case bondframe.FrameFIN:
-				v := f.Seq
-				if finSeq == nil || v < *finSeq {
-					finSeq = &v
-				}
-			default:
-				h.Deps.log().Errorf("[bond %d] unknown frame type %d", connID, f.Type)
-				return
-			}
-
-			for {
-				data, ok := pending[expect]
-				if !ok {
-					break
-				}
-				delete(pending, expect)
-				if len(data) > 0 {
-					if _, err := tcpConn.Write(data); err != nil {
-						h.Deps.log().Errorf("[bond %d] local TCP write error: %v", connID, err)
-						return
-					}
-				}
-				expect++
-			}
-		}
-	}
+	chunks := bondframe.Reorder(ctx, tcpConn, recvCh, bondframe.ReorderHooks{
+		OnOverflow:    func(have int) { h.Deps.log().Errorf("[bond %d] pending map overflow (>%d), closing", connID, bondframe.PendingCap) },
+		OnUnknownType: func(typ byte) { h.Deps.log().Errorf("[bond %d] unknown frame type %d", connID, typ) },
+		OnWriteError:  func(err error) { h.Deps.log().Errorf("[bond %d] local TCP write error: %v", connID, err) },
+		OnCloseWrite:  h.Deps.log().Debugf,
+	})
+	h.Deps.log().Debugf("[bond %d] download finished chunks=%d", connID, chunks)
 }

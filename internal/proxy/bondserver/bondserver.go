@@ -265,57 +265,13 @@ func (c *serverConn) run() {
 }
 
 func (c *serverConn) copyBondToBackend(backendConn net.Conn) {
-	pending := make(map[uint64][]byte)
-	var expect uint64
-	var finSeq *uint64
-
-	for {
-		if finSeq != nil && expect == *finSeq {
-			bondframe.CloseWrite(backendConn, c.deps.log().Debugf)
-			c.deps.log().Debugf("[bond %d] upload to backend finished chunks=%d", c.id, expect)
-			return
-		}
-
-		select {
-		case <-c.ctx.Done():
-			return
-		case f := <-c.recvCh:
-			switch f.Type {
-			case bondframe.FrameData:
-				// Bound the reorder buffer so a malicious or buggy peer
-				// that emits seq with permanent gaps cannot exhaust memory.
-				// Matches bondclient.copyBondToTCP.
-				if len(pending) >= 1024 {
-					c.deps.log().Errorf("[bond %d] pending map overflow (>1024), closing", c.id)
-					return
-				}
-				pending[f.Seq] = f.Data
-			case bondframe.FrameFIN:
-				v := f.Seq
-				if finSeq == nil || v < *finSeq {
-					finSeq = &v
-				}
-			default:
-				c.deps.log().Errorf("[bond %d] unknown frame type %d", c.id, f.Type)
-				return
-			}
-
-			for {
-				data, ok := pending[expect]
-				if !ok {
-					break
-				}
-				delete(pending, expect)
-				if len(data) > 0 {
-					if _, err := backendConn.Write(data); err != nil {
-						c.deps.log().Errorf("[bond %d] backend write error: %v", c.id, err)
-						return
-					}
-				}
-				expect++
-			}
-		}
-	}
+	chunks := bondframe.Reorder(c.ctx, backendConn, c.recvCh, bondframe.ReorderHooks{
+		OnOverflow:    func(have int) { c.deps.log().Errorf("[bond %d] pending map overflow (>%d), closing", c.id, bondframe.PendingCap) },
+		OnUnknownType: func(typ byte) { c.deps.log().Errorf("[bond %d] unknown frame type %d", c.id, typ) },
+		OnWriteError:  func(err error) { c.deps.log().Errorf("[bond %d] backend write error: %v", c.id, err) },
+		OnCloseWrite:  c.deps.log().Debugf,
+	})
+	c.deps.log().Debugf("[bond %d] upload to backend finished chunks=%d", c.id, chunks)
 }
 
 func (c *serverConn) copyBackendToBond(backendConn net.Conn) {

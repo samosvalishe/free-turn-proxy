@@ -4,6 +4,7 @@
 package bondframe
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -115,6 +116,81 @@ func ReadFrame(r io.Reader) (Frame, error) {
 		}
 	}
 	return f, nil
+}
+
+// PendingCap bounds the per-bond reorder buffer. A peer that emits seq with
+// permanent gaps cannot grow it past this many frames.
+const PendingCap = 1024
+
+// ReorderHooks plugs caller-specific logging into Reorder. All fields may be nil.
+type ReorderHooks struct {
+	OnOverflow    func(have int)
+	OnUnknownType func(typ byte)
+	OnWriteError  func(err error)
+	OnCloseWrite  func(format string, v ...any)
+}
+
+// Reorder consumes Frames from recv, writes payloads to dst in Seq order, and
+// returns the number of fully delivered chunks. It returns when:
+//   - the FIN seq has been reached (CloseWrite is called on dst);
+//   - recv is closed;
+//   - ctx is cancelled;
+//   - an unknown frame type, pending overflow, or write error fires.
+func Reorder(ctx context.Context, dst net.Conn, recv <-chan Frame, h ReorderHooks) uint64 {
+	pending := make(map[uint64][]byte)
+	var expect uint64
+	var finSeq *uint64
+
+	for {
+		if finSeq != nil && expect == *finSeq {
+			CloseWrite(dst, h.OnCloseWrite)
+			return expect
+		}
+		select {
+		case <-ctx.Done():
+			return expect
+		case f, ok := <-recv:
+			if !ok {
+				return expect
+			}
+			switch f.Type {
+			case FrameData:
+				if len(pending) >= PendingCap {
+					if h.OnOverflow != nil {
+						h.OnOverflow(len(pending))
+					}
+					return expect
+				}
+				pending[f.Seq] = f.Data
+			case FrameFIN:
+				v := f.Seq
+				if finSeq == nil || v < *finSeq {
+					finSeq = &v
+				}
+			default:
+				if h.OnUnknownType != nil {
+					h.OnUnknownType(f.Type)
+				}
+				return expect
+			}
+			for {
+				data, ok := pending[expect]
+				if !ok {
+					break
+				}
+				delete(pending, expect)
+				if len(data) > 0 {
+					if _, err := dst.Write(data); err != nil {
+						if h.OnWriteError != nil {
+							h.OnWriteError(err)
+						}
+						return expect
+					}
+				}
+				expect++
+			}
+		}
+	}
 }
 
 // CloseWrite half-closes the write side of conn if the underlying type
