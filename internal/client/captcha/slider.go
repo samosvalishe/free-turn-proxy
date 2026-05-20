@@ -9,7 +9,6 @@ import (
 	"image"
 	"image/color"
 	_ "image/jpeg" // register JPEG decoder for image.Decode
-	"log"
 	"math"
 	mathrand "math/rand"
 	"runtime"
@@ -59,7 +58,7 @@ func (s *captchaSession) solveSliderCaptcha(
 	if err != nil {
 		return "", err
 	}
-	log.Printf("slider puzzle decoded: grid=%d attempts=%d swaps=%d", puzzle.Size, puzzle.Attempts, len(puzzle.Swaps))
+	Log.Debugf("[Captcha] slider puzzle decoded: grid=%d attempts=%d swaps=%d", puzzle.Size, puzzle.Attempts, len(puzzle.Swaps))
 
 	guesses, err := rankSliderGuesses(puzzle.Image, puzzle.Size, puzzle.Swaps)
 	if err != nil {
@@ -73,7 +72,7 @@ func (s *captchaSession) solveSliderCaptcha(
 	if limit <= 0 {
 		return "", errors.New("slider has no attempts available")
 	}
-	log.Printf("slider guesses ranked: total=%d limit=%d", len(guesses), limit)
+	Log.Debugf("[Captcha] slider guesses ranked: total=%d limit=%d", len(guesses), limit)
 
 	deviceJSON := captchaDeviceInfo
 	if s.savedProfile != nil && strings.TrimSpace(s.savedProfile.DeviceJSON) != "" {
@@ -91,7 +90,7 @@ func (s *captchaSession) solveSliderCaptcha(
 	}
 
 	for i := 0; i < limit; i++ {
-		log.Printf("slider attempt %d/%d (guess #%d)", i+1, limit, guesses[i].Index)
+		Log.Debugf("[Captcha] slider attempt %d/%d (guess #%d)", i+1, limit, guesses[i].Index)
 		answerData, err := json.Marshal(struct {
 			Value []int `json:"value"`
 		}{Value: guesses[i].Swaps})
@@ -113,7 +112,7 @@ func (s *captchaSession) solveSliderCaptcha(
 			if check.SuccessToken == "" {
 				return "", errors.New("captcha success token not found")
 			}
-			log.Printf("slider accepted on attempt %d", i+1)
+			Log.Infof("[Captcha] slider accepted on attempt %d", i+1)
 			return check.SuccessToken, nil
 		}
 		if strings.EqualFold(check.Status, "error_limit") {
@@ -185,7 +184,7 @@ func splitSliderSteps(steps []int) (int, []int, int, error) {
 	if len(tail)%2 != 0 {
 		attempts = tail[len(tail)-1]
 		tail = tail[:len(tail)-1]
-		log.Printf("slider payload had odd-length tail; fallback attempts=%d", attempts)
+		Log.Warnf("[Captcha] slider payload had odd-length tail; fallback attempts=%d", attempts)
 	}
 	if attempts <= 0 {
 		attempts = 4

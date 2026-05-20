@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	mathrand "math/rand"
 	"regexp"
 	"strconv"
@@ -23,7 +22,15 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/client/browserprofile"
+	"github.com/cacggghp/vk-turn-proxy/internal/logx"
 )
+
+// Log is the package-level logger. Defaults to no-op; main wires it via
+// SetLogger so captcha output respects the global -debug flag and levels.
+var Log logx.Logger = logx.Nop()
+
+// SetLogger installs a logger for this package. Safe to call once at startup.
+func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
 
 const (
 	captchaAPIVersion    = "5.131"
@@ -121,7 +128,7 @@ func Solve(
 	if captchaErr == nil || captchaErr.SessionToken == "" {
 		return "", fmt.Errorf("no session_token in redirect_uri")
 	}
-	log.Printf("[STREAM %d] [Captcha] Solving VK Smart Captcha automatically...", streamID)
+	Log.Infof("[STREAM %d] [Captcha] Solving VK Smart Captcha automatically...", streamID)
 
 	s := &captchaSession{ctx: ctx, client: client, profile: profile, savedProfile: savedProfile}
 
@@ -130,7 +137,7 @@ func Solve(
 		if solveErr == nil {
 			return token, nil
 		}
-		log.Printf("[STREAM %d] [Captcha] captcha solve attempt %d failed: %v", streamID, attempt, solveErr)
+		Log.Warnf("[STREAM %d] [Captcha] solve attempt %d failed: %v", streamID, attempt, solveErr)
 		if errors.Is(solveErr, errCaptchaRateLimit) {
 			return "", solveErr
 		}
@@ -176,12 +183,12 @@ func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
 		return "", errors.New("failed to find slider captcha settings")
 	}
 
-	log.Printf("captcha solving pow difficulty=%d", page.PowDifficulty)
+	Log.Debugf("[Captcha] solving pow difficulty=%d", page.PowDifficulty)
 	hash := solveCaptchaPoW(s.ctx, page.PowInput, page.PowDifficulty)
 	if hash == "" {
 		return "", errors.New("captcha pow failed")
 	}
-	log.Printf("captcha pow solved")
+	Log.Debugf("[Captcha] pow solved")
 
 	base := captchaBaseValues(captchaErr.SessionToken)
 	if _, settingsErr := s.captchaRequest("captchaNotRobot.settings", base); settingsErr != nil {
@@ -198,7 +205,7 @@ func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
 
 	if m := reCaptchaVersion.FindStringSubmatch(page.ScriptURL); len(m) > 1 {
 		if m[1] != captchaScriptVersion {
-			log.Printf("captcha script version drift: known=%s latest=%s", captchaScriptVersion, m[1])
+			Log.Warnf("[Captcha] script version drift: known=%s latest=%s", captchaScriptVersion, m[1])
 		}
 	}
 
@@ -213,7 +220,7 @@ func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
 	}
 	var token string
 	for {
-		log.Printf("captcha solving show_type=%s", showType)
+		Log.Debugf("[Captcha] solving show_type=%s", showType)
 		switch showType {
 		case "slider":
 			token, err = s.solveSliderCaptcha(captchaErr.SessionToken, browserFP, hash, sliderSettings, debugInfo)
@@ -226,7 +233,7 @@ func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
 			break
 		}
 		if errors.Is(err, errCaptchaBot) && !strings.EqualFold(showType, "slider") && sliderSettings != "" {
-			log.Printf("captcha checkbox returned BOT, trying slider challenge from page settings")
+			Log.Infof("[Captcha] checkbox returned BOT, trying slider challenge")
 			showType = "slider"
 			continue
 		}
@@ -238,7 +245,7 @@ func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
 	}
 
 	if _, endErr := s.captchaRequest("captchaNotRobot.endSession", base); endErr != nil {
-		log.Printf("captcha endSession failed: %v", endErr)
+		Log.Warnf("[Captcha] endSession failed: %v", endErr)
 	}
 	return token, nil
 }
@@ -293,7 +300,7 @@ func (s *captchaSession) fetchDebugInfo(scriptURL string) (string, error) {
 	}
 	v := string(m[1])
 	captchaDebugCache.Store(scriptURL, v)
-	log.Printf("captcha debug_info fetched url=%s", scriptURL)
+	Log.Debugf("[Captcha] debug_info fetched url=%s", scriptURL)
 	return v, nil
 }
 
@@ -386,9 +393,9 @@ func (s *captchaSession) performCaptchaCheck(
 		return nil, err
 	}
 	if check.ShowType != "" {
-		log.Printf("captcha check status=%s show_type=%s", check.Status, check.ShowType)
+		Log.Debugf("[Captcha] check status=%s show_type=%s", check.Status, check.ShowType)
 	} else {
-		log.Printf("captcha check status=%s", check.Status)
+		Log.Debugf("[Captcha] check status=%s", check.Status)
 	}
 	return check, nil
 }
@@ -521,7 +528,7 @@ func (s *captchaSession) doRaw(
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
-			log.Printf("captcha close body: %s", closeErr)
+			Log.Warnf("[Captcha] close body: %s", closeErr)
 		}
 	}()
 	return io.ReadAll(resp.Body)

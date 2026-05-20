@@ -39,50 +39,57 @@ func manualCaptchaSolver(_ context.Context, e *captcha.Error, d net.Dialer) (str
 }
 
 func main() {
+	cfg, err := config.ParseClient(os.Args[1:], os.Stderr)
+	if err != nil {
+		// logger not built yet — config parse failure is the only pre-logger fatal.
+		log.Fatalf("%v", err)
+	}
+
+	logger := logx.New(cfg.Log.Debug)
+	captcha.SetLogger(logger)
+	manualcaptcha.SetLogger(logger)
+	dnsdial.SetLogger(logger)
+	manualcaptcha.Debug = cfg.Log.Debug
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-signalChan
-		log.Printf("Terminating...\n")
+		logger.Infof("Terminating...")
 		cancel()
 		select {
 		case <-signalChan:
 		case <-time.After(5 * time.Second):
 		}
-		log.Fatalf("Exit...\n")
+		logger.Errorf("Exit...")
+		os.Exit(1)
 	}()
-
-	cfg, err := config.ParseClient(os.Args[1:], os.Stderr)
-	if err != nil {
-		log.Fatalf("%v", err)
-	}
 
 	if cfg.DNS.Servers != nil {
 		dnsdial.SetUDPDNSServers(cfg.DNS.Servers)
-		log.Printf("[DNS] using custom UDP servers: %v", cfg.DNS.Servers)
+		logger.Infof("[DNS] using custom UDP servers: %v", cfg.DNS.Servers)
 	}
 	appDialer := dnsdial.AppDialer(cfg.DNS.Mode)
 	dnsdial.InstallGlobalResolver(cfg.DNS.Mode)
 	if cfg.Obf.GenWrapKey {
 		key, gerr := srtpmimicry.GenKeyHex()
 		if gerr != nil {
-			log.Panicf("%v", gerr)
+			logger.Errorf("gen-wrap-key: %v", gerr)
+			os.Exit(1)
 		}
 		fmt.Println(key)
 		return
 	}
 	peer, err := net.ResolveUDPAddr("udp", cfg.Proxy.Peer)
 	if err != nil {
-		panic(err)
+		logger.Errorf("resolve peer addr: %v", err)
+		os.Exit(1)
 	}
 	if cfg.Obf.WrapMode {
-		log.Printf("WRAP mode enabled: peer server must use matching -wrap-key")
+		logger.Infof("WRAP mode enabled: peer server must use matching -wrap-key")
 	}
-
-	logger := logx.New(cfg.Log.Debug)
-	manualcaptcha.Debug = cfg.Log.Debug
 
 	var connectedStreams atomic.Int32
 
@@ -112,7 +119,8 @@ func main() {
 			GetCreds: tcpfwd.GetCredsFunc(vkAuth.GetCredentials),
 		}
 		if err := tcpfwd.Run(ctx, vlessDeps, vlessParams, peer, cfg.Proxy.Listen, cfg.TURN.N, cfg.Proxy.Mode == config.ProxyModeTCPFwdBond); err != nil {
-			log.Fatalf("tcpfwd: %v", err)
+			logger.Errorf("tcpfwd: %v", err)
+			os.Exit(1)
 		}
 		return
 	}
@@ -130,6 +138,7 @@ func main() {
 		GetCreds: udprelay.GetCredsFunc(vkAuth.GetCredentials),
 	}
 	if err := udprelay.Run(ctx, udpDtlsDialer, vkAuth, logger, &connectedStreams, cancel, udpParams, peer, cfg.Proxy.Listen, cfg.TURN.N); err != nil {
-		log.Fatalf("udprelay: %v", err)
+		logger.Errorf("udprelay: %v", err)
+		os.Exit(1)
 	}
 }

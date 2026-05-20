@@ -24,6 +24,7 @@ import (
 func main() {
 	cfg, err := config.ParseServer(os.Args[1:], os.Stderr)
 	if err != nil {
+		// logger not built yet — config parse failure is the only pre-logger fatal.
 		log.Fatalf("%v", err)
 	}
 	logger := logx.New(cfg.Log.Debug)
@@ -32,7 +33,8 @@ func main() {
 	if cfg.Obf.GenWrapKey {
 		key, gerr := srtpmimicry.GenKeyHex()
 		if gerr != nil {
-			log.Fatalf("gen-wrap-key: %v", gerr)
+			logger.Errorf("gen-wrap-key: %v", gerr)
+			os.Exit(1)
 		}
 		fmt.Println(key)
 		return
@@ -44,22 +46,25 @@ func main() {
 	signal.Notify(signalChan, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-signalChan
-		log.Printf("Terminating...\n")
+		logger.Infof("Terminating...")
 		cancel()
 		<-signalChan
-		log.Fatalf("Exit...\n")
+		logger.Errorf("Exit...")
+		os.Exit(1)
 	}()
 
 	addr, err := net.ResolveUDPAddr("udp", cfg.Proxy.Listen)
 	if err != nil {
-		panic(err)
+		logger.Errorf("resolve listen addr: %v", err)
+		os.Exit(1)
 	}
-	log.Printf("Starting server listen=%s connect=%s vless=%t wrap=%t bond-autodetect=true",
+	logger.Infof("Starting server listen=%s connect=%s vless=%t wrap=%t bond-autodetect=true",
 		cfg.Proxy.Listen, cfg.Proxy.Connect, cfg.Proxy.Mode == config.ProxyModeTCPFwd, cfg.Obf.WrapMode)
 
 	certificate, genErr := selfsign.GenerateSelfSigned()
 	if genErr != nil {
-		panic(genErr)
+		logger.Errorf("self-signed cert: %v", genErr)
+		os.Exit(1)
 	}
 
 	dtlsOpts := []dtls.ServerOption{
@@ -70,25 +75,27 @@ func main() {
 	}
 	var listener net.Listener
 	if cfg.Obf.WrapMode {
-		log.Printf("WRAP mode enabled: listener only accepts clients with matching -wrap-key")
+		logger.Infof("WRAP mode enabled: listener only accepts clients with matching -wrap-key")
 		wrapListener, werr := srtpmimicry.Listen(addr, cfg.Obf.WrapKey)
 		if werr != nil {
-			panic(werr)
+			logger.Errorf("wrap listen: %v", werr)
+			os.Exit(1)
 		}
 		listener, err = dtls.NewListenerWithOptions(wrapListener, dtlsOpts...)
 	} else {
 		listener, err = dtls.ListenWithOptions("udp", addr, dtlsOpts...)
 	}
 	if err != nil {
-		panic(err)
+		logger.Errorf("dtls listen: %v", err)
+		os.Exit(1)
 	}
 	context.AfterFunc(ctx, func() {
 		if err = listener.Close(); err != nil {
-			panic(err)
+			logger.Errorf("listener close: %v", err)
 		}
 	})
 
-	fmt.Println("Listening")
+	logger.Infof("Listening on %s", cfg.Proxy.Listen)
 
 	var wg sync.WaitGroup
 	for {
@@ -100,7 +107,7 @@ func main() {
 		}
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Println(err)
+			logger.Warnf("accept: %v", err)
 			continue
 		}
 		wg.Go(func() {
@@ -112,22 +119,22 @@ func main() {
 func handleAccepted(ctx context.Context, logger logx.Logger, registry *bondserver.Registry, conn net.Conn, cfg *config.Server) {
 	defer func() {
 		if closeErr := conn.Close(); closeErr != nil {
-			log.Printf("failed to close incoming connection: %s", closeErr)
+			logger.Warnf("failed to close incoming connection: %s", closeErr)
 		}
 	}()
-	logger.Debugf("Connection from %s\n", conn.RemoteAddr())
+	logger.Debugf("Connection from %s", conn.RemoteAddr())
 
 	ctx1, cancel1 := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel1()
 
 	dtlsConn, ok := conn.(*dtls.Conn)
 	if !ok {
-		log.Println("Type error: expected *dtls.Conn")
+		logger.Errorf("Type error: expected *dtls.Conn")
 		return
 	}
 	logger.Debugf("Start handshake")
 	if err := dtlsConn.HandshakeContext(ctx1); err != nil {
-		log.Printf("Handshake failed: %v", err)
+		logger.Warnf("Handshake failed: %v", err)
 		return
 	}
 	logger.Debugf("Handshake done")
@@ -138,5 +145,5 @@ func handleAccepted(ctx context.Context, logger logx.Logger, registry *bondserve
 		udpserver.Handle(ctx, logger, conn, cfg.Proxy.Connect)
 	}
 
-	logger.Debugf("Connection closed: %s\n", conn.RemoteAddr())
+	logger.Debugf("Connection closed: %s", conn.RemoteAddr())
 }

@@ -255,7 +255,7 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 				}
 				if errors.Is(err, vkauth.ErrCaptchaWaitRequired) {
 					if !errors.Is(err, vkauth.ErrLockoutActive) {
-						deps.log().Errorf("[STREAM %d] Backing off for 60 seconds to avoid IP ban...", streamID)
+						deps.log().Warnf("[STREAM %d] Backing off for 60 seconds to avoid IP ban", streamID)
 						select {
 						case <-ctx.Done():
 							return
@@ -330,7 +330,7 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 	wg := sync.WaitGroup{}
 	context.AfterFunc(dtlsctx, func() {
 		if err := dtlsConn.SetDeadline(time.Now()); err != nil {
-			deps.log().Errorf("[STREAM %d] Warning: SetDeadline failed: %v", streamID, err)
+			deps.log().Warnf("[STREAM %d] SetDeadline failed: %v", streamID, err)
 		}
 	})
 

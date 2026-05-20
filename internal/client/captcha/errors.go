@@ -2,7 +2,6 @@ package captcha
 
 import (
 	"fmt"
-	"log"
 	neturl "net/url"
 )
 
@@ -25,14 +24,14 @@ type Error struct {
 func ParseError(errData map[string]any) *Error {
 	codeFloat, ok := errData["error_code"].(float64)
 	if !ok {
-		log.Printf("missing error_code in captcha error data")
+		Log.Warnf("[Captcha] missing error_code in error data")
 		return nil
 	}
 	code := int(codeFloat)
 
 	redirectURI, ok := errData["redirect_uri"].(string)
 	if !ok {
-		log.Printf("missing redirect_uri in captcha error data")
+		Log.Warnf("[Captcha] missing redirect_uri in error data")
 		return nil
 	}
 
@@ -41,20 +40,20 @@ func ParseError(errData map[string]any) *Error {
 		if sidNum, ok2 := errData["captcha_sid"].(float64); ok2 {
 			captchaSid = fmt.Sprintf("%.0f", sidNum)
 		} else {
-			log.Printf("missing captcha_sid in captcha error data")
+			Log.Warnf("[Captcha] missing captcha_sid in error data")
 			return nil
 		}
 	}
 
 	captchaImg, ok := errData["captcha_img"].(string)
 	if !ok {
-		log.Printf("missing captcha_img in captcha error data")
+		Log.Warnf("[Captcha] missing captcha_img in error data")
 		return nil
 	}
 
 	errorMsg, ok := errData["error_msg"].(string)
 	if !ok {
-		log.Printf("missing error_msg in captcha error data")
+		Log.Warnf("[Captcha] missing error_msg in error data")
 		return nil
 	}
 
@@ -63,7 +62,7 @@ func ParseError(errData map[string]any) *Error {
 		if parsed, err := neturl.Parse(redirectURI); err == nil {
 			sessionToken = parsed.Query().Get("session_token")
 		} else {
-			log.Printf("failed to parse redirect_uri: %v", err)
+			Log.Warnf("[Captcha] failed to parse redirect_uri: %v", err)
 			return nil
 		}
 	}

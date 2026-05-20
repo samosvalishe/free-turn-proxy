@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -27,11 +26,19 @@ import (
 
 	"github.com/cacggghp/vk-turn-proxy/internal/client/browserprofile"
 	"github.com/cacggghp/vk-turn-proxy/internal/client/ish"
+	"github.com/cacggghp/vk-turn-proxy/internal/logx"
 )
 
 // Debug toggles verbose request/response logging for the proxied browser
 // traffic. Set from main once cfg is parsed.
 var Debug bool
+
+// Log is the package-level logger; defaults to no-op. main wires it via
+// SetLogger so manual-captcha output respects -debug and levels.
+var Log logx.Logger = logx.Nop()
+
+// SetLogger installs a logger for this package.
+func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
 
 const captchaListenPort = "8765"
 
@@ -516,12 +523,12 @@ func startCaptchaServer(srv *http.Server, logPrefix string) error {
 		listening = true
 		wrappedListener, err := ish.WrapListener(listener)
 		if err != nil {
-			log.Printf("%s: failed to wrap listener for iSH: %v", logPrefix, err)
+			Log.Warnf("%s: failed to wrap listener for iSH: %v", logPrefix, err)
 			wrappedListener = listener
 		}
 		go func(listener net.Listener) {
 			if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Printf("%s: %s", logPrefix, err)
+				Log.Errorf("%s: %s", logPrefix, err)
 			}
 		}(wrappedListener)
 	}
@@ -548,7 +555,7 @@ func runCaptchaServerAndWait(handler http.Handler, captchaURL string, keyCh <-ch
 	fmt.Println("==============================================")
 	fmt.Println()
 
-	log.Printf("[%s] Opening browser...", logPrefix)
+	Log.Infof("[%s] Opening browser...", logPrefix)
 	openBrowser(captchaURL)
 
 	key := <-keyCh
@@ -560,7 +567,7 @@ func runCaptchaServerAndWait(handler http.Handler, captchaURL string, keyCh <-ch
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer shutCancel()
 	if err := srv.Shutdown(shutCtx); err != nil {
-		log.Printf("%s: shutdown warning (token already received): %v", logPrefix, err)
+		Log.Warnf("%s: shutdown warning (token already received): %v", logPrefix, err)
 	}
 
 	return key, nil
@@ -620,22 +627,22 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if isCaptchaRequest {
 		b, err := io.ReadAll(req.Body)
 		if err != nil {
-			log.Printf("[Captcha Proxy] Failed to read request body: %v", err)
+			Log.Warnf("[Captcha Proxy] failed to read request body: %v", err)
 			b = nil
 		}
 		req.Body = io.NopCloser(bytes.NewReader(b))
 
 		if Debug {
-			log.Printf("[Captcha Proxy] Real browser sent %s data: %s", req.URL.Path, string(b))
+			Log.Debugf("[Captcha Proxy] real browser sent %s data: %s", req.URL.Path, string(b))
 			for k, v := range req.Header {
-				log.Printf("[Captcha Proxy] Header (%s): %s = %s", req.URL.Path, k, strings.Join(v, ", "))
+				Log.Debugf("[Captcha Proxy] header (%s): %s = %s", req.URL.Path, k, strings.Join(v, ", "))
 			}
 		}
 
 		if strings.Contains(req.URL.Path, "captchaNotRobot.componentDone") || strings.Contains(req.URL.Path, "captchaNotRobot.check") {
 			parsedBody, err := neturl.ParseQuery(string(b))
 			if err != nil {
-				log.Printf("[Captcha Proxy] Failed to parse request body: %v", err)
+				Log.Warnf("[Captcha Proxy] failed to parse request body: %v", err)
 			}
 			device := parsedBody.Get("device")
 			browserFp := parsedBody.Get("browser_fp")
@@ -653,9 +660,9 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 					BrowserFp:  browserFp,
 				}
 				if err := browserprofile.Save(sp); err != nil {
-					log.Printf("[Captcha Proxy] Failed to save browser profile: %v", err)
+					Log.Warnf("[Captcha Proxy] failed to save browser profile: %v", err)
 				} else {
-					log.Printf("[Captcha Proxy] Successfully intercepted and saved real browser profile!")
+					Log.Infof("[Captcha Proxy] saved real browser profile")
 				}
 			}
 		}
@@ -683,7 +690,7 @@ func SolveViaProxy(redirectURI string, dialer net.Dialer) (string, error) {
 			rewriteProxyRequest(req.Out, targetURL)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			log.Printf("[Captcha Proxy] ERROR for %s %s: %v", r.Method, r.URL.String(), err)
+			Log.Errorf("[Captcha Proxy] %s %s: %v", r.Method, r.URL.String(), err)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:20px"><h2>Captcha proxy error</h2><p>%s %s</p><p>%v</p></body></html>`, r.Method, r.URL.String(), err)
@@ -705,7 +712,7 @@ func SolveViaProxy(redirectURI string, dialer net.Dialer) (string, error) {
 			contentType := res.Header.Get("Content-Type")
 			contentEncoding := res.Header.Get("Content-Encoding")
 			if Debug {
-				log.Printf("[Captcha Proxy] %s %d | Content-Type: %q, Encoding: %q", res.Request.Method, res.StatusCode, contentType, contentEncoding)
+				Log.Debugf("[Captcha Proxy] %s %d | Content-Type: %q, Encoding: %q", res.Request.Method, res.StatusCode, contentType, contentEncoding)
 			}
 
 			shouldInspectBody := strings.Contains(contentType, "text/html") ||
@@ -723,7 +730,7 @@ func SolveViaProxy(redirectURI string, dialer net.Dialer) (string, error) {
 					reader = gzReader
 					defer func() {
 						if err := gzReader.Close(); err != nil {
-							log.Printf("failed to close gzip reader: %v", err)
+							Log.Warnf("[Captcha Proxy] close gzip reader: %v", err)
 						}
 					}()
 				}
@@ -773,10 +780,10 @@ func SolveViaProxy(redirectURI string, dialer net.Dialer) (string, error) {
 	mux.HandleFunc("/local-captcha-result", func(w http.ResponseWriter, r *http.Request) {
 		token := r.FormValue("token")
 		if token != "" {
-			log.Printf("[Captcha] Received success token from browser (%d bytes)", len(token))
+			Log.Infof("[Captcha] received success token from browser (%d bytes)", len(token))
 			notifyKey(keyCh, token)
 		} else {
-			log.Printf("[Captcha] Received empty token from browser")
+			Log.Warnf("[Captcha] received empty token from browser")
 		}
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "text/plain")
@@ -838,7 +845,7 @@ func SolveViaProxy(redirectURI string, dialer net.Dialer) (string, error) {
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("[Captcha Proxy] HTTP %s %s", r.Method, r.URL.Path)
+		Log.Debugf("[Captcha Proxy] HTTP %s %s", r.Method, r.URL.Path)
 		if r.URL.Path == "/" && targetURL.Path != "" && targetURL.Path != "/" && r.URL.RawQuery == "" {
 			// Don't log the full redirect URL to keep console clean
 			http.Redirect(w, r, localCaptchaURLForTarget(targetURL), http.StatusTemporaryRedirect)

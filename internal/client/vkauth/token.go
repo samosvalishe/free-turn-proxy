@@ -75,7 +75,7 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 		}
 		defer func() {
 			if closeErr := httpResp.Body.Close(); closeErr != nil {
-				c.log.Infof("close response body: %s", closeErr)
+				c.log.Warnf("[VK Auth] close response body: %s", closeErr)
 			}
 		}()
 
@@ -109,7 +109,7 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 	// Token 1 -> getCallPreview (warmup, non-fatal).
 	data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&fields=photo_200&access_token=%s", link, token1)
 	if _, prevErr := doRequest(data, "https://api.vk.ru/method/calls.getCallPreview?v=5.275&client_id="+creds.ClientID); prevErr != nil {
-		c.log.Infof("[STREAM %d] [VK Auth] Warning: getCallPreview failed: %v", streamID, prevErr)
+		c.log.Warnf("[STREAM %d] [VK Auth] getCallPreview failed: %v", streamID, prevErr)
 	}
 
 	vkDelayRandom(200, 400)
@@ -130,10 +130,10 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 			if captchaErr != nil && captchaErr.IsCaptcha() {
 				solveMode, hasSolveMode := CaptchaSolveModeForAttempt(attempt, c.manualOnly)
 				if !hasSolveMode {
-					c.log.Infof("[STREAM %d] [Captcha] No more solve modes available (attempt %d)", streamID, attempt+1)
+					c.log.Warnf("[STREAM %d] [Captcha] No more solve modes available (attempt %d)", streamID, attempt+1)
 					c.engageLockout(60 * time.Second)
 					if c.streamsFn() == 0 {
-						c.log.Infof("[STREAM %d] [FATAL] 0 connected streams and captcha solve modes exhausted.", streamID)
+						c.log.Errorf("[STREAM %d] [Captcha] FATAL: 0 connected streams and solve modes exhausted", streamID)
 						return "", "", nil, ErrFatalCaptchaNoStreams
 					}
 					return "", "", nil, ErrCaptchaWaitRequired
@@ -152,7 +152,7 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 					if captchaErr.SessionToken != "" && captchaErr.RedirectURI != "" {
 						successToken, solveErr = solveFn(ctx, captchaErr, streamID, client, profile)
 						if solveErr != nil {
-							c.log.Infof("[STREAM %d] [Captcha] Auto captcha failed: %v", streamID, solveErr)
+							c.log.Warnf("[STREAM %d] [Captcha] Auto captcha failed: %v", streamID, solveErr)
 						}
 					} else {
 						solveErr = fmt.Errorf("missing fields for auto solve")
@@ -162,7 +162,7 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 						solveErr = fmt.Errorf("manual captcha solver not configured")
 						break
 					}
-					c.log.Infof("[STREAM %d] [Captcha] Triggering manual captcha fallback...", streamID)
+					c.log.Infof("[STREAM %d] [Captcha] Triggering manual captcha fallback", streamID)
 					// Manual solver gets its own 3-min budget so a tight parent
 					// deadline doesn't cut user solve time. We still propagate
 					// parent cancellation (app shutdown) so the in-flight solver
@@ -187,12 +187,12 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 						solveErr = res.err
 						if successToken != "" || captchaKey != "" {
 							if solveErr != nil {
-								c.log.Infof("[STREAM %d] [Captcha] Token received (ignoring cleanup error: %v)", streamID, solveErr)
+								c.log.Debugf("[STREAM %d] [Captcha] Token received (ignoring cleanup error: %v)", streamID, solveErr)
 								solveErr = nil
 							}
-							c.log.Infof("[STREAM %d] [Captcha] Successfully got token from browser", streamID)
+							c.log.Infof("[STREAM %d] [Captcha] Got token from browser", streamID)
 						} else if solveErr != nil {
-							c.log.Infof("[STREAM %d] [Captcha] manual solver returned error: %v", streamID, solveErr)
+							c.log.Warnf("[STREAM %d] [Captcha] Manual solver error: %v", streamID, solveErr)
 						}
 					case <-manualCtx.Done():
 						if errors.Is(manualCtx.Err(), context.DeadlineExceeded) {
@@ -205,15 +205,15 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 				}
 
 				if solveErr != nil {
-					c.log.Infof("[STREAM %d] [Captcha] %s failed (attempt %d): %v", streamID, CaptchaSolveModeLabel(solveMode), attempt+1, solveErr)
+					c.log.Warnf("[STREAM %d] [Captcha] %s failed (attempt %d): %v", streamID, CaptchaSolveModeLabel(solveMode), attempt+1, solveErr)
 					nextSolveMode, hasNextSolveMode := CaptchaSolveModeForAttempt(attempt+1, c.manualOnly)
 					if hasNextSolveMode {
-						c.log.Infof("[STREAM %d] [Captcha] Falling back to %s...", streamID, CaptchaSolveModeLabel(nextSolveMode))
+						c.log.Infof("[STREAM %d] [Captcha] Falling back to %s", streamID, CaptchaSolveModeLabel(nextSolveMode))
 						continue
 					}
 					c.engageLockout(60 * time.Second)
 					if c.streamsFn() == 0 {
-						c.log.Infof("[STREAM %d] [FATAL] 0 connected streams and manual captcha failed/timed out.", streamID)
+						c.log.Errorf("[STREAM %d] [Captcha] FATAL: 0 connected streams and manual captcha failed/timed out", streamID)
 						return "", "", nil, ErrFatalCaptchaNoStreams
 					}
 					return "", "", nil, ErrCaptchaWaitRequired

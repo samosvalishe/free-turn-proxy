@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -20,9 +19,18 @@ import (
 
 	"github.com/miekg/dns"
 
+	"github.com/cacggghp/vk-turn-proxy/internal/logx"
+
 	// Embedded Mozilla CA roots for CGO_ENABLED=0 builds (Android).
 	_ "golang.org/x/crypto/x509roots/fallback"
 )
+
+// Log is the package-level logger. Defaults to no-op; main wires it via
+// SetLogger so DNS-mode output respects the global -debug flag and levels.
+var Log logx.Logger = logx.Nop()
+
+// SetLogger installs a logger for this package.
+func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
 
 const (
 	dohQueryTimeout = 6 * time.Second
@@ -178,7 +186,7 @@ func (r *DohResolver) forwardRaw(ctx context.Context, query []byte) ([]byte, Doh
 		body, err := r.postWire(epCtx, ep, query)
 		cancel()
 		if err != nil {
-			log.Printf("[DoH] %s: %v", ep.Hostname, err)
+			Log.Warnf("[DoH] %s: %v", ep.Hostname, err)
 			lastErr = err
 			continue
 		}
@@ -263,7 +271,7 @@ func startDohForwarder(r *DohResolver) (_ *dohForwarder, err error) {
 		udpAddr: udpConn.LocalAddr().String(),
 		tcpAddr: tcpLn.Addr().String(),
 	}
-	log.Printf("[DoH] forwarder listening udp=%s tcp=%s", fwd.udpAddr, fwd.tcpAddr)
+	Log.Infof("[DoH] forwarder listening udp=%s tcp=%s", fwd.udpAddr, fwd.tcpAddr)
 
 	go fwd.serveUDP(udpConn, r)
 	go fwd.serveTCP(tcpLn, r)
@@ -276,7 +284,7 @@ func (f *dohForwarder) serveUDP(conn *net.UDPConn, r *DohResolver) {
 	for {
 		n, client, err := conn.ReadFromUDP(buf)
 		if err != nil {
-			log.Printf("[DoH] udp read: %v", err)
+			Log.Errorf("[DoH] udp read: %v", err)
 			return
 		}
 		query := append([]byte(nil), buf[:n]...)
@@ -285,11 +293,11 @@ func (f *dohForwarder) serveUDP(conn *net.UDPConn, r *DohResolver) {
 			defer cancel()
 			resp, _, err := r.forwardRaw(ctx, q)
 			if err != nil {
-				log.Printf("[DoH] udp forward failed: %v", err)
+				Log.Warnf("[DoH] udp forward failed: %v", err)
 				return
 			}
 			if _, err := conn.WriteToUDP(resp, c); err != nil {
-				log.Printf("[DoH] udp write: %v", err)
+				Log.Warnf("[DoH] udp write: %v", err)
 			}
 		}(query, client)
 	}
@@ -300,7 +308,7 @@ func (f *dohForwarder) serveTCP(ln *net.TCPListener, r *DohResolver) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Printf("[DoH] tcp accept: %v", err)
+			Log.Errorf("[DoH] tcp accept: %v", err)
 			return
 		}
 		go handleDohForwarderTCP(conn, r)
@@ -328,7 +336,7 @@ func handleDohForwarderTCP(conn net.Conn, r *DohResolver) {
 		resp, _, err := r.forwardRaw(ctx, query)
 		cancel()
 		if err != nil {
-			log.Printf("[DoH] tcp forward failed: %v", err)
+			Log.Warnf("[DoH] tcp forward failed: %v", err)
 			return
 		}
 		out := make([]byte, 2+len(resp))
@@ -421,8 +429,7 @@ func buildDialer(mode string, r *DohResolver) net.Dialer {
 	case DNSModeAuto:
 		return newAppDialer(autoDial(r))
 	default:
-		log.Panicf("unknown DNS mode %q", mode)
-		return net.Dialer{}
+		panic(fmt.Sprintf("unknown DNS mode %q", mode))
 	}
 }
 
@@ -472,9 +479,9 @@ func autoDial(r *DohResolver) dialFunc {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		probed.Do(func() {
 			if udpProbe(autoUDPBudget) {
-				log.Printf("[DNS] UDP/53 probe OK, using UDP")
+				Log.Infof("[DNS] UDP/53 probe OK, using UDP")
 			} else {
-				log.Printf("[DNS] UDP/53 unreachable; sticky-switching to DoH")
+				Log.Warnf("[DNS] UDP/53 unreachable; sticky-switching to DoH")
 				useDoH.Store(true)
 			}
 		})

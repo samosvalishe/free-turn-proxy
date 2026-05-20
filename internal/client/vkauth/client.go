@@ -156,12 +156,12 @@ func (c *Client) HandleAuthError(streamID int) bool {
 	count := cache.errorCount.Add(1)
 	cache.lastErrorTime.Store(now)
 
-	c.log.Infof("[STREAM %d] Auth error (cache=%d, count=%d/%d)", streamID, cacheID, count, MaxCacheErrors)
+	c.log.Warnf("[STREAM %d] [VK Auth] Auth error (cache=%d, count=%d/%d)", streamID, cacheID, count, MaxCacheErrors)
 
 	if count >= MaxCacheErrors {
-		c.log.Infof("[VK Auth] Multiple auth errors detected (%d), invalidating cache %d for stream %d...", count, cacheID, streamID)
+		c.log.Warnf("[VK Auth] Multiple auth errors (%d), invalidating cache %d for stream %d", count, cacheID, streamID)
 		cache.Invalidate()
-		c.log.Infof("[STREAM %d] [VK Auth] Credentials cache invalidated", streamID)
+		c.log.Warnf("[STREAM %d] [VK Auth] Credentials cache invalidated", streamID)
 		return true
 	}
 	return false
@@ -197,7 +197,7 @@ func (c *Client) fetchSerialized(ctx context.Context, link string, streamID int)
 	elapsed := time.Since(c.lastFetchTime)
 	if !c.lastFetchTime.IsZero() && elapsed < minInterval {
 		wait := minInterval - elapsed
-		c.log.Infof("[STREAM %d] [VK Auth] Throttling: waiting %v to prevent rate limit...", streamID, wait.Truncate(time.Millisecond))
+		c.log.Debugf("[STREAM %d] [VK Auth] Throttling: waiting %v to prevent rate limit", streamID, wait.Truncate(time.Millisecond))
 		select {
 		case <-ctx.Done():
 			return "", "", nil, ctx.Err()
@@ -225,14 +225,14 @@ func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, 
 			return user, pass, addrs, nil
 		}
 		lastErr = err
-		c.log.Infof("[STREAM %d] [VK Auth] Failed with client_id=%s: %v", streamID, creds.ClientID, err)
+		c.log.Warnf("[STREAM %d] [VK Auth] Failed with client_id=%s: %v", streamID, creds.ClientID, err)
 
 		if errors.Is(err, ErrCaptchaWaitRequired) || errors.Is(err, ErrFatalCaptchaNoStreams) {
 			return "", "", nil, err
 		}
 		es := err.Error()
 		if strings.Contains(es, "error_code:29") || strings.Contains(es, "error_code: 29") || strings.Contains(es, "Rate limit") {
-			c.log.Infof("[STREAM %d] [VK Auth] Rate limit detected, trying next credentials...", streamID)
+			c.log.Warnf("[STREAM %d] [VK Auth] Rate limit detected, trying next credentials", streamID)
 		}
 	}
 	return "", "", nil, fmt.Errorf("all VK credentials failed: %w", lastErr)
