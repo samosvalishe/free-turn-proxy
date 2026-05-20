@@ -336,6 +336,7 @@ func (c *serverConn) writeToNextLane(typ byte, seq uint64, data []byte, laneIdx 
 			left := c.removeLane(lane)
 			c.deps.log().Errorf("[bond %d] lane %d write error: %v (lanes=%d)", c.id, lane.index, err, left)
 			if left == 0 {
+				c.cancel()
 				return err
 			}
 		}
