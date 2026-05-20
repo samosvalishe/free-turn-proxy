@@ -26,13 +26,13 @@ import (
 
 // manualCaptchaSolver bridges the vkauth.ManualSolveFunc contract to the
 // local captcha bouncer (internal/client/captcha/manual).
-func manualCaptchaSolver(_ context.Context, e *captcha.Error, d net.Dialer) (string, string, error) {
+func manualCaptchaSolver(ctx context.Context, e *captcha.Error, d net.Dialer) (string, string, error) {
 	if e.RedirectURI != "" {
-		t, err := manualcaptcha.SolveViaProxy(e.RedirectURI, d)
+		t, err := manualcaptcha.SolveViaProxy(ctx, e.RedirectURI, d)
 		return t, "", err
 	}
 	if e.CaptchaImg != "" {
-		k, err := manualcaptcha.SolveViaHTTP(e.CaptchaImg)
+		k, err := manualcaptcha.SolveViaHTTP(ctx, e.CaptchaImg)
 		return "", k, err
 	}
 	return "", "", fmt.Errorf("no redirect_uri or captcha_img")

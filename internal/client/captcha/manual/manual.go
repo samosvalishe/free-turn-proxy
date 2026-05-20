@@ -541,12 +541,23 @@ func startCaptchaServer(srv *http.Server, logPrefix string) error {
 }
 
 // runCaptchaServerAndWait triggers the browser, and waiting gracefully for the solution token.
-func runCaptchaServerAndWait(handler http.Handler, captchaURL string, keyCh <-chan string, logPrefix string) (string, error) {
+// Returns ctx.Err() if ctx fires before a key arrives; in both cases the HTTP server is shut down.
+func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaURL string, keyCh <-chan string, logPrefix string) (string, error) {
 	srv := &http.Server{Handler: handler}
 
 	if err := startCaptchaServer(srv, logPrefix); err != nil {
 		return "", err
 	}
+
+	defer func() {
+		// Best-effort shutdown. On iSH SetDeadline is a no-op and Shutdown may
+		// time out while listeners drain; we still propagate the result.
+		shutCtx, shutCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer shutCancel()
+		if err := srv.Shutdown(shutCtx); err != nil {
+			Log.Warnf("%s: shutdown warning: %v", logPrefix, err)
+		}
+	}()
 
 	fmt.Println("\n==============================================")
 	fmt.Println("ACTION REQUIRED: MANUAL CAPTCHA SOLVING NEEDED")
@@ -558,19 +569,12 @@ func runCaptchaServerAndWait(handler http.Handler, captchaURL string, keyCh <-ch
 	Log.Infof("[%s] Opening browser...", logPrefix)
 	openBrowser(captchaURL)
 
-	key := <-keyCh
-
-	// Best-effort shutdown: the token is already received, so even if
-	// Shutdown times out (e.g. because ishConn.SetDeadline is a no-op
-	// on iSH and active connections can't be force-closed), we still
-	// return the token successfully.
-	shutCtx, shutCancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer shutCancel()
-	if err := srv.Shutdown(shutCtx); err != nil {
-		Log.Warnf("%s: shutdown warning (token already received): %v", logPrefix, err)
+	select {
+	case key := <-keyCh:
+		return key, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
 	}
-
-	return key, nil
 }
 
 // notifyKey pushes the key string to the given channel without blocking
@@ -586,7 +590,7 @@ func notifyKey(keyCh chan<- string, key string) {
 // SolveViaHTTP serves a tiny HTML page asking the user to solve the
 // pictured CAPTCHA, opens it in the browser, and blocks until the key
 // is posted back.
-func SolveViaHTTP(captchaImg string) (string, error) {
+func SolveViaHTTP(ctx context.Context, captchaImg string) (string, error) {
 	keyCh := make(chan string, 1)
 	mux := http.NewServeMux()
 
@@ -614,7 +618,7 @@ button{font-size:24px;padding:12px 32px;margin-top:12px;cursor:pointer}</style>
 		_, _ = fmt.Fprint(w, `<!DOCTYPE html><html><body><h2>Done!</h2></body></html>`)
 	})
 
-	return runCaptchaServerAndWait(mux, localCaptchaOrigin(), keyCh, "captcha HTTP server error")
+	return runCaptchaServerAndWait(ctx, mux, localCaptchaOrigin(), keyCh, "captcha HTTP server error")
 }
 
 type loggingTransport struct {
@@ -674,7 +678,7 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 // server, rewriting absolute URLs so the browser stays on
 // 127.0.0.1:8765 throughout the puzzle, then returns the resulting
 // auth token.
-func SolveViaProxy(redirectURI string, dialer net.Dialer) (string, error) {
+func SolveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer) (string, error) {
 	keyCh := make(chan string, 1)
 
 	targetURL, err := neturl.Parse(redirectURI)
@@ -854,7 +858,7 @@ func SolveViaProxy(redirectURI string, dialer net.Dialer) (string, error) {
 		proxy.ServeHTTP(w, r)
 	})
 
-	return runCaptchaServerAndWait(mux, localCaptchaURLForTarget(targetURL), keyCh, "proxy HTTP server error")
+	return runCaptchaServerAndWait(ctx, mux, localCaptchaURLForTarget(targetURL), keyCh, "proxy HTTP server error")
 }
 
 func openBrowser(url string) {
