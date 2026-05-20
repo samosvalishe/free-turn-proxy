@@ -258,7 +258,7 @@ docker build -t vk-turn-proxy .
 
 ## WRAP-Режим
 
-`-wrap` дополнительно оборачивает DTLS-пакеты ChaCha20-XOR перед отправкой в TURN ChannelData. Ключ должен совпадать на клиенте и сервере.
+`-wrap` маскирует TURN-payload под SRTP: добавляет RTP/opus-заголовок и шифрует тело ChaCha20-Poly1305 AEAD. Это не защита (DTLS уже шифрует внутренний канал), а обфускация под голосовой трафик, чтобы content-filter VK не дропал пакеты. Ключ должен совпадать на клиенте и сервере.
 
 Сгенерировать ключ:
 
@@ -273,7 +273,8 @@ docker build -t vk-turn-proxy .
 ./client -listen 127.0.0.1:9000 -peer <ip-vps>:56000 -vk-link "<vk-call-link>" -wrap -wrap-key <64-hex-key>
 ```
 
-> **Breaking change (V2-0):** флаги `-no-dtls` (клиент) и `-vless-bond` (сервер) удалены.
+> **Breaking change (V2-0):** удалены клиентский `-no-dtls` и **серверный** `-vless-bond`.
+> Клиентский `-vless-bond` сохранён — это и есть переключатель bonding.
 > `-no-dtls` помечался DO NOT USE и в проде не работал (VK дропает пакеты без DTLS-handshake).
 > Серверный `-vless-bond` больше не нужен: сервер автоопределяет bond по magic-префиксу в каждом стриме.
 
@@ -300,33 +301,35 @@ docker build -t vk-turn-proxy .
 
 | Флаг | По умолчанию | Описание |
 | --- | --- | --- |
-| `-listen` | `127.0.0.1:9000` | локальный адрес для WireGuard или Xray клиента |
-| `-peer` | обязательный | адрес VK TURN Proxy server на VPS, например `<ip-vps>:56000` |
-| `-vk-link` | обязательный | ссылка VK Calls |
-| `-n` | `10` | количество TURN-соединений |
-| `-udp` | `false` | подключаться к TURN-реле по UDP вместо TCP |
+| `-listen` | `127.0.0.1:9000` | локальный адрес `ip:port`, куда подключается WireGuard или Xray клиент |
+| `-peer` | обязательный | адрес сервера VK TURN Proxy на VPS, `host:port` (например `<ip-vps>:56000`) |
+| `-vk-link` | обязательный | ссылка VK Calls вида `https://vk.com/call/join/...` |
+| `-n` | `10` | количество параллельных TURN-потоков (соединений к TURN-реле) |
+| `-udp` | `false` | подключаться к TURN-реле по UDP (по умолчанию TCP/TLS) |
 | `-turn` | из ссылки | переопределить IP TURN-сервера |
 | `-port` | из ссылки | переопределить порт TURN-сервера |
-| `-vless` | `false` | TCP/VLESS режим |
-| `-vless-bond` | `false` | распределять одно TCP-соединение по активным smux-сессиям |
-| `-wrap` | `false` | включить WRAP-обфускацию |
-| `-wrap-key` | пусто | 32-байтный ключ в hex, 64 символа |
-| `-gen-wrap-key` | `false` | напечатать новый WRAP-ключ и выйти |
-| `-manual-captcha` | `false` | сразу использовать ручное прохождение captcha |
-| `-streams-per-cred` | `10` | сколько потоков используют один кеш TURN-учетных данных |
-| `-debug` | `false` | подробные логи |
+| `-vless` | `false` | режим TCP-форвардера (VLESS/Xray) вместо UDP-релея для WireGuard |
+| `-vless-bond` | `false` | распределять одно VLESS TCP-соединение по всем активным smux-сессиям (только с `-vless`) |
+| `-wrap` | `false` | маскировать TURN-payload под SRTP (см. [WRAP-режим](#wrap-режим)); ключ должен совпадать с сервером |
+| `-wrap-key` | пусто | общий ключ для `-wrap`, 32 байта в hex (64 символа) |
+| `-gen-wrap-key` | `false` | напечатать новый ключ для `-wrap-key` и выйти |
+| `-manual-captcha` | `false` | пропустить авто-решение captcha и сразу открыть ручной режим в локальном браузере |
+| `-streams-per-cred` | `10` | сколько TURN-потоков делят один кеш VK-учёток |
+| `-dns` | `auto` | режим DNS-резолвинга: `udp` \| `doh` \| `auto` (UDP/53, sticky-fallback на DoH) |
+| `-dns-servers` | пусто | список UDP/53 DNS-серверов через запятую вместо встроенных, формат `ip[:port][,ip[:port]...]` |
+| `-debug` | `false` | включить подробные debug-логи |
 
 ## Флаги Сервера
 
 | Флаг | По умолчанию | Описание |
 | --- | --- | --- |
-| `-listen` | `0.0.0.0:56000` | адрес прослушивания |
-| `-connect` | обязательный | backend-адрес, например `127.0.0.1:51820` или `127.0.0.1:443` |
-| `-vless` | `false` | TCP/VLESS режим (bond распознаётся автоматически по magic-префиксу) |
-| `-wrap` | `false` | включить WRAP-обфускацию |
-| `-wrap-key` | пусто | 32-байтный ключ в hex, 64 символа |
-| `-gen-wrap-key` | `false` | напечатать новый WRAP-ключ и выйти |
-| `-debug` | `false` | подробные логи |
+| `-listen` | `0.0.0.0:56000` | локальный адрес прослушивания `ip:port` |
+| `-connect` | обязательный | адрес локального бэкенда `host:port` (WireGuard `127.0.0.1:51820` или Xray `127.0.0.1:443`) |
+| `-vless` | `false` | режим TCP-форвардера (VLESS/Xray) вместо UDP-релея; bond определяется автоматически по magic-префиксу в стриме |
+| `-wrap` | `false` | маскировать TURN-payload под SRTP (см. [WRAP-режим](#wrap-режим)); ключ должен совпадать с клиентом |
+| `-wrap-key` | пусто | общий ключ для `-wrap`, 32 байта в hex (64 символа) |
+| `-gen-wrap-key` | `false` | напечатать новый ключ для `-wrap-key` и выйти |
+| `-debug` | `false` | включить подробные debug-логи |
 
 ## Captcha
 
@@ -393,42 +396,6 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0"
 - Если сервер запущен в Docker bridge mode, `CONNECT_ADDR=127.0.0.1:51820` укажет внутрь контейнера, а не на хост. Используйте host network или IP хоста.
 - Если включен `-wrap`, убедитесь, что и клиент, и сервер используют одинаковый `-wrap-key`.
 
-## Похожие Проекты
-
-Авторы этого репозитория не отвечают за работу сторонних проектов.
-
-Server:
-
-- https://github.com/Urtyom-Alyanov/turn-proxy - реализация на Rust.
-- https://github.com/jaykaiperson/lionheart - похожий подход для `stream.wb.ru`.
-- https://github.com/kulikov0/whitelist-bypass - проброс через медиасерверы.
-- https://github.com/NedgNDG/vk-proxy-auto-installer - автоустановщик VK TURN Proxy.
-
-Android:
-
-- https://github.com/samosvalishe/turn-proxy-android
-- https://github.com/MYSOREZ/vk-turn-proxy-android
-- https://github.com/kiper292/wireguard-turn-android
-- https://github.com/WINGS-N/WINGSV
-- https://github.com/oxsidee/vkpn
-- https://github.com/amurcanov/proxy-turn-vk-android
-
-iOS:
-
-- https://github.com/nullcstring/turnbridge
-
-macOS:
-
-- https://github.com/denny4-user/vk-turn-proxy-macos-gui
-
 ## Лицензия
 
 GPL-3.0. См. [LICENSE](LICENSE).
-
-<a href="https://www.star-history.com/?repos=cacggghp%2Fvk-turn-proxy&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=cacggghp/vk-turn-proxy&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=cacggghp/vk-turn-proxy&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=cacggghp/vk-turn-proxy&type=date&legend=top-left" />
- </picture>
-</a>

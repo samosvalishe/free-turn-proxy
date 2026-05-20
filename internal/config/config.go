@@ -102,23 +102,23 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 		fs.SetOutput(errOut)
 	}
 
-	host := fs.String("turn", "", "override TURN server ip")
-	port := fs.String("port", "", "override TURN port")
-	listen := fs.String("listen", "127.0.0.1:9000", "listen on ip:port")
-	vklink := fs.String("vk-link", "", "VK calls invite link \"https://vk.com/call/join/...\"")
-	peerAddr := fs.String("peer", "", "peer server address (host:port)")
-	n := fs.Int("n", 10, "connections to TURN")
-	udp := fs.Bool("udp", false, "connect to TURN with UDP")
-	vlessMode := fs.Bool("vless", false, "VLESS mode: forward TCP connections (for VLESS) instead of UDP packets")
-	vlessBond := fs.Bool("vless-bond", false, "bond one VLESS TCP connection across all active smux sessions")
-	wrapMode := fs.Bool("wrap", false, "WRAP mode: ChaCha20-XOR obfuscate DTLS packets before they reach TURN ChannelData")
-	wrapKeyHex := fs.String("wrap-key", "", "32-byte hex-encoded shared key for -wrap (64 hex chars)")
-	genWrapKey := fs.Bool("gen-wrap-key", false, "print a fresh 64-character hex key for -wrap-key and exit")
-	streamsPerCredFlag := fs.Int("streams-per-cred", defaultStreamsPerCache, "number of TURN streams sharing one VK credential cache")
-	debugFlag := fs.Bool("debug", false, "enable debug logging")
-	manualCaptchaFlag := fs.Bool("manual-captcha", false, "skip auto captcha solving, use manual mode immediately")
-	dnsFlag := fs.String("dns", dnsModeAuto, "DNS resolution mode: udp | doh | auto (auto tries UDP/53 first, sticky-fallback to DoH on total failure)")
-	dnsServersFlag := fs.String("dns-servers", "", "comma-separated UDP/53 DNS servers to use instead of built-in defaults (e.g. carrier resolvers from Android LinkProperties). Format: ip[:port][,ip[:port]...].")
+	host := fs.String("turn", "", "переопределить IP TURN-сервера (по умолчанию берётся из VK Calls ссылки)")
+	port := fs.String("port", "", "переопределить порт TURN-сервера (по умолчанию берётся из VK Calls ссылки)")
+	listen := fs.String("listen", "127.0.0.1:9000", "локальный адрес ip:port, куда подключается WireGuard или Xray клиент")
+	vklink := fs.String("vk-link", "", "ссылка VK Calls вида https://vk.com/call/join/... (обязательно)")
+	peerAddr := fs.String("peer", "", "адрес сервера VK TURN Proxy на VPS, host:port (обязательно)")
+	n := fs.Int("n", 10, "количество параллельных TURN-потоков (соединений к TURN-реле)")
+	udp := fs.Bool("udp", false, "подключаться к TURN-реле по UDP (по умолчанию TCP/TLS)")
+	vlessMode := fs.Bool("vless", false, "режим TCP-форвардера (VLESS/Xray) вместо UDP-релея для WireGuard")
+	vlessBond := fs.Bool("vless-bond", false, "распределять одно VLESS TCP-соединение по всем активным smux-сессиям (только с -vless)")
+	wrapMode := fs.Bool("wrap", false, "маскировать TURN-payload под SRTP (RTP/opus + ChaCha20-Poly1305 AEAD) для обхода content-filter VK; ключ должен совпадать на клиенте и сервере")
+	wrapKeyHex := fs.String("wrap-key", "", "общий ключ для -wrap, 32 байта в hex (64 символа)")
+	genWrapKey := fs.Bool("gen-wrap-key", false, "напечатать новый ключ для -wrap-key и выйти")
+	streamsPerCredFlag := fs.Int("streams-per-cred", defaultStreamsPerCache, "сколько TURN-потоков делят один кеш VK-учёток")
+	debugFlag := fs.Bool("debug", false, "включить подробные debug-логи")
+	manualCaptchaFlag := fs.Bool("manual-captcha", false, "пропустить авто-решение VK captcha и сразу открыть ручной режим в локальном браузере")
+	dnsFlag := fs.String("dns", dnsModeAuto, "режим DNS-резолвинга: udp | doh | auto (auto: сначала UDP/53, sticky-fallback на DoH при полном отказе)")
+	dnsServersFlag := fs.String("dns-servers", "", "список UDP/53 DNS-серверов через запятую вместо встроенных (напр. резолверы оператора из Android LinkProperties). Формат: ip[:port][,ip[:port]...]")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -200,13 +200,13 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 		fs.SetOutput(errOut)
 	}
 
-	listen := fs.String("listen", "0.0.0.0:56000", "listen on ip:port")
-	connect := fs.String("connect", "", "connect to ip:port")
-	vlessMode := fs.Bool("vless", false, "VLESS mode: forward TCP connections (for VLESS) instead of UDP packets")
-	wrapMode := fs.Bool("wrap", false, "WRAP mode: ChaCha20-XOR obfuscate DTLS packets before they reach TURN ChannelData")
-	wrapKeyHex := fs.String("wrap-key", "", "32-byte hex-encoded shared key for -wrap (64 hex chars)")
-	genWrapKey := fs.Bool("gen-wrap-key", false, "print a fresh 64-character hex key for -wrap-key and exit")
-	debugFlag := fs.Bool("debug", false, "enable debug logging")
+	listen := fs.String("listen", "0.0.0.0:56000", "локальный адрес прослушивания ip:port")
+	connect := fs.String("connect", "", "адрес локального бэкенда, host:port (обязательно: WireGuard 127.0.0.1:51820 или Xray 127.0.0.1:443)")
+	vlessMode := fs.Bool("vless", false, "режим TCP-форвардера (VLESS/Xray) вместо UDP-релея для WireGuard; bond определяется автоматически по magic-префиксу в стриме")
+	wrapMode := fs.Bool("wrap", false, "маскировать TURN-payload под SRTP (RTP/opus + ChaCha20-Poly1305 AEAD) для обхода content-filter VK; ключ должен совпадать с клиентом")
+	wrapKeyHex := fs.String("wrap-key", "", "общий ключ для -wrap, 32 байта в hex (64 символа)")
+	genWrapKey := fs.Bool("gen-wrap-key", false, "напечатать новый ключ для -wrap-key и выйти")
+	debugFlag := fs.Bool("debug", false, "включить подробные debug-логи")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
