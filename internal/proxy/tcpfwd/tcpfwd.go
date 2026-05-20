@@ -3,13 +3,13 @@ package tcpfwd
 import (
 	"context"
 	"fmt"
-	"io"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/client/ish"
 	"github.com/cacggghp/vk-turn-proxy/internal/logx"
+	"github.com/cacggghp/vk-turn-proxy/internal/netconn"
 	"github.com/cacggghp/vk-turn-proxy/internal/proxy/common"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/internal/transport/dtlsdial"
@@ -162,7 +162,12 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 				return
 			}
 			defer func() { _ = stream.Close() }()
-			fromSession, toSession := pipe(deps, ctx, tc, stream)
+			errf := func(format string, v ...any) {
+				if deps.log().DebugEnabled() {
+					deps.log().Errorf(format, v...)
+				}
+			}
+			fromSession, toSession := netconn.BiCopy(ctx, tc, stream, errf)
 			sessRef.FromSession.Add(uint64(fromSession))
 			sessRef.ToSession.Add(uint64(toSession))
 			deps.log().Debugf("[session %d] TCP done #%d local<-session=%s local->session=%s",
@@ -275,44 +280,3 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	return smuxSess, cleanup, nil
 }
 
-// pipe copies data bidirectionally between two connections, cancelling both
-// sides as soon as either copy finishes. Returns (c1<-c2, c2<-c1) bytes.
-func pipe(deps *Deps, ctx context.Context, c1, c2 net.Conn) (int64, int64) {
-	ctx2, cancel := context.WithCancel(ctx)
-	context.AfterFunc(ctx2, func() {
-		if err := c1.SetDeadline(time.Now()); err != nil {
-			deps.log().Errorf("pipe: failed to set deadline c1: %v", err)
-		}
-		if err := c2.SetDeadline(time.Now()); err != nil {
-			deps.log().Errorf("pipe: failed to set deadline c2: %v", err)
-		}
-	})
-
-	var wg sync.WaitGroup
-	var c1FromC2 int64
-	var c2FromC1 int64
-	wg.Go(func() {
-		defer cancel()
-		n, err := io.Copy(c1, c2)
-		c1FromC2 = n
-		if err != nil && deps.log().DebugEnabled() {
-			deps.log().Errorf("pipe: c1<-c2 copy error: %v", err)
-		}
-	})
-	wg.Go(func() {
-		defer cancel()
-		n, err := io.Copy(c2, c1)
-		c2FromC1 = n
-		if err != nil && deps.log().DebugEnabled() {
-			deps.log().Errorf("pipe: c2<-c1 copy error: %v", err)
-		}
-	})
-	wg.Wait()
-	if err := c1.SetDeadline(time.Time{}); err != nil && deps.log().DebugEnabled() {
-		deps.log().Errorf("pipe: failed to reset deadline c1: %v", err)
-	}
-	if err := c2.SetDeadline(time.Time{}); err != nil && deps.log().DebugEnabled() {
-		deps.log().Errorf("pipe: failed to reset deadline c2: %v", err)
-	}
-	return c1FromC2, c2FromC1
-}

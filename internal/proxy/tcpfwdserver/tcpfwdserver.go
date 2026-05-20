@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cacggghp/vk-turn-proxy/internal/logx"
+	"github.com/cacggghp/vk-turn-proxy/internal/netconn"
 	"github.com/cacggghp/vk-turn-proxy/internal/proxy/bondserver"
 	"github.com/cacggghp/vk-turn-proxy/internal/stats"
 	"github.com/cacggghp/vk-turn-proxy/internal/transport/kcptun"
@@ -110,7 +111,7 @@ func handleStream(ctx context.Context, logger logx.Logger, registry *bondserver.
 		}
 	}()
 
-	pipeConn(ctx, logger, &prefixedConn{Conn: s, prefix: prefix[:]}, backendConn)
+	netconn.BiCopy(ctx, &prefixedConn{Conn: s, prefix: prefix[:]}, backendConn, logger.Debugf)
 }
 
 // prefixedConn re-injects the magic-peek prefix on the first reads so the
@@ -129,37 +130,3 @@ func (c *prefixedConn) Read(p []byte) (int, error) {
 	return c.Conn.Read(p)
 }
 
-// pipeConn copies data bidirectionally between two connections.
-func pipeConn(ctx context.Context, logger logx.Logger, c1, c2 net.Conn) {
-	ctx2, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	context.AfterFunc(ctx2, func() {
-		if err := c1.SetDeadline(time.Now()); err != nil {
-			logger.Debugf("pipeConn: failed to set deadline c1: %v", err)
-		}
-		if err := c2.SetDeadline(time.Now()); err != nil {
-			logger.Debugf("pipeConn: failed to set deadline c2: %v", err)
-		}
-	})
-
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		if _, err := io.Copy(c1, c2); err != nil {
-			logger.Debugf("pipeConn: c1<-c2 copy error: %v", err)
-		}
-	})
-	wg.Go(func() {
-		if _, err := io.Copy(c2, c1); err != nil {
-			logger.Debugf("pipeConn: c2<-c1 copy error: %v", err)
-		}
-	})
-	wg.Wait()
-
-	if err := c1.SetDeadline(time.Time{}); err != nil {
-		logger.Debugf("pipeConn: failed to reset deadline c1: %v", err)
-	}
-	if err := c2.SetDeadline(time.Time{}); err != nil {
-		logger.Debugf("pipeConn: failed to reset deadline c2: %v", err)
-	}
-}
