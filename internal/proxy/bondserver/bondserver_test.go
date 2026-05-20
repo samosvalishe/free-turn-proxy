@@ -273,3 +273,22 @@ func TestRegistryGetDedup(t *testing.T) {
 	}
 	t.Fatal("registry did not drop conn after done")
 }
+
+// TestRegistryTenantIsolation ensures that the same ConnID under different
+// tenant scopes resolves to distinct serverConn instances. Guards against a
+// regression where the map key reverts to plain uint64.
+func TestRegistryTenantIsolation(t *testing.T) {
+	r := NewRegistry(Deps{})
+	ctx := t.Context()
+
+	ca := r.get(ctx, auth.TenantID("A"), 7, "127.0.0.1:1")
+	cb := r.get(ctx, auth.TenantID("B"), 7, "127.0.0.1:1")
+	if ca == cb {
+		t.Fatal("expected distinct conns for different tenants on same ConnID")
+	}
+	if ca.tenantID != auth.TenantID("A") || cb.tenantID != auth.TenantID("B") {
+		t.Fatalf("tenantID mismatch: ca=%q cb=%q", ca.tenantID, cb.tenantID)
+	}
+	close(ca.done)
+	close(cb.done)
+}
