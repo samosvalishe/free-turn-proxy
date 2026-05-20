@@ -14,6 +14,13 @@ import (
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
 )
 
+// GenerateSelfSignedCert returns a new self-signed TLS certificate for use
+// as the DTLS identity. It is a thin wrapper around selfsign.GenerateSelfSigned
+// and exists so both cmd/server and Dialer share one call-site.
+func GenerateSelfSignedCert() (tls.Certificate, error) {
+	return selfsign.GenerateSelfSigned()
+}
+
 // Dialer configures the DTLS client handshake.
 type Dialer struct {
 	// HandshakeTimeout caps the handshake context. Zero means no timeout.

@@ -16,9 +16,9 @@ import (
 	"github.com/samosvalishe/btp/internal/proxy/bondserver"
 	"github.com/samosvalishe/btp/internal/proxy/tcpfwdserver"
 	"github.com/samosvalishe/btp/internal/proxy/udpserver"
+	"github.com/samosvalishe/btp/internal/transport/dtlsdial"
 	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 	"github.com/pion/dtls/v3"
-	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
 )
 
 func main() {
@@ -66,7 +66,7 @@ func main() {
 		logger.Warnf("running without -wrap: any client reaching %s can relay to %s (no shared-key auth)", cfg.Proxy.Listen, cfg.Proxy.Connect)
 	}
 
-	certificate, genErr := selfsign.GenerateSelfSigned()
+	certificate, genErr := dtlsdial.GenerateSelfSignedCert()
 	if genErr != nil {
 		logger.Errorf("self-signed cert: %v", genErr)
 		os.Exit(1)
