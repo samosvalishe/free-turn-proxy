@@ -101,7 +101,7 @@ func ReadFrame(r io.Reader) (Frame, error) {
 		return Frame{}, err
 	}
 	size := binary.BigEndian.Uint32(hdr[9:13])
-	if size > 4*1024*1024 {
+	if size > MaxChunk {
 		return Frame{}, fmt.Errorf("bond frame too large: %d", size)
 	}
 	f := Frame{
