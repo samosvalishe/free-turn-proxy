@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samosvalishe/btp/internal/auth"
 	"github.com/samosvalishe/btp/internal/logx"
 	"github.com/samosvalishe/btp/internal/wire/bondframe"
 	"github.com/xtaci/smux"
@@ -37,30 +38,42 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-// Registry deduplicates concurrent lanes that share a ConnID into a single
-// backend TCP connection.
+// connKey is the composite de-duplication key for the Registry map.
+// Incorporating TenantID ensures ConnIDs from different tenants never collide,
+// which is required for multi-tenant deployments. In single-tenant (non-auth)
+// mode every key has Tenant == auth.Anonymous.
+type connKey struct {
+	Tenant auth.TenantID
+	ConnID uint64
+}
+
+// Registry deduplicates concurrent lanes that share a (TenantID, ConnID) pair
+// into a single backend TCP connection.
 type Registry struct {
 	deps Deps
 
 	mu    sync.Mutex
-	conns map[uint64]*serverConn
+	conns map[connKey]*serverConn
 }
 
 // NewRegistry creates an empty Registry.
 func NewRegistry(deps Deps) *Registry {
-	return &Registry{deps: deps, conns: make(map[uint64]*serverConn)}
+	return &Registry{deps: deps, conns: make(map[connKey]*serverConn)}
 }
 
 // HandleStreamAfterMagic accepts a smux stream whose first 4 magic bytes have
 // already been consumed (server-side multiplex pre-peek), reads the Hello,
 // attaches as a lane, and blocks until the underlying bond connection is done.
-func (r *Registry) HandleStreamAfterMagic(ctx context.Context, stream *smux.Stream, connectAddr string, magic [4]byte) {
-	r.handleStream(ctx, stream, connectAddr, func(rd io.Reader) (bondframe.Hello, error) {
+//
+// tenant scopes the de-duplication key. Pass [auth.Anonymous] in single-tenant
+// deployments; real Authenticator-derived values in multi-tenant mode.
+func (r *Registry) HandleStreamAfterMagic(ctx context.Context, tenant auth.TenantID, stream *smux.Stream, connectAddr string, magic [4]byte) {
+	r.handleStream(ctx, tenant, stream, connectAddr, func(rd io.Reader) (bondframe.Hello, error) {
 		return bondframe.ReadHelloAfterMagic(rd, magic)
 	})
 }
 
-func (r *Registry) handleStream(ctx context.Context, stream *smux.Stream, connectAddr string, readHello func(io.Reader) (bondframe.Hello, error)) {
+func (r *Registry) handleStream(ctx context.Context, tenant auth.TenantID, stream *smux.Stream, connectAddr string, readHello func(io.Reader) (bondframe.Hello, error)) {
 	defer func() {
 		if err := stream.Close(); err != nil && err != smux.ErrGoAway {
 			r.deps.log().Errorf("bondserver: close smux stream: %v", err)
@@ -73,7 +86,7 @@ func (r *Registry) handleStream(ctx context.Context, stream *smux.Stream, connec
 		return
 	}
 
-	conn := r.get(ctx, hello.ConnID, connectAddr)
+	conn := r.get(ctx, tenant, hello.ConnID, connectAddr)
 	conn.addLane(&serverLane{
 		index:  hello.LaneIndex,
 		stream: stream,
@@ -85,15 +98,17 @@ func (r *Registry) handleStream(ctx context.Context, stream *smux.Stream, connec
 	}
 }
 
-func (r *Registry) get(ctx context.Context, id uint64, connectAddr string) *serverConn {
+func (r *Registry) get(ctx context.Context, tenant auth.TenantID, id uint64, connectAddr string) *serverConn {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if c := r.conns[id]; c != nil {
+	key := connKey{Tenant: tenant, ConnID: id}
+	if c := r.conns[key]; c != nil {
 		return c
 	}
 	connCtx, cancel := context.WithCancel(ctx)
 	c := &serverConn{
 		deps:        &r.deps,
+		tenantID:    tenant,
 		id:          id,
 		connectAddr: connectAddr,
 		ctx:         connCtx,
@@ -102,12 +117,12 @@ func (r *Registry) get(ctx context.Context, id uint64, connectAddr string) *serv
 		ready:       make(chan struct{}, 1),
 		recvCh:      make(chan bondframe.Frame, 1024),
 	}
-	r.conns[id] = c
+	r.conns[key] = c
 	go func() {
 		<-c.done
 		r.mu.Lock()
-		if r.conns[id] == c {
-			delete(r.conns, id)
+		if r.conns[key] == c {
+			delete(r.conns, key)
 		}
 		r.mu.Unlock()
 	}()
@@ -122,6 +137,7 @@ type serverLane struct {
 
 type serverConn struct {
 	deps        *Deps
+	tenantID    auth.TenantID
 	id          uint64
 	connectAddr string
 	ctx         context.Context

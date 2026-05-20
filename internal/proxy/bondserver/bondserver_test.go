@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samosvalishe/btp/internal/auth"
 	"github.com/samosvalishe/btp/internal/wire/bondframe"
 )
 
@@ -251,18 +252,19 @@ func TestRegistryGetDedup(t *testing.T) {
 	r := NewRegistry(Deps{})
 	ctx := t.Context()
 
-	c1 := r.get(ctx, 7, "127.0.0.1:1")
-	c2 := r.get(ctx, 7, "127.0.0.1:1")
+	c1 := r.get(ctx, auth.Anonymous, 7, "127.0.0.1:1")
+	c2 := r.get(ctx, auth.Anonymous, 7, "127.0.0.1:1")
 	if c1 != c2 {
 		t.Fatal("expected same conn for same id")
 	}
 
 	close(c1.done)
 	// give the cleanup goroutine a chance to run
+	key := connKey{Tenant: auth.Anonymous, ConnID: 7}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		r.mu.Lock()
-		_, ok := r.conns[7]
+		_, ok := r.conns[key]
 		r.mu.Unlock()
 		if !ok {
 			return
