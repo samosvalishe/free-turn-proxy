@@ -70,16 +70,11 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 	}
 
 	deps.log().Infof("VLESS mode: waiting for sessions to connect (total: %d)...", numSessions)
-	for {
-		select {
-		case <-ctx.Done():
-			wgMaint.Wait()
-			return nil
-		case <-time.After(100 * time.Millisecond):
-		}
-		if pool.Count() > 0 {
-			break
-		}
+	select {
+	case <-ctx.Done():
+		wgMaint.Wait()
+		return nil
+	case <-pool.Ready():
 	}
 
 	listener, err := net.Listen("tcp", listenAddr)
@@ -105,12 +100,10 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 	for {
 		tcpConn, err := wrappedListener.Accept()
 		if err != nil {
-			select {
-			case <-ctx.Done():
+			if ctx.Err() != nil {
 				wgConn.Wait()
 				wgMaint.Wait()
 				return nil
-			default:
 			}
 			deps.log().Errorf("TCP accept error: %s", err)
 			continue

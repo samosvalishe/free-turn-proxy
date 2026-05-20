@@ -32,6 +32,20 @@ type SessionPool struct {
 	sessions    []*PooledSession
 	counter     atomic.Uint64
 	connCounter atomic.Uint64
+
+	readyOnce sync.Once
+	ready     chan struct{}
+}
+
+// Ready returns a channel closed the first time the pool gains a session.
+func (p *SessionPool) Ready() <-chan struct{} {
+	p.mu.Lock()
+	if p.ready == nil {
+		p.ready = make(chan struct{})
+	}
+	ch := p.ready
+	p.mu.Unlock()
+	return ch
 }
 
 // Add registers a freshly connected session in the pool.
@@ -39,7 +53,12 @@ func (p *SessionPool) Add(id int, s *smux.Session) *PooledSession {
 	ps := &PooledSession{ID: id, Sess: s}
 	p.mu.Lock()
 	p.sessions = append(p.sessions, ps)
+	if p.ready == nil {
+		p.ready = make(chan struct{})
+	}
+	ready := p.ready
 	p.mu.Unlock()
+	p.readyOnce.Do(func() { close(ready) })
 	return ps
 }
 
