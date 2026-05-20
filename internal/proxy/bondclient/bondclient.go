@@ -55,9 +55,15 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	lanes := make([]*lane, 0, len(candidates))
-	laneIDs := make([]string, 0, len(candidates))
-	for i, ps := range candidates {
+	// Phase 1: open streams on usable sessions. Phase 2: send Hello with the
+	// actual lane count so bondserver.waitForInitialLanes doesn't wait on lanes
+	// that were never opened.
+	type pending struct {
+		ps     *tcpfwd.PooledSession
+		stream *smux.Stream
+	}
+	opened := make([]pending, 0, len(candidates))
+	for _, ps := range candidates {
 		if ps.Sess.IsClosed() {
 			continue
 		}
@@ -66,15 +72,22 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 			h.Deps.log().Errorf("[bond %d] session %d open stream error: %s", connID, ps.ID, err)
 			continue
 		}
-		if err := bondframe.WriteHello(stream, connID, uint16(i), uint16(len(candidates))); err != nil {
-			h.Deps.log().Errorf("[bond %d] session %d hello error: %s", connID, ps.ID, err)
-			_ = stream.Close()
+		opened = append(opened, pending{ps: ps, stream: stream})
+	}
+
+	lanes := make([]*lane, 0, len(opened))
+	laneIDs := make([]string, 0, len(opened))
+	laneCount := uint16(len(opened))
+	for i, p := range opened {
+		if err := bondframe.WriteHello(p.stream, connID, uint16(i), laneCount); err != nil {
+			h.Deps.log().Errorf("[bond %d] session %d hello error: %s", connID, p.ps.ID, err)
+			_ = p.stream.Close()
 			continue
 		}
-		ps.Opened.Add(1)
-		ps.Active.Add(1)
-		lanes = append(lanes, &lane{ps: ps, stream: stream})
-		laneIDs = append(laneIDs, strconv.Itoa(ps.ID))
+		p.ps.Opened.Add(1)
+		p.ps.Active.Add(1)
+		lanes = append(lanes, &lane{ps: p.ps, stream: p.stream})
+		laneIDs = append(laneIDs, strconv.Itoa(p.ps.ID))
 	}
 
 	if len(lanes) == 0 {
@@ -190,6 +203,10 @@ func (h *Handler) copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.
 	}
 }
 
+// writeBondFrameToNextLane writes to the next live lane in round-robin order.
+// Unlike bondserver.writeToNextLane (which loops waiting for new lanes to
+// attach), the client's lane set is fixed for the lifetime of Handle, so once
+// all lanes are dead there is nothing to wait for — fail fast.
 func writeBondFrameToNextLane(ctx context.Context, lanes []*lane, typ byte, seq uint64, data []byte, laneIdx *uint64) (*lane, error) {
 	for range lanes {
 		idx := *laneIdx % uint64(len(lanes))
