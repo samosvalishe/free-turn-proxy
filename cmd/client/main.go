@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -139,8 +140,12 @@ func main() {
 		WrapKey:  cfg.Obf.WrapKey,
 		GetCreds: udprelay.GetCredsFunc(vkAuth.GetCredentials),
 	}
-	if err := udprelay.Run(ctx, udpDtlsDialer, vkAuth, logger, &connectedStreams, cancel, udpParams, peer, cfg.Proxy.Listen, cfg.TURN.N); err != nil {
-		logger.Errorf("udprelay: %v", err)
+	if err := udprelay.Run(ctx, udpDtlsDialer, vkAuth, logger, &connectedStreams, udpParams, peer, cfg.Proxy.Listen, cfg.TURN.N); err != nil {
+		if errors.Is(err, udprelay.ErrFatal) {
+			logger.Errorf("udprelay: fatal: %v", err)
+		} else {
+			logger.Errorf("udprelay: %v", err)
+		}
 		os.Exit(1)
 	}
 }

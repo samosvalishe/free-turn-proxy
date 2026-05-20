@@ -60,16 +60,24 @@ type Params struct {
 	GetCreds GetCredsFunc
 }
 
+// ErrFatal is returned by Run when a stream encounters a condition that
+// requires the entire application to exit (e.g. manual captcha solver failed
+// with no connected streams). Callers should check with errors.Is and call
+// os.Exit themselves — udprelay does not reach into the host process.
+var ErrFatal = errors.New("udprelay: fatal error")
+
 // Deps groups everything the loops need from the host process. The atomics
 // are owned by Run and exposed here so DTLSLoop/TURNLoop can share them when
 // called directly (Run wires them automatically).
 type Deps struct {
-	DTLSDialer       *dtlsdial.Dialer
-	Auth             AuthHandler
-	Log              logx.Logger
-	ActiveLocalPeer  *atomic.Value
+	DTLSDialer      *dtlsdial.Dialer
+	Auth            AuthHandler
+	Log             logx.Logger
+	ActiveLocalPeer *atomic.Value
 	ConnectedStreams *atomic.Int32
-	AppCancel        func()
+	// fatalCh is an internal signalling channel; set by Run, written by
+	// TURNLoop, and drained by Run to propagate the fatal error up.
+	fatalCh chan error
 }
 
 func (d *Deps) log() logx.Logger {
@@ -84,7 +92,9 @@ func (d *Deps) log() logx.Logger {
 // connectedStreams is owned by the caller (vkauth reads it via StreamsAlive)
 // and incremented/decremented by oneTURN.
 // Returns after all stream loops exit (i.e. when ctx is cancelled).
-func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, appCancel context.CancelFunc, params *Params, peer *net.UDPAddr, listenAddr string, numStreams int) error {
+// If a fatal captcha condition is encountered, Run returns ErrFatal so the
+// caller can perform os.Exit without udprelay reaching into the host process.
+func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, params *Params, peer *net.UDPAddr, listenAddr string, numStreams int) error {
 	listenConn, err := net.ListenPacket("udp", listenAddr)
 	if err != nil {
 		return fmt.Errorf("udprelay listen %s: %w", listenAddr, err)
@@ -99,49 +109,64 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		numStreams = 1
 	}
 
+	fatalCh := make(chan error, 1)
 	var activeLocalPeer atomic.Value
 	deps := &Deps{
-		DTLSDialer:       dtlsDialer,
-		Auth:             auth,
-		Log:              logger,
-		ActiveLocalPeer:  &activeLocalPeer,
+		DTLSDialer:      dtlsDialer,
+		Auth:            auth,
+		Log:             logger,
+		ActiveLocalPeer: &activeLocalPeer,
 		ConnectedStreams: connectedStreams,
-		AppCancel:        appCancel,
+		fatalCh:         fatalCh,
 	}
+
+	// runCtx is cancelled when a fatal error is detected (via fatalCh), which
+	// propagates cancellation into all stream loops without requiring them to
+	// hold a reference to the host-process cancel function.
+	runCtx, runCancel := context.WithCancel(ctx)
+	defer runCancel()
 
 	inboundChan := make(chan *Packet, inboundQueueCap)
 	wg := sync.WaitGroup{}
 	wg.Go(func() {
-		runListener(ctx, listenConn, &activeLocalPeer, inboundChan)
+		runListener(runCtx, listenConn, &activeLocalPeer, inboundChan)
 	})
 	t := time.Tick(200 * time.Millisecond)
 
-	okchan := make(chan struct{})
-	connchan := make(chan net.PacketConn)
-	wg.Go(func() {
-		DTLSLoop(ctx, deps, peer, listenConn, inboundChan, connchan, okchan, 1)
-	})
-	wg.Go(func() {
-		TURNLoop(ctx, deps, params, peer, connchan, t, 1)
-	})
-
-	select {
-	case <-okchan:
-	case <-ctx.Done():
-	}
-
-	for i := 1; i < numStreams; i++ {
+	// Stream 1 gets okchan so it can signal the first successful handshake to
+	// the log. All streams start concurrently — no gate between stream 1 and
+	// the rest, so a slow DTLS handshake on stream 1 never delays streams 2..N.
+	okchan := make(chan struct{}, 1)
+	for i := 0; i < numStreams; i++ {
 		cchan := make(chan net.PacketConn)
-		streamID := i
+		var ok chan<- struct{}
+		if i == 0 {
+			ok = okchan
+		}
+		streamID := i + 1
 		wg.Go(func() {
-			DTLSLoop(ctx, deps, peer, listenConn, inboundChan, cchan, nil, streamID)
+			DTLSLoop(runCtx, deps, peer, listenConn, inboundChan, cchan, ok, streamID)
 		})
 		wg.Go(func() {
-			TURNLoop(ctx, deps, params, peer, cchan, t, streamID)
+			TURNLoop(runCtx, deps, params, peer, cchan, t, streamID)
 		})
 	}
+
+	// If a fatal error was sent, cancel remaining goroutines and propagate up.
+	var fatalErr error
+	go func() {
+		select {
+		case err := <-fatalCh:
+			fatalErr = err
+			runCancel()
+		case <-runCtx.Done():
+		}
+	}()
 
 	wg.Wait()
+	if fatalErr != nil {
+		return fatalErr
+	}
 	return nil
 }
 
@@ -249,8 +274,9 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 			if err != nil {
 				if errors.Is(err, vkauth.ErrFatalCaptchaNoStreams) {
 					deps.log().Errorf("[STREAM %d] Fatal manual captcha error. Shutting down application.", streamID)
-					if deps.AppCancel != nil {
-						deps.AppCancel()
+					select {
+					case deps.fatalCh <- fmt.Errorf("%w: %w", ErrFatal, err):
+					default:
 					}
 					return
 				}
