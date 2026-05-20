@@ -135,19 +135,25 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	}
 
 	// If a fatal error was sent, cancel remaining goroutines and propagate up.
-	var fatalErr error
+	// watcherDone synchronises the watcher goroutine with Run's return so the
+	// fatalErr load happens-after the store.
+	var fatalErr atomic.Pointer[error]
+	watcherDone := make(chan struct{})
 	go func() {
+		defer close(watcherDone)
 		select {
 		case err := <-fatalCh:
-			fatalErr = err
+			fatalErr.Store(&err)
 			runCancel()
 		case <-runCtx.Done():
 		}
 	}()
 
 	wg.Wait()
-	if fatalErr != nil {
-		return fatalErr
+	runCancel()
+	<-watcherDone
+	if p := fatalErr.Load(); p != nil {
+		return *p
 	}
 	return nil
 }
