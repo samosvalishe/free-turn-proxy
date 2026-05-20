@@ -52,10 +52,10 @@ var ErrFatal = errors.New("udprelay: fatal error")
 // are owned by Run and exposed here so DTLSLoop/TURNLoop can share them when
 // called directly (Run wires them automatically).
 type Deps struct {
-	DTLSDialer      *dtlsdial.Dialer
-	Auth            AuthHandler
-	Log             logx.Logger
-	ActiveLocalPeer *atomic.Value
+	DTLSDialer       *dtlsdial.Dialer
+	Auth             AuthHandler
+	Log              logx.Logger
+	ActiveLocalPeer  *atomic.Value
 	ConnectedStreams *atomic.Int32
 	// fatalCh is an internal signalling channel; set by Run, written by
 	// TURNLoop, and drained by Run to propagate the fatal error up.
@@ -94,12 +94,12 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	fatalCh := make(chan error, 1)
 	var activeLocalPeer atomic.Value
 	deps := &Deps{
-		DTLSDialer:      dtlsDialer,
-		Auth:            auth,
-		Log:             logger,
-		ActiveLocalPeer: &activeLocalPeer,
+		DTLSDialer:       dtlsDialer,
+		Auth:             auth,
+		Log:              logger,
+		ActiveLocalPeer:  &activeLocalPeer,
 		ConnectedStreams: connectedStreams,
-		fatalCh:         fatalCh,
+		fatalCh:          fatalCh,
 	}
 
 	// runCtx is cancelled when a fatal error is detected (via fatalCh), which

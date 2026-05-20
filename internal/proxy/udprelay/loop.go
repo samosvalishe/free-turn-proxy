@@ -10,11 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/cbeuw/connutil"
+	"github.com/samosvalishe/btp/internal/client/vkauth"
 	"github.com/samosvalishe/btp/internal/proxy/common"
 	"github.com/samosvalishe/btp/internal/stats"
 	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
-	"github.com/samosvalishe/btp/internal/client/vkauth"
-	"github.com/cbeuw/connutil"
 )
 
 // DTLSLoop keeps a single DTLS termination alive for streamID, restarting it
