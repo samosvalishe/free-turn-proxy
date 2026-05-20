@@ -27,14 +27,10 @@ import (
 
 // Log is the package-level logger. Defaults to no-op; main wires it via
 // SetLogger so captcha output respects the global -debug flag and levels.
-//
-// Deprecated: pass a logx.Logger to Solve directly. SetLogger remains for
-// callers that cannot be updated (e.g. auto_solver.go uses captcha.Log directly).
+// Solve also accepts an explicit logger parameter for callers that want DI.
 var Log logx.Logger = logx.Nop()
 
 // SetLogger installs a logger for this package. Safe to call once at startup.
-//
-// Deprecated: prefer passing a logx.Logger to Solve.
 func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
 
 const (
@@ -158,10 +154,7 @@ func Solve(
 			return "", solveErr
 		}
 
-		backoffSteps := attempt
-		if backoffSteps > 10 {
-			backoffSteps = 10
-		}
+		backoffSteps := min(attempt, 10)
 		timer := time.NewTimer(time.Duration(backoffSteps) * 500 * time.Millisecond)
 		select {
 		case <-ctx.Done():
