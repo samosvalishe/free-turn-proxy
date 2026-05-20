@@ -110,9 +110,10 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	}
 
 	inboundChan := make(chan *Packet, inboundQueueCap)
-	go runListener(ctx, listenConn, &activeLocalPeer, inboundChan)
-
 	wg := sync.WaitGroup{}
+	wg.Go(func() {
+		runListener(ctx, listenConn, &activeLocalPeer, inboundChan)
+	})
 	t := time.Tick(200 * time.Millisecond)
 
 	okchan := make(chan struct{})
@@ -287,7 +288,11 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 }
 
 func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) error {
-	time.Sleep(time.Duration(rand.Intn(400)+100) * time.Millisecond)
+	select {
+	case <-time.After(time.Duration(rand.Intn(400)+100) * time.Millisecond):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 
 	dtlsctx, dtlscancel := context.WithCancel(ctx)
 	defer dtlscancel()
@@ -341,8 +346,11 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 			case <-dtlsctx.Done():
 				return
 			case pkt := <-inboundChan:
-				_, _ = dtlsConn.Write(pkt.Data[:pkt.N])
+				_, werr := dtlsConn.Write(pkt.Data[:pkt.N])
 				packetPool.Put(pkt)
+				if werr != nil {
+					return
+				}
 			}
 		}
 	})
@@ -374,9 +382,14 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 }
 
 func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, conn2 net.PacketConn, streamID int, c chan<- error) {
-	time.Sleep(time.Duration(rand.Intn(400)+100) * time.Millisecond)
 	var err error
 	defer func() { c <- err }()
+	select {
+	case <-time.After(time.Duration(rand.Intn(400)+100) * time.Millisecond):
+	case <-ctx.Done():
+		err = ctx.Err()
+		return
+	}
 	stream, err1 := common.DialTURN(ctx, params.Host, params.Port, params.UDP, peer, params.Link, streamID, params.GetCreds)
 	if err1 != nil {
 		if deps.Auth.IsAuthError(err1) {
