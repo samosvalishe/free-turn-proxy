@@ -401,9 +401,11 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	relayConn := stream.Relay
 	deps.log().Debugf("[STREAM %d] TURN server IP: %s", streamID, stream.ServerUDPAddr.IP)
 
+	// Increment before ResetErrors so concurrent HandleAuthError observers see
+	// the stream as connected before its error counter clears.
+	deps.ConnectedStreams.Add(1)
 	deps.Auth.ResetErrors(streamID)
 
-	deps.ConnectedStreams.Add(1)
 	defer func() {
 		deps.ConnectedStreams.Add(-1)
 		if cerr := stream.Close(); cerr != nil {
