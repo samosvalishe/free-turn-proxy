@@ -355,8 +355,18 @@ func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
 }
 
 func (c *serverConn) writeToNextLane(typ byte, seq uint64, data []byte, laneIdx *uint64) error {
+	lanes := c.snapshotLanes()
 	for {
-		lanes := c.snapshotLanes()
+		if len(lanes) == 0 {
+			select {
+			case <-c.ctx.Done():
+				return c.ctx.Err()
+			case <-time.After(10 * time.Millisecond):
+			}
+			lanes = c.snapshotLanes()
+			continue
+		}
+		written := false
 		for range lanes {
 			lane := lanes[*laneIdx%uint64(len(lanes))]
 			*laneIdx++
@@ -364,7 +374,8 @@ func (c *serverConn) writeToNextLane(typ byte, seq uint64, data []byte, laneIdx 
 			err := bondframe.WriteFrame(lane.stream, typ, seq, data)
 			lane.mu.Unlock()
 			if err == nil {
-				return nil
+				written = true
+				break
 			}
 			left := c.removeLane(lane)
 			c.deps.log().Errorf("[bond %d] lane %d write error: %v (lanes=%d)", c.id, lane.index, err, left)
@@ -372,10 +383,9 @@ func (c *serverConn) writeToNextLane(typ byte, seq uint64, data []byte, laneIdx 
 				return err
 			}
 		}
-		select {
-		case <-c.ctx.Done():
-			return c.ctx.Err()
-		case <-time.After(10 * time.Millisecond):
+		if written {
+			return nil
 		}
+		lanes = c.snapshotLanes()
 	}
 }
