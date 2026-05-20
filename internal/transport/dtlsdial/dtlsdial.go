@@ -41,7 +41,7 @@ type Dialer struct {
 // see internal/transport/dtlsdial/doc.go).
 func (d *Dialer) Dial(ctx context.Context, pc net.PacketConn, peer *net.UDPAddr) (*dtls.Conn, error) {
 	d.certOnce.Do(func() {
-		d.cert, d.certErr = selfsign.GenerateSelfSigned()
+		d.cert, d.certErr = GenerateSelfSignedCert()
 	})
 	if d.certErr != nil {
 		return nil, d.certErr
