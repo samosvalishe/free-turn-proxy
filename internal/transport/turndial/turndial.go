@@ -1,10 +1,10 @@
-// Package turndial centralizes the TURN dial+allocate pipeline shared by
-// the client UDP (oneTurnConnection) and VLESS (createSmuxSession) modes.
+// Package turndial централизует TURN dial+allocate pipeline, общий для
+// UDP (oneTurnConnection) и VLESS (createSmuxSession) режимов клиента.
 //
-// One call to Open performs: parse target, apply host/port overrides,
-// resolve UDP addr, dial UDP-or-TCP (with SplitFirstWriteConn over TCP),
-// turn.NewClient, Listen, Allocate. Returns the relay PacketConn plus a
-// Close that tears down the allocation, TURN client, and underlying conn.
+// Один вызов Open выполняет: парсинг цели, применение host/port override,
+// резолв UDP-адреса, dial UDP-или-TCP (с SplitFirstWriteConn поверх TCP),
+// turn.NewClient, Listen, Allocate. Возвращает relay PacketConn и Close,
+// который разрушает аллокацию, TURN-клиент и транспорт.
 package turndial
 
 import (
@@ -18,32 +18,29 @@ import (
 	"github.com/pion/turn/v5"
 )
 
-// Config configures one Open call.
+// Config конфигурирует один вызов Open.
 type Config struct {
-	// HostOverride, if non-empty, replaces the host part returned by the
-	// credentials lookup.
+	// HostOverride, если непустой, заменяет host из lookup credentials.
 	HostOverride string
-	// PortOverride, if non-empty, replaces the port part returned by the
-	// credentials lookup.
+	// PortOverride, если непустой, заменяет port из lookup credentials.
 	PortOverride string
-	// UDP=true dials TURN over UDP; otherwise over TCP via STUNConn.
+	// UDP=true — dial TURN по UDP; иначе по TCP через STUNConn.
 	UDP bool
-	// DialTimeout caps the TCP dial. Zero defaults to 5s.
+	// DialTimeout ограничивает TCP dial. Ноль → 5s.
 	DialTimeout time.Duration
 }
 
-// Stream is a live TURN allocation with its dependencies. Close tears
-// everything down in reverse order.
+// Stream — активная TURN-аллокация с зависимостями. Close разрушает в обратном порядке.
 type Stream struct {
-	// Relay is the allocated relay PacketConn returned by turn.Client.Allocate.
+	// Relay — выделенный relay PacketConn из turn.Client.Allocate.
 	Relay net.PacketConn
-	// ServerUDPAddr is the resolved TURN server UDP address (host:port).
+	// ServerUDPAddr — резолвнутый UDP-адрес TURN-сервера (host:port).
 	ServerUDPAddr *net.UDPAddr
 	close         func() error
 }
 
-// Close releases the allocation, TURN client and underlying transport.
-// Safe to call once. Returns the first non-nil error (if any).
+// Close освобождает аллокацию, TURN-клиент и транспорт.
+// Безопасно вызвать один раз. Возвращает первую non-nil ошибку.
 func (s *Stream) Close() error {
 	if s == nil || s.close == nil {
 		return nil
@@ -51,9 +48,8 @@ func (s *Stream) Close() error {
 	return s.close()
 }
 
-// Open dials TURN, creates a turn.Client and allocates a relay. rawAddr is
-// the host:port returned by the credentials lookup; user/pass are the TURN
-// long-term credentials.
+// Open подключается к TURN, создаёт turn.Client и выделяет relay. rawAddr —
+// host:port из lookup credentials; user/pass — долгосрочные TURN-реквизиты.
 func Open(ctx context.Context, cfg Config, peer *net.UDPAddr, user, pass, rawAddr string) (*Stream, error) {
 	urlhost, urlport, err := net.SplitHostPort(rawAddr)
 	if err != nil {

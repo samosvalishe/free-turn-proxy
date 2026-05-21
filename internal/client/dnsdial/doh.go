@@ -1,6 +1,6 @@
-// Package dnsdial owns DNS resolution and the net.Dialer wired into all
-// outbound HTTP/TLS clients. Selects between UDP/53, DNS-over-HTTPS, or
-// auto (UDP probe → sticky DoH fallback) based on Mode.
+// Package dnsdial владеет DNS-резолвингом и net.Dialer'ом, прокинутым во все
+// outbound HTTP/TLS клиенты. По Mode выбирает UDP/53, DNS-over-HTTPS или auto
+// (UDP-probe → sticky DoH fallback).
 package dnsdial
 
 import (
@@ -21,21 +21,20 @@ import (
 
 	"github.com/samosvalishe/btp/internal/logx"
 
-	// Embedded Mozilla CA roots for CGO_ENABLED=0 builds (Android).
+	// встроенные Mozilla CA roots для CGO_ENABLED=0 сборок (Android).
 	_ "golang.org/x/crypto/x509roots/fallback"
 )
 
-// Log is the package-level logger. Defaults to no-op; main wires it via
-// SetLogger so DNS-mode output respects the global -debug flag and levels.
+// Log — пакетный логгер. По умолчанию no-op; main устанавливает через SetLogger.
 var Log logx.Logger = logx.Nop()
 
-// SetLogger installs a logger for this package.
+// SetLogger ставит логгер пакета.
 func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
 
 const (
 	dohQueryTimeout = 6 * time.Second
-	// Total budget across all endpoint attempts in forwardRaw. Must be a
-	// multiple of dohQueryTimeout to give every fallback a real chance.
+	// общий бюджет для всех попыток endpoint'ов в forwardRaw. Кратно
+	// dohQueryTimeout — чтобы каждому fallback хватило времени.
 	dohForwardBudget    = 25 * time.Second
 	dohMaxResponseBytes = 64 * 1024
 	dohContentType      = "application/dns-message"
@@ -51,33 +50,31 @@ const (
 	autoUDPBudget       = 1500 * time.Millisecond
 )
 
-// DohEndpoint describes a single DNS-over-HTTPS server together with the IPs
-// we bootstrap to — so that resolving the endpoint hostname does not itself
-// require DNS.
+// DohEndpoint — один DNS-over-HTTPS сервер с bootstrap-IP, чтобы резолв самого
+// hostname не требовал DNS.
 type DohEndpoint struct {
 	URL          string
 	Hostname     string
 	BootstrapIPs []string
 }
 
-// Yandex is tried first because it tends to stay reachable on RU mobile
-// operators even when international resolvers get blocked; Google and
-// Cloudflare follow as fallbacks.
+// Yandex — первый, т.к. остаётся доступен у RU мобильных операторов даже когда
+// международные резолверы блокируются; Google и Cloudflare — fallback.
 var defaultDohEndpoints = []DohEndpoint{
 	{"https://common.dot.dns.yandex.net/dns-query", "common.dot.dns.yandex.net", []string{"77.88.8.8", "77.88.8.1"}},
 	{"https://secure.dot.dns.yandex.net/dns-query", "secure.dot.dns.yandex.net", []string{"77.88.8.88", "77.88.8.2"}},
 	{"https://family.dot.dns.yandex.net/dns-query", "family.dot.dns.yandex.net", []string{"77.88.8.7", "77.88.8.3"}},
 }
 
-// DohResolver POSTs DNS wire queries to one of several DoH endpoints.
+// DohResolver делает POST с DNS-wire запросом к одному из DoH endpoint'ов.
 type DohResolver struct {
 	endpoints []DohEndpoint
 	client    *http.Client
 }
 
-// NewDohResolver constructs a resolver using defaultDohEndpoints if endpoints
-// is nil. Endpoint hostnames are dialed by IP using BootstrapIPs, so the DoH
-// transport never depends on the system resolver.
+// NewDohResolver конструирует резолвер; если endpoints=nil, берёт
+// defaultDohEndpoints. Имена endpoint'ов диалятся по BootstrapIPs — DoH-транспорт
+// не зависит от системного резолвера.
 func NewDohResolver(endpoints []DohEndpoint) *DohResolver {
 	if len(endpoints) == 0 {
 		endpoints = defaultDohEndpoints
@@ -88,14 +85,13 @@ func NewDohResolver(endpoints []DohEndpoint) *DohResolver {
 	}
 }
 
-// newDohResolverWithClient is a test hook that skips the bootstrap transport.
+// newDohResolverWithClient — тестовый hook, минующий bootstrap-транспорт.
 func newDohResolverWithClient(endpoints []DohEndpoint, client *http.Client) *DohResolver {
 	return &DohResolver{endpoints: endpoints, client: client}
 }
 
-// newBootstrapTransport returns an http.Transport whose DialContext only
-// knows how to reach the configured DoH endpoint hostnames, by mapping each
-// to its BootstrapIPs.
+// newBootstrapTransport возвращает http.Transport, чей DialContext знает только
+// заданные hostname'ы DoH endpoint'ов и резолвит их в BootstrapIPs.
 func newBootstrapTransport(endpoints []DohEndpoint) *http.Transport {
 	bootstrap := make(map[string][]string, len(endpoints))
 	for _, ep := range endpoints {
@@ -128,9 +124,9 @@ func newBootstrapTransport(endpoints []DohEndpoint) *http.Transport {
 			}
 			return nil, lastErr
 		},
-		// Explicit DialTLSContext ensures SNI = endpoint hostname even when
-		// the underlying TCP dial targets a bootstrap IP. Without this, some
-		// HTTP/2 paths can leak the literal IP as ServerName and fail TLS.
+		// явный DialTLSContext гарантирует SNI = hostname, даже если TCP-dial
+		// идёт на bootstrap-IP. Без этого некоторые HTTP/2 пути сливают
+		// литерал IP как ServerName и TLS падает.
 		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			host, port, err := net.SplitHostPort(addr)
 			if err != nil {
@@ -164,15 +160,14 @@ func newBootstrapTransport(endpoints []DohEndpoint) *http.Transport {
 	}
 }
 
-// forwardRaw POSTs an opaque DNS-wire query to the configured DoH endpoints
-// in order and returns the first successful raw response together with the
-// endpoint that produced it. No parsing — useful for the local forwarder
-// which needs to pass through whatever the upstream resolver answers
-// (RESINFO/HTTPS/SVCB/EDNS options/…).
+// forwardRaw делает POST opaque DNS-wire запроса к настроенным DoH endpoint'ам
+// по порядку и возвращает первый успешный raw-ответ вместе с endpoint'ом.
+// Без парсинга — удобно для локального форвардера, который пропускает что бы
+// upstream ни ответил (RESINFO/HTTPS/SVCB/EDNS options/…).
 //
-// Each endpoint gets its own per-attempt deadline (dohQueryTimeout) so a
-// slow first endpoint does not consume the entire budget and starve the
-// fallbacks. The parent ctx still bounds the total wait via cancel chain.
+// Каждому endpoint'у — свой per-attempt deadline (dohQueryTimeout), чтобы
+// медленный первый не сожрал весь бюджет и не зарезал fallback'и. Parent ctx
+// всё ещё ограничивает общее ожидание через cancel chain.
 func (r *DohResolver) forwardRaw(ctx context.Context, query []byte) ([]byte, DohEndpoint, error) {
 	if len(r.endpoints) == 0 {
 		return nil, DohEndpoint{}, errors.New("doh: no endpoints configured")
@@ -195,7 +190,7 @@ func (r *DohResolver) forwardRaw(ctx context.Context, query []byte) ([]byte, Doh
 	return nil, DohEndpoint{}, lastErr
 }
 
-// postWire performs a single application/dns-message POST to one endpoint.
+// postWire делает один application/dns-message POST к одному endpoint'у.
 func (r *DohResolver) postWire(ctx context.Context, ep DohEndpoint, query []byte) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", ep.URL, bytes.NewReader(query))
 	if err != nil {
@@ -221,10 +216,10 @@ func (r *DohResolver) postWire(ctx context.Context, ep DohEndpoint, query []byte
 	return body, nil
 }
 
-// Go's net.Resolver dials this stub like a regular nameserver, which avoids
-// the many edge cases of a fake-net.Conn approach (RESINFO probes, EDNS
-// handshakes, truncation, …). Whatever it reads on UDP/TCP is sent verbatim
-// to a DoH endpoint and the wire response is sent back to the client.
+// net.Resolver Go дозванивается до этого stub'а как до обычного nameserver'а —
+// обходит уйму edge-case'ов fake-net.Conn (RESINFO probes, EDNS handshakes,
+// truncation, …). Что бы он ни прочитал на UDP/TCP — уходит дословно в DoH
+// endpoint, ответ отдаётся клиенту.
 
 type dohForwarder struct {
 	udpAddr string
@@ -237,9 +232,9 @@ var (
 	dohForwarderErr  error
 )
 
-// sharedDohForwarder lazily starts a process-wide forwarder bound to the
-// supplied resolver. The first caller wins; subsequent callers reuse the
-// same forwarder regardless of what they pass in.
+// sharedDohForwarder лениво запускает process-wide форвардер, привязанный к
+// заданному resolver. Побеждает первый caller; следующие переиспользуют тот же
+// форвардер независимо от того, что передали.
 func sharedDohForwarder(r *DohResolver) (*dohForwarder, error) {
 	dohForwarderOnce.Do(func() {
 		dohForwarderInst, dohForwarderErr = startDohForwarder(r)
@@ -350,8 +345,8 @@ func handleDohForwarderTCP(conn net.Conn, r *DohResolver) {
 	}
 }
 
-// dohForwarderDial returns a Resolver.Dial that connects to the local DoH
-// forwarder over UDP or TCP (whichever the resolver asked for).
+// dohForwarderDial возвращает Resolver.Dial, подключающийся к локальному DoH
+// форвардеру по UDP или TCP (что запросил резолвер).
 func dohForwarderDial(r *DohResolver) dialFunc {
 	return func(ctx context.Context, network, _ string) (net.Conn, error) {
 		fwd, err := sharedDohForwarder(r)
@@ -387,13 +382,13 @@ func init() {
 
 func udpDNSServers() []string { return *udpDNSServersPtr.Load() }
 
-// SetUDPDNSServers replaces the default UDP/53 server list. Each entry may be
-// "ip" or "ip:port" — bare IPs get :53 appended. Empty list keeps the defaults.
-// Used on Android to inject the carrier's resolver IPs from
-// LinkProperties.dnsServers, which often work where public DoH/DoT do not.
+// SetUDPDNSServers заменяет дефолтный список UDP/53 серверов. Каждый элемент —
+// "ip" или "ip:port"; голые IP получают :53. Пустой список оставляет дефолт.
+// На Android используется для подсовывания резолверов оператора из
+// LinkProperties.dnsServers — часто работают там, где публичный DoH/DoT нет.
 //
-// Safe to call concurrently with resolver use — the list pointer is swapped
-// atomically. Existing in-flight dials see whichever snapshot they captured.
+// Безопасно вызывать конкурентно с использованием резолвера — указатель списка
+// меняется атомарно. Уже идущие dial видят свой захваченный снимок.
 func SetUDPDNSServers(servers []string) {
 	if len(servers) == 0 {
 		return
@@ -417,9 +412,9 @@ func SetUDPDNSServers(servers []string) {
 
 type dialFunc = func(context.Context, string, string) (net.Conn, error)
 
-// buildDialer returns a net.Dialer whose internal Go resolver uses the
-// chosen DNS transport. In "auto" mode the first total-failure of UDP/53
-// sticks the process onto DoH for the rest of its lifetime.
+// buildDialer возвращает net.Dialer, чей внутренний Go-резолвер использует
+// выбранный DNS-транспорт. В режиме "auto" первый полный отказ UDP/53
+// залипает процесс на DoH до конца его жизни.
 func buildDialer(mode string, r *DohResolver) net.Dialer {
 	switch mode {
 	case DNSModeUDP:
@@ -433,8 +428,8 @@ func buildDialer(mode string, r *DohResolver) net.Dialer {
 	}
 }
 
-// newAppDialer wraps a Resolver.Dial with the timeouts used everywhere in
-// the app for outbound TCP/HTTP connections.
+// newAppDialer оборачивает Resolver.Dial таймаутами, используемыми везде в
+// приложении для outbound TCP/HTTP.
 func newAppDialer(dial dialFunc) net.Dialer {
 	return net.Dialer{
 		Timeout:   appDialerTimeout,
@@ -443,7 +438,7 @@ func newAppDialer(dial dialFunc) net.Dialer {
 	}
 }
 
-// udpDNSDial picks the first reachable UDP/53 resolver from udpDNSServers.
+// udpDNSDial берёт первый достижимый UDP/53 резолвер из udpDNSServers.
 func udpDNSDial(ctx context.Context, _ string, _ string) (net.Conn, error) {
 	var (
 		d       net.Dialer
@@ -462,14 +457,12 @@ func udpDNSDial(ctx context.Context, _ string, _ string) (net.Conn, error) {
 	return nil, lastErr
 }
 
-// autoDial returns a Dial that probes UDP/53 once with a real DNS round-trip;
-// if the probe fails it latches onto DoH for the rest of the process. Built
-// for Android, where the network can flip between Wi-Fi (UDP/53 works) and
-// mobile (UDP/53 blocked).
+// autoDial возвращает Dial, который один раз пробит UDP/53 реальным DNS
+// round-trip'ом; при провале залипает на DoH до конца процесса. Сделано под
+// Android, где сеть скачет между Wi-Fi (UDP/53 работает) и мобилкой (блок).
 //
-// A simple dial-timeout doesn't work for UDP because UDP "dial" is
-// connectionless and always succeeds instantly. The only way to know whether
-// UDP/53 actually works is to send a real query and wait for a response.
+// Просто dial-timeout не годится: UDP "dial" безсоединительный и всегда успешен
+// мгновенно. Единственный способ узнать — реально отправить запрос и ждать ответ.
 func autoDial(r *DohResolver) dialFunc {
 	var (
 		probed sync.Once
@@ -492,10 +485,9 @@ func autoDial(r *DohResolver) dialFunc {
 	}
 }
 
-// udpProbe sends a real DNS A query for a well-known domain via UDP and
-// checks whether any response arrives within the deadline. We try the first
-// two servers from udpDNSServers under a shared deadline — if neither
-// responds, UDP/53 is blocked.
+// udpProbe шлёт реальный DNS A-запрос к known-домену по UDP и проверяет, придёт
+// ли ответ до дедлайна. Пробуем первые два сервера из udpDNSServers под общим
+// deadline — если ни один не ответил, UDP/53 заблокирован.
 func udpProbe(timeout time.Duration) bool {
 	m := new(dns.Msg)
 	m.SetQuestion("dns.google.", dns.TypeA)

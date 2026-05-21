@@ -1,5 +1,5 @@
-// Package stats provides throughput counters and a counting net.Conn wrapper
-// shared between the client and server binaries.
+// Package stats — счётчики пропускной способности и обёртка net.Conn
+// с подсчётом байт. Используется и клиентом, и сервером.
 package stats
 
 import (
@@ -10,20 +10,20 @@ import (
 	"time"
 )
 
-// Stats tracks tx/rx byte counters. When Enabled is false, Add* are no-ops and
-// LogEvery returns immediately, matching the original isDebug-gated behavior.
+// Stats хранит счётчики tx/rx байт. При enabled=false Add* — no-op,
+// LogEvery возвращается сразу (поведение под isDebug).
 type Stats struct {
 	tx      atomic.Uint64
 	rx      atomic.Uint64
 	enabled bool
 }
 
-// New returns a Stats with the given enabled flag.
+// New возвращает Stats с заданным флагом enabled.
 func New(enabled bool) *Stats {
 	return &Stats{enabled: enabled}
 }
 
-// AddTx records n bytes sent.
+// AddTx учитывает n переданных байт.
 func (s *Stats) AddTx(n int) {
 	if !s.enabled || n <= 0 {
 		return
@@ -31,7 +31,7 @@ func (s *Stats) AddTx(n int) {
 	s.tx.Add(uint64(n))
 }
 
-// AddRx records n bytes received.
+// AddRx учитывает n полученных байт.
 func (s *Stats) AddRx(n int) {
 	if !s.enabled || n <= 0 {
 		return
@@ -39,8 +39,8 @@ func (s *Stats) AddRx(n int) {
 	s.rx.Add(uint64(n))
 }
 
-// LogEvery emits a throughput summary every 5s via logf until ctx is canceled.
-// No-op if Stats is disabled.
+// LogEvery каждые 5с печатает сводку пропускной способности через logf,
+// пока не отменён ctx. No-op, если Stats выключен.
 func (s *Stats) LogEvery(ctx context.Context, logf func(string, ...any), label, txName, rxName string) {
 	if !s.enabled {
 		return
@@ -82,7 +82,7 @@ func (s *Stats) LogEvery(ctx context.Context, logf func(string, ...any), label, 
 	}
 }
 
-// FormatBitsPerSecond renders a bandwidth value from a byte count and interval.
+// FormatBitsPerSecond форматирует пропускную способность из числа байт и интервала.
 func FormatBitsPerSecond(bytes uint64, interval time.Duration) string {
 	if interval <= 0 {
 		interval = time.Second
@@ -98,7 +98,7 @@ func FormatBitsPerSecond(bytes uint64, interval time.Duration) string {
 	return fmt.Sprintf("%.0f bit/s", bps)
 }
 
-// FormatByteCount renders a human-readable byte count.
+// FormatByteCount форматирует число байт в человекочитаемый вид.
 func FormatByteCount(bytes uint64) string {
 	if bytes >= 1024*1024 {
 		return fmt.Sprintf("%.2f MiB", float64(bytes)/(1024*1024))
@@ -109,20 +109,19 @@ func FormatByteCount(bytes uint64) string {
 	return fmt.Sprintf("%d B", bytes)
 }
 
-// CountingConn wraps a net.Conn and accumulates rx/tx byte counters in Stats.
+// CountingConn оборачивает net.Conn и аккумулирует rx/tx-счётчики в Stats.
 type CountingConn struct {
 	net.Conn
 	Stats *Stats
 }
 
-// Read reads from the underlying conn and updates rx counter.
 func (c *CountingConn) Read(p []byte) (int, error) {
 	n, err := c.Conn.Read(p)
 	c.Stats.AddRx(n)
 	return n, err
 }
 
-// Write writes to the underlying conn and updates tx counter.
+
 func (c *CountingConn) Write(p []byte) (int, error) {
 	n, err := c.Conn.Write(p)
 	c.Stats.AddTx(n)

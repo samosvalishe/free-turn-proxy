@@ -25,12 +25,12 @@ import (
 	"github.com/samosvalishe/btp/internal/logx"
 )
 
-// Log is the package-level logger. Defaults to no-op; main wires it via
-// SetLogger so captcha output respects the global -debug flag and levels.
-// Solve also accepts an explicit logger parameter for callers that want DI.
+// Log — пакетный логгер. По умолчанию no-op; main устанавливает его через
+// SetLogger, чтобы captcha-вывод подчинялся глобальному -debug. Solve также
+// принимает logger параметром для DI.
 var Log logx.Logger = logx.Nop()
 
-// SetLogger installs a logger for this package. Safe to call once at startup.
+// SetLogger ставит логгер пакета. Безопасно вызывать один раз при старте.
 func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
 
 const (
@@ -124,9 +124,9 @@ func (s *captchaSession) logger() logx.Logger {
 	return Log
 }
 
-// Solve runs the automatic captcha challenge against VK's captchaNotRobot API
-// and returns a success token on success. log may be nil, in which case the
-// package-level Log is used.
+// Solve запускает авторешение captcha против VK captchaNotRobot API
+// и возвращает success-токен при успехе. log может быть nil — тогда
+// используется пакетный Log.
 func Solve(
 	ctx context.Context,
 	captchaErr *Error,
@@ -479,8 +479,8 @@ func solveCaptchaPoW(ctx context.Context, input string, difficulty int) string {
 		return ""
 	}
 	target := strings.Repeat("0", difficulty)
-	// ctx-check every 1024 iterations keeps cancel latency under a few ms
-	// even on weak ARM (was every 4096).
+	// ctx-check каждые 1024 итерации — задержка отмены в пределах нескольких мс
+	// даже на слабом ARM (было 4096).
 	buf := make([]byte, 0, len(input)+20)
 	buf = append(buf, input...)
 	for nonce := 1; nonce <= 10_000_000; nonce++ {

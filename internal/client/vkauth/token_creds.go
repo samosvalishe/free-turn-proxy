@@ -10,9 +10,8 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
-// fetchTurnCreds performs step 4 of the token chain: it calls
-// vchat.joinConversationByLink and extracts the TURN username, credential, and
-// address list from the response.
+// fetchTurnCreds — шаг 4 цепочки: вызывает vchat.joinConversationByLink
+// и извлекает TURN username, credential и список адресов из ответа.
 func (c *Client) fetchTurnCreds(
 	ctx context.Context,
 	httpClient tlsclient.HttpClient,

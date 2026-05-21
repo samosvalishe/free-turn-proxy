@@ -9,29 +9,28 @@ import (
 
 const inboundQueueCap = 2000
 
-// Packet is a pooled UDP datagram carried from the listener to the per-stream
-// DTLS worker. N is the populated prefix of Data.
+// Packet — пулированная UDP-датаграмма, передаваемая из listener'а в per-stream
+// DTLS-воркер. N — заполненный префикс Data.
 type Packet struct {
 	Data []byte
 	N    int
 }
 
-// packetPool reuses Packet buffers across the inbound hot path. Buffer size
-// matches the 2048-byte default the listener loop expects.
+// packetPool переиспользует Packet-буферы на горячем inbound пути. Размер буфера
+// соответствует 2048 байт, которые ожидает цикл listener'а.
 var packetPool = sync.Pool{
 	New: func() any { return &Packet{Data: make([]byte, 2048)} },
 }
 
-// runListener reads packets from listenConn, refreshes the active-peer cache,
-// and posts each packet to inboundChan. Packets are dropped when the channel
-// is full to keep the read loop wait-free.
+// runListener читает пакеты из listenConn, обновляет кэш active-peer
+// и публикует каждый пакет в inboundChan. При переполнении канала пакет
+// отбрасывается — цикл чтения остаётся wait-free.
 func runListener(ctx context.Context, listenConn net.PacketConn, activeLocalPeer *atomic.Value, inboundChan chan<- *Packet) {
-	// Pointer-cache for the last seen local peer addr. Avoids the
-	// per-packet addr.String() allocation pair on the hot WG ingest path:
-	// most packets come from the same UDPAddr instance, so a pointer
-	// equality check covers the fast path. The slow path (new instance
-	// from ReadFrom for the same ip:port) does one String compare and
-	// then refreshes the cache.
+	// Pointer-кэш последнего виденного адреса local peer. Позволяет избежать
+	// per-packet аллокации addr.String() на горячем WG ingest пути:
+	// большинство пакетов приходит от одного UDPAddr, поэтому проверка
+	// по указателю покрывает fast path. Медленный путь (новый экземпляр
+	// от ReadFrom для того же ip:port) делает одно String-сравнение и обновляет кэш.
 	var lastAddr net.Addr
 	var lastAddrStr string
 	for {

@@ -5,13 +5,13 @@ import (
 	"time"
 )
 
-// VKCredentials — пара app_id/app_secret для получения анонимных токенов.
+// VKCredentials — пара app_id/app_secret для получения anonymous-токенов.
 type VKCredentials struct {
 	ClientID     string
 	ClientSecret string
 }
 
-// TurnCredentials — разрешённые TURN-реквизиты для группы потоков.
+// TurnCredentials — резолвленный TURN-allocation для группы потоков.
 type TurnCredentials struct {
 	Username    string
 	Password    string
@@ -20,7 +20,7 @@ type TurnCredentials struct {
 	Link        string
 }
 
-// DefaultCredentials — публичные app_id VK SDK; клиент перебирает по порядку.
+// DefaultCredentials — публичные VK SDK app ID, которые клиент пробует по порядку.
 var DefaultCredentials = []VKCredentials{
 	{ClientID: "6287487", ClientSecret: "QbYic1K3lEV5kTGiqlq2"},  // VK_WEB_APP_ID
 	{ClientID: "7879029", ClientSecret: "aR5NKGmm03GYrCiNKsaw"},  // VK_MVK_APP_ID
@@ -38,7 +38,8 @@ const (
 	DefaultStreamsPerCache = 10
 )
 
-// Sentinel-ошибки auth-потока. Строковые формы стабильны (используются в логах).
+// Sentinel errors produced by the auth flow. Callers use errors.Is.
+// The string forms remain stable for log output.
 var (
 	ErrCaptchaWaitRequired   = errors.New("CAPTCHA_WAIT_REQUIRED")
 	ErrFatalCaptchaNoStreams = errors.New("FATAL_CAPTCHA_FAILED_NO_STREAMS")

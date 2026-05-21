@@ -1,6 +1,6 @@
-// Package dtlsdial wraps pion-dtls client setup (self-signed cert, EMS,
-// AES-128-GCM, send-only CID) plus an optional concurrency gate around the
-// handshake. Used by the client UDP and VLESS pipelines.
+// Package dtlsdial оборачивает настройку pion-dtls клиента (self-signed cert, EMS,
+// AES-128-GCM, send-only CID) плюс опциональный конкурентный gate на handshake.
+// Используется UDP и VLESS pipeline'ами клиента.
 package dtlsdial
 
 import (
@@ -14,19 +14,16 @@ import (
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
 )
 
-// GenerateSelfSignedCert returns a new self-signed TLS certificate for use
-// as the DTLS identity. It is a thin wrapper around selfsign.GenerateSelfSigned
-// and exists so both cmd/server and Dialer share one call-site.
 func GenerateSelfSignedCert() (tls.Certificate, error) {
 	return selfsign.GenerateSelfSigned()
 }
 
-// Dialer configures the DTLS client handshake.
+// Dialer конфигурирует DTLS-handshake клиента.
 type Dialer struct {
-	// HandshakeTimeout caps the handshake context. Zero means no timeout.
+	// HandshakeTimeout ограничивает контекст handshake. Ноль — без таймаута.
 	HandshakeTimeout time.Duration
-	// HandshakeSem, if non-nil, gates concurrent handshakes (Dial blocks
-	// until a slot is available or ctx fires).
+	// HandshakeSem, если non-nil, ограничивает параллельные handshake
+	// (Dial блокируется до появления слота или отмены ctx).
 	HandshakeSem chan struct{}
 
 	certOnce sync.Once
@@ -34,11 +31,10 @@ type Dialer struct {
 	certErr  error
 }
 
-// Dial acquires the optional handshake slot and performs a DTLS client
-// handshake over pc to peer. On success returns the connected *dtls.Conn.
-// Caller closes it. The self-signed cert is generated once per Dialer and
-// reused across handshakes (DTLS is used here for obfuscation, not auth —
-// see internal/transport/dtlsdial/doc.go).
+// Dial захватывает опциональный handshake-слот и выполняет DTLS-handshake
+// клиента поверх pc к peer. При успехе возвращает *dtls.Conn (закрывает вызывающий).
+// Self-signed сертификат генерируется один раз на Dialer и переиспользуется
+// (DTLS здесь — для обфускации, не аутентификации; см. doc.go).
 func (d *Dialer) Dial(ctx context.Context, pc net.PacketConn, peer *net.UDPAddr) (*dtls.Conn, error) {
 	d.certOnce.Do(func() {
 		d.cert, d.certErr = GenerateSelfSignedCert()

@@ -1,7 +1,7 @@
-// Package bondserver implements the server side of the bonded VLESS lane:
-// a single backend TCP connection multiplexed across N smux streams that all
-// share a ConnID. Frame wire-format lives in internal/wire/bondframe; this package
-// wires the backend TCP <-> lanes copy loops and the per-ConnID registry.
+// Package bondserver реализует серверную сторону bonded VLESS lane:
+// одно backend TCP-соединение, мультиплексированное по N smux-потокам с общим
+// ConnID. Wire-формат фреймов — internal/wire/bondframe; пакет соединяет
+// copy-loop backend TCP ↔ lanes и реестр per-ConnID.
 package bondserver
 
 import (
@@ -18,16 +18,16 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// laneStream is the subset of *smux.Stream that serverLane needs. Defined as
-// an interface so unit tests can inject in-memory pipes without spinning up a
-// real smux session.
+// laneStream — подмножество *smux.Stream, нужное serverLane. Определено как
+// интерфейс, чтобы юнит-тесты могли подменять in-memory pipe без смоделированной
+// smux-сессии.
 type laneStream interface {
 	io.Reader
 	io.Writer
 	SetDeadline(time.Time) error
 }
 
-// Deps groups host-process dependencies needed by the bond server.
+// Deps — зависимости хост-процесса для bond-сервера.
 type Deps struct {
 	Log logx.Logger
 }
@@ -39,17 +39,16 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-// connKey is the composite de-duplication key for the Registry map.
-// Incorporating TenantID ensures ConnIDs from different tenants never collide,
-// which is required for multi-tenant deployments. In single-tenant (non-auth)
-// mode every key has Tenant == auth.Anonymous.
+// connKey — составной ключ дедупликации для карты Registry.
+// TenantID в ключе гарантирует, что ConnID разных тенантов никогда не пересекаются
+// (обязательно для multi-tenant). В single-tenant режиме у всех ключей Tenant == auth.Anonymous.
 type connKey struct {
 	Tenant auth.TenantID
 	ConnID uint64
 }
 
-// Registry deduplicates concurrent lanes that share a (TenantID, ConnID) pair
-// into a single backend TCP connection.
+// Registry дедуплицирует одновременные lane с одинаковой парой (TenantID, ConnID)
+// в одно backend TCP-соединение.
 type Registry struct {
 	deps Deps
 
@@ -57,17 +56,16 @@ type Registry struct {
 	conns map[connKey]*serverConn
 }
 
-// NewRegistry creates an empty Registry.
 func NewRegistry(deps Deps) *Registry {
 	return &Registry{deps: deps, conns: make(map[connKey]*serverConn)}
 }
 
-// HandleStreamAfterMagic accepts a smux stream whose first 4 magic bytes have
-// already been consumed (server-side multiplex pre-peek), reads the Hello,
-// attaches as a lane, and blocks until the underlying bond connection is done.
+// HandleStreamAfterMagic принимает smux-поток, у которого первые 4 magic-байта
+// уже прочитаны (server-side multiplex pre-peek), читает Hello, прикрепляет
+// lane и блокируется до завершения bond-соединения.
 //
-// tenant scopes the de-duplication key. Pass [auth.Anonymous] in single-tenant
-// deployments; real Authenticator-derived values in multi-tenant mode.
+// tenant ограничивает ключ дедупликации. В single-tenant — [auth.Anonymous];
+// в multi-tenant — значение от реального Authenticator.
 func (r *Registry) HandleStreamAfterMagic(ctx context.Context, tenant auth.TenantID, stream *smux.Stream, connectAddr string, magic [4]byte) {
 	r.handleStream(ctx, tenant, stream, connectAddr, func(rd io.Reader) (bondframe.Hello, error) {
 		return bondframe.ReadHelloAfterMagic(rd, magic)
@@ -298,8 +296,8 @@ func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
 	for {
 		n, err := backendConn.Read(buf)
 		if n > 0 {
-			// writeToNextLane is synchronous (WriteFrame returns before lane
-			// switch), so buf[:n] can be passed directly — matches bondclient.
+			// writeToNextLane — синхронная запись (WriteFrame возвращается до
+			// переключения lane), поэтому buf[:n] передаётся напрямую — аналог bondclient.
 			if writeErr := c.writeToNextLane(bondframe.FrameData, seq, buf[:n], &laneIdx); writeErr != nil {
 				c.deps.log().Errorf("[bond %d] lane write data error: %v", c.id, writeErr)
 				return

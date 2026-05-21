@@ -1,7 +1,7 @@
-// Package bondclient implements the client side of the bonded VLESS lane:
-// a single accepted TCP connection striped (round-robin) across all currently
-// live smux sessions in a tcpfwd.SessionPool. Frame wire-format lives in
-// internal/wire/bondframe; this package wires the local TCP <-> lanes copy loops.
+// Package bondclient реализует клиентскую сторону bonded VLESS lane:
+// одно принятое TCP-соединение, распределённое (round-robin) по всем активным
+// smux-сессиям в tcpfwd.SessionPool. Wire-формат фреймов — internal/wire/bondframe;
+// пакет соединяет copy-loop локального TCP ↔ lanes.
 package bondclient
 
 import (
@@ -22,7 +22,7 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// Deps groups host-process dependencies needed by the bond client.
+// Deps — зависимости хост-процесса для bond-клиента.
 type Deps struct {
 	Log logx.Logger
 }
@@ -34,12 +34,12 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-// Handler binds Deps and exposes Handle, matching the tcpfwd.BondHandler signature.
+// Handler связывает Deps и предоставляет Handle под сигнатуру tcpfwd.BondHandler.
 type Handler struct {
 	Deps Deps
 }
 
-// lane is one striped smux stream within a bonded TCP connection.
+// lane — один smux-поток внутри bonded TCP-соединения.
 type lane struct {
 	ps     *tcpfwd.PooledSession
 	stream *smux.Stream
@@ -47,17 +47,17 @@ type lane struct {
 	dead   atomic.Bool
 }
 
-// Handle stripes the local TCP connection across all live candidate sessions.
-// Signature matches tcpfwd.BondHandler.
+// Handle распределяет локальное TCP-соединение по всем активным сессиям-кандидатам.
+// Сигнатура соответствует tcpfwd.BondHandler.
 func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, candidates []*tcpfwd.PooledSession) {
 	defer func() { _ = tcpConn.Close() }()
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Phase 1: open streams on usable sessions. Phase 2: send Hello with the
-	// actual lane count so bondserver.waitForInitialLanes doesn't wait on lanes
-	// that were never opened.
+	// Фаза 1: открыть потоки на доступных сессиях. Фаза 2: отправить Hello с
+	// реальным числом lane — bondserver.waitForInitialLanes не будет ждать
+	// lane, которые не были открыты.
 	type pending struct {
 		ps     *tcpfwd.PooledSession
 		stream *smux.Stream
@@ -203,10 +203,9 @@ func (h *Handler) copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.
 	}
 }
 
-// writeBondFrameToNextLane writes to the next live lane in round-robin order.
-// Unlike bondserver.writeToNextLane (which loops waiting for new lanes to
-// attach), the client's lane set is fixed for the lifetime of Handle, so once
-// all lanes are dead there is nothing to wait for — fail fast.
+// writeBondFrameToNextLane пишет в следующий живой lane в порядке round-robin.
+// В отличие от bondserver.writeToNextLane (который ждёт новые lane), набор
+// lane клиента фиксирован на время жизни Handle — нечего ждать, fail fast.
 func writeBondFrameToNextLane(ctx context.Context, lanes []*lane, typ byte, seq uint64, data []byte, laneIdx *uint64) (*lane, error) {
 	for range lanes {
 		idx := *laneIdx % uint64(len(lanes))

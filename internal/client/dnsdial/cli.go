@@ -17,15 +17,15 @@ func sharedDohResolver() *DohResolver {
 	return dohResolverInstance
 }
 
-// AppDialer returns the net.Dialer used by tls-client and other HTTP callers.
-// DNS transport is selected by mode (udp | doh | auto).
+// AppDialer возвращает net.Dialer для tls-client и других HTTP-вызывающих.
+// DNS-транспорт выбирается по mode (udp | doh | auto).
 func AppDialer(mode string) net.Dialer {
 	return buildDialer(mode, sharedDohResolver())
 }
 
-// InstallGlobalResolver wires net.DefaultResolver to the same DNS transport
-// as AppDialer, so third-party libs that build their own http.Client without
-// our Dialer still use DoH / auto-fallback instead of the OS resolver.
+// InstallGlobalResolver выставляет net.DefaultResolver на тот же DNS-транспорт,
+// что и AppDialer — чтобы сторонние библиотеки, собирающие свой http.Client
+// без нашего Dialer, тоже шли через DoH / auto-fallback, а не OS resolver.
 func InstallGlobalResolver(mode string) {
 	d := AppDialer(mode)
 	if d.Resolver != nil {

@@ -13,9 +13,8 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
-// fetchCallToken performs step 2 of the token chain: it calls
-// calls.getAnonymousToken and drives the captcha-retry loop until a call token
-// is returned or all solve modes are exhausted.
+// fetchCallToken — шаг 2 цепочки: вызывает calls.getAnonymousToken и ведёт
+// цикл retry captcha до получения call-токена или исчерпания всех режимов решения.
 func (c *Client) fetchCallToken(
 	ctx context.Context,
 	httpClient tlsclient.HttpClient,
@@ -59,8 +58,8 @@ func (c *Client) fetchCallToken(
 	}
 }
 
-// solveCaptcha drives one captcha solve attempt and returns the POST body for
-// the next retry, or an error when all modes are exhausted.
+// solveCaptcha выполняет одну попытку решения captcha и возвращает тело POST
+// для следующего retry или ошибку при исчерпании всех режимов.
 func (c *Client) solveCaptcha(
 	ctx context.Context,
 	httpClient tlsclient.HttpClient,
@@ -105,9 +104,9 @@ func (c *Client) solveCaptcha(
 			break
 		}
 		c.log.Infof("[STREAM %d] [Captcha] Triggering manual captcha fallback", streamID)
-		// Manual solver gets its own 3-min budget so a tight parent deadline
-		// doesn't cut user solve time. Parent cancellation (app shutdown) still
-		// propagates so the goroutine doesn't outlive the process.
+		// Ручной решалке выделяется свой 3-минутный бюджет — жёсткий parent-deadline
+		// не обрезает время пользователя. Отмена parent (завершение приложения)
+		// всё равно propagate, горутина не переживает процесс.
 		manualCtx, manualCancel := context.WithTimeout(ctx, 3*time.Minute)
 
 		type manualRes struct {
@@ -168,7 +167,7 @@ func (c *Client) solveCaptcha(
 	return buildCaptchaRetryData(link, escapedName, token1, captchaErr, successToken, captchaKey), nil
 }
 
-// buildCaptchaRetryData constructs the POST body for the next captcha attempt.
+// buildCaptchaRetryData формирует тело POST для следующей попытки captcha.
 func buildCaptchaRetryData(link, escapedName, token1 string, captchaErr *captcha.Error, successToken, captchaKey string) string {
 	if captchaKey != "" {
 		return fmt.Sprintf(

@@ -1,7 +1,7 @@
-// Package udprelay implements the UDP-mode proxy loop: it terminates DTLS from a
-// local peer (WireGuard) and relays its packets through a per-stream TURN
-// allocation back to a remote peer. Run is the entrypoint; it owns the local
-// listener, the inbound dispatch fan-in, and the per-stream DTLS/TURN loops.
+// Package udprelay реализует UDP-режим прокси: терминирует DTLS от локального
+// пира (WireGuard) и ретранслирует пакеты через per-stream TURN-аллокацию
+// обратно к удалённому пиру. Run — точка входа; владеет локальным listener,
+// fan-in входящего dispatch и per-stream DTLS/TURN циклами.
 package udprelay
 
 import (
@@ -18,13 +18,12 @@ import (
 	"github.com/samosvalishe/btp/internal/transport/dtlsdial"
 )
 
-// GetCredsFunc is re-exported from common so callers can keep their imports
-// scoped to this package.
+// GetCredsFunc реэкспортирован из common, чтобы вызывающие не выходили за пределы импортов пакета.
 type GetCredsFunc = common.GetCredsFunc
 
-// AuthHandler is the subset of vkauth.Client this package needs. Defined as
-// an interface so tests can inject fakes; the production wiring still imports
-// vkauth for its sentinel errors (ErrFatalCaptchaNoStreams, etc.).
+// AuthHandler — подмножество vkauth.Client, необходимое пакету. Определено как
+// интерфейс, чтобы тесты могли подменять fake; prod-код всё равно импортирует
+// vkauth ради sentinel-ошибок (ErrFatalCaptchaNoStreams и т.д.).
 type AuthHandler interface {
 	IsAuthError(err error) bool
 	HandleAuthError(streamID int) bool
@@ -32,7 +31,7 @@ type AuthHandler interface {
 	LockoutUntilUnix() int64
 }
 
-// Params is the per-stream TURN/wrap configuration shared by the DTLS and TURN loops.
+// Params — per-stream конфигурация TURN/wrap, общая для DTLS и TURN циклов.
 type Params struct {
 	Host     string
 	Port     string
@@ -42,23 +41,23 @@ type Params struct {
 	GetCreds GetCredsFunc
 }
 
-// ErrFatal is returned by Run when a stream encounters a condition that
-// requires the entire application to exit (e.g. manual captcha solver failed
-// with no connected streams). Callers should check with errors.Is and call
-// os.Exit themselves — udprelay does not reach into the host process.
+// ErrFatal возвращается из Run, когда поток встречает условие, требующее
+// завершения всего приложения (напр. ручной решатель captcha провалился без
+// подключённых потоков). Вызывающий должен проверить через errors.Is и вызвать
+// os.Exit сам — udprelay не вмешивается в хост-процесс.
 var ErrFatal = errors.New("udprelay: fatal error")
 
-// Deps groups everything the loops need from the host process. The atomics
-// are owned by Run and exposed here so DTLSLoop/TURNLoop can share them when
-// called directly (Run wires them automatically).
+// Deps объединяет всё, что циклы берут из хост-процесса. Атомики принадлежат
+// Run и экспонированы здесь, чтобы DTLSLoop/TURNLoop могли разделять их при
+// прямом вызове (Run подключает их автоматически).
 type Deps struct {
 	DTLSDialer       *dtlsdial.Dialer
 	Auth             AuthHandler
 	Log              logx.Logger
 	ActiveLocalPeer  *atomic.Value
 	ConnectedStreams *atomic.Int32
-	// fatalCh is an internal signalling channel; set by Run, written by
-	// TURNLoop, and drained by Run to propagate the fatal error up.
+	// fatalCh — внутренний сигнальный канал; устанавливается Run, пишется
+	// TURNLoop, читается Run для проброса фатальной ошибки наверх.
 	fatalCh chan error
 }
 
@@ -69,13 +68,13 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-// Run is the UDP-mode entrypoint. It binds listenAddr, fans inbound packets
-// into a shared queue, and spawns numStreams pairs of (DTLSLoop, TURNLoop).
-// connectedStreams is owned by the caller (vkauth reads it via StreamsAlive)
-// and incremented/decremented by oneTURN.
-// Returns after all stream loops exit (i.e. when ctx is cancelled).
-// If a fatal captcha condition is encountered, Run returns ErrFatal so the
-// caller can perform os.Exit without udprelay reaching into the host process.
+// Run — точка входа UDP-режима. Биндит listenAddr, распределяет входящие пакеты
+// в общую очередь и запускает numStreams пар (DTLSLoop, TURNLoop).
+// connectedStreams принадлежит вызывающему (vkauth читает через StreamsAlive)
+// и инкрементируется/декрементируется в oneTURN.
+// Возвращается после выхода всех потоков (т.е. при отмене ctx).
+// При фатальном captcha-условии возвращает ErrFatal — вызывающий делает os.Exit
+// без вмешательства udprelay в хост-процесс.
 func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, params *Params, peer *net.UDPAddr, listenAddr string, numStreams int) error {
 	listenConn, err := net.ListenPacket("udp", listenAddr)
 	if err != nil {
@@ -102,9 +101,9 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		fatalCh:          fatalCh,
 	}
 
-	// runCtx is cancelled when a fatal error is detected (via fatalCh), which
-	// propagates cancellation into all stream loops without requiring them to
-	// hold a reference to the host-process cancel function.
+	// runCtx отменяется при обнаружении фатальной ошибки (через fatalCh),
+	// распространяя отмену во все потоковые циклы без необходимости хранить
+	// ссылку на cancel-функцию хост-процесса.
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
@@ -115,9 +114,9 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	})
 	t := time.Tick(200 * time.Millisecond)
 
-	// Stream 1 gets okchan so it can signal the first successful handshake to
-	// the log. All streams start concurrently — no gate between stream 1 and
-	// the rest, so a slow DTLS handshake on stream 1 never delays streams 2..N.
+	// Поток 1 получает okchan для сигнализации о первом успешном handshake в лог.
+	// Все потоки стартуют одновременно — нет барьера между потоком 1 и остальными,
+	// поэтому медленный DTLS handshake потока 1 не задерживает потоки 2..N.
 	okchan := make(chan struct{}, 1)
 	for i := 0; i < numStreams; i++ {
 		cchan := make(chan net.PacketConn)
@@ -134,9 +133,9 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		})
 	}
 
-	// If a fatal error was sent, cancel remaining goroutines and propagate up.
-	// watcherDone synchronises the watcher goroutine with Run's return so the
-	// fatalErr load happens-after the store.
+	// При фатальной ошибке отменяем остальные горутины и пробрасываем наверх.
+	// watcherDone синхронизирует watcher-горутину с возвратом Run, обеспечивая
+	// happens-after между store и load fatalErr.
 	var fatalErr atomic.Pointer[error]
 	watcherDone := make(chan struct{})
 	go func() {

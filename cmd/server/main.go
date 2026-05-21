@@ -24,7 +24,7 @@ import (
 func main() {
 	cfg, err := config.ParseServer(os.Args[1:], os.Stderr)
 	if err != nil {
-		// logger not built yet — config parse failure is the only pre-logger fatal.
+		// логгер ещё не создан — единственный fatal до его инициализации.
 		log.Fatalf("%v", err)
 	}
 	logger := logx.New(cfg.Log.Debug)

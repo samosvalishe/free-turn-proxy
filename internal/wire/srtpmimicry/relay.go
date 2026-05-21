@@ -7,8 +7,9 @@ import (
 	"time"
 )
 
-// RelayPacketConn wraps a TURN relay PacketConn to direct all writes to a fixed peer.
-// When Conn is non-nil, packets are wrapped/unwrapped with SRTP-mimicry AEAD.
+// RelayPacketConn оборачивает TURN relay PacketConn, направляя все записи
+// фиксированному пиру. Если Conn non-nil, пакеты оборачиваются/разворачиваются
+// SRTP-mimicry AEAD.
 type RelayPacketConn struct {
 	Relay net.PacketConn
 	Peer  net.Addr

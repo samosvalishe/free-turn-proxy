@@ -18,11 +18,10 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// GetCredsFunc is re-exported from common so callers can keep their imports
-// scoped to this package.
+// GetCredsFunc реэкспортирован из common, чтобы вызывающие не выходили за пределы импортов пакета.
 type GetCredsFunc = common.GetCredsFunc
 
-// Params is the per-pool TURN/wrap configuration.
+// Params — конфигурация TURN/wrap для пула.
 type Params struct {
 	Host       string
 	Port       string
@@ -34,12 +33,12 @@ type Params struct {
 	KCPFEC     kcptun.FEC
 }
 
-// BondHandler stripes one accepted TCP connection across all currently-live
-// pool sessions. Nil disables bond mode (callers will then use round-robin).
-// The bond client implementation lives in internal/proxy/bondclient.
+// BondHandler распределяет одно принятое TCP-соединение по всем активным сессиям пула.
+// Nil отключает bond-режим (будет round-robin).
+// Реализация — internal/proxy/bondclient.
 type BondHandler func(ctx context.Context, tcpConn net.Conn, connID uint64, lanes []*PooledSession)
 
-// Deps groups host-process dependencies needed by the VLESS loop.
+// Deps — зависимости хост-процесса для VLESS-цикла.
 type Deps struct {
 	DTLSDialer  *dtlsdial.Dialer
 	Log         logx.Logger
@@ -53,9 +52,9 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-// Run is the VLESS-mode entrypoint. It spawns numSessions maintainers, waits
-// for at least one to connect, then accepts local TCP connections and forwards
-// each as a smux stream (round-robin) or bonded across all live sessions.
+// Run — точка входа VLESS-режима. Запускает numSessions maintainer-горутин, ждёт
+// первого подключения, затем принимает локальные TCP-соединения и форвардит
+// каждое как smux-поток (round-robin) или bonded по всем активным сессиям.
 func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenAddr string, numSessions int, useBond bool) error {
 	pool := &SessionPool{}
 
@@ -176,9 +175,9 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 	}
 }
 
-// maintainSession keeps one TURN+DTLS+KCP+smux session alive: 3s backoff on
-// setup failure, 2s after a successful session disconnects, in both cases
-// before the next reconnect attempt.
+// maintainSession поддерживает одну TURN+DTLS+KCP+smux сессию живой:
+// 3s backoff при ошибке инициализации, 2s после отключения успешной сессии,
+// в обоих случаях перед следующей попыткой подключения.
 func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, id int, pool *SessionPool) {
 	for {
 		select {
@@ -223,8 +222,8 @@ func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.
 	}
 }
 
-// createSmuxSession establishes a full TURN+DTLS+KCP+smux pipeline and returns
-// the smux session along with a cleanup function (LIFO teardown).
+// createSmuxSession создаёт полный TURN+DTLS+KCP+smux pipeline и возвращает
+// smux-сессию вместе с функцией cleanup (LIFO-разрушение).
 func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, id int) (*smux.Session, func(), error) {
 	var cleanupFns []func()
 	cleanup := func() {

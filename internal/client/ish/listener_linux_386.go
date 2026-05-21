@@ -17,8 +17,8 @@ type listener struct {
 	fd int
 }
 
-// WrapListener overrides the standard net.Listener with a legacy syscall listener
-// designed specifically for the iSH simulator on iOS, which lacks modern `accept4`.
+// WrapListener подменяет стандартный net.Listener на legacy-syscall listener,
+// заточенный под iSH-симулятор на iOS, где нет современного `accept4`.
 func WrapListener(ln net.Listener) (net.Listener, error) {
 	tl, ok := ln.(*net.TCPListener)
 	if !ok {
@@ -29,13 +29,14 @@ func WrapListener(ln net.Listener) (net.Listener, error) {
 		return nil, err
 	}
 
-	// Keep a reference to *os.File so the garbage collector doesn't close the FD.
+	// держим ссылку на *os.File, чтобы GC не закрыл FD.
 	return &listener{Listener: ln, f: f, fd: int(f.Fd())}, nil
 }
 
 func (l *listener) Accept() (net.Conn, error) {
-	// Set the listener socket to blocking mode. Go makes it non-blocking by default.
-	// This avoids using time.Sleep in a spin-loop, which triggers futex_time64 SIGSYS in modern Go on iSH.
+	// ставим listener-сокет в blocking. Go по умолчанию делает его non-blocking.
+	// Это избавляет от time.Sleep в spin-loop, который триггерит futex_time64 SIGSYS
+	// в современном Go на iSH.
 	if err := syscall.SetNonblock(l.fd, false); err != nil {
 		return nil, err
 	}
@@ -44,11 +45,11 @@ func (l *listener) Accept() (net.Conn, error) {
 		addr := make([]byte, 128)
 		addrlen := uintptr(128)
 
-		// i386 network syscalls are multiplexed via socketcall (102).
-		// SYS_ACCEPT is subcall 5.
+		// i386 сетевые syscall'ы мультиплексируются через socketcall (102).
+		// SYS_ACCEPT — subcall 5.
 		args := [3]uintptr{uintptr(l.fd), uintptr(unsafe.Pointer(&addr[0])), uintptr(unsafe.Pointer(&addrlen))}
 
-		// Use Syscall6 to ensure we have enough arguments registers for the platform.
+		// Syscall6 — чтобы хватило регистров аргументов на этой платформе.
 		r1, _, errno := syscall.Syscall6(102, 5, uintptr(unsafe.Pointer(&args)), 0, 0, 0, 0)
 		if errno != 0 {
 			if errno == syscall.EINTR {
@@ -62,16 +63,15 @@ func (l *listener) Accept() (net.Conn, error) {
 		_ = syscall.SetsockoptInt(nfd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, 256*1024)
 		_ = syscall.SetsockoptInt(nfd, syscall.SOL_SOCKET, syscall.SO_SNDBUF, 256*1024)
 
-		// We avoid Go's net.FileConn because it tries to register the fd with Go's epoll poller,
-		// which in iSH emulator consistency fails with EEXIST (file exists).
-		// Instead, we return a custom blocking net.Conn wrapper.
+		// избегаем net.FileConn — она регистрирует fd в Go epoll poller'е, что в
+		// iSH стабильно падает с EEXIST. Возвращаем кастомный blocking net.Conn.
 		conn := &ishConn{fd: nfd}
 		return conn, nil
 	}
 }
 
 func (l *listener) Close() error {
-	// Close both the duplicated FD and the original listener.
+	// закрываем и дублированный FD, и оригинальный listener.
 	err1 := l.f.Close()
 	err2 := l.Listener.Close()
 	if err1 != nil {
@@ -80,7 +80,7 @@ func (l *listener) Close() error {
 	return err2
 }
 
-// ishConn bypasses Go's network poller to prevent EEXIST bugs in iSH
+// ishConn обходит сетевой poller Go, чтобы не словить EEXIST в iSH.
 type ishConn struct {
 	fd int
 }

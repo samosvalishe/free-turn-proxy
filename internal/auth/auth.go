@@ -5,39 +5,35 @@ import (
 	"net"
 )
 
-// TenantID identifies a tenant in a multi-tenant deployment.
-// The zero value ("") is the [Anonymous] sentinel used in single-tenant mode.
+// TenantID идентифицирует тенанта в multi-tenant конфигурации.
+// Нулевое значение ("") — sentinel [Anonymous] для single-tenant режима.
 type TenantID string
 
-// Anonymous is the sentinel TenantID used when authentication is disabled
-// (single-tenant / no-op mode). All call-sites pass this value until a real
-// Authenticator is wired in.
+// Anonymous — sentinel TenantID, когда аутентификация выключена
+// (single-tenant / no-op). Все вызовы передают это значение, пока
+// настоящий Authenticator не подключён.
 const Anonymous TenantID = ""
 
-// Authenticator authenticates an incoming connection and returns the
-// TenantID it belongs to. Implementations must be safe for concurrent use.
+// Authenticator аутентифицирует входящее соединение и возвращает TenantID.
+// Реализации обязаны быть конкурентно безопасны.
 //
-// A nil error with [Anonymous] means the connection is accepted in
-// non-multi-tenant mode. Any non-nil error must be treated as a rejection
-// and the caller must close conn.
+// nil ошибка с [Anonymous] означает приём в не-multi-tenant режиме.
+// Любая не-nil ошибка трактуется как отказ; вызывающий обязан закрыть conn.
 //
-// This interface is stream-oriented: it consumes a net.Conn and is intended
-// for bondserver/tcpfwdserver wiring. UDP-mode auth (when needed) will get
-// a separate interface taking a token []byte read out-of-band from the
-// handshake, since udpserver has no per-tenant stream abstraction.
+// Интерфейс ориентирован на потоки (net.Conn) — для bondserver/tcpfwdserver.
+// UDP-режиму (если потребуется) нужен отдельный интерфейс с токеном из
+// out-of-band handshake, т.к. в udpserver нет per-tenant абстракции потока.
 type Authenticator interface {
 	Authenticate(ctx context.Context, conn net.Conn) (TenantID, error)
 }
 
-// NopAuthenticator is a no-op Authenticator that always returns [Anonymous].
-// It is the default when multi-tenant support is not configured.
+// NopAuthenticator — no-op Authenticator, всегда возвращает [Anonymous].
+// Используется по умолчанию, когда multi-tenant не настроен.
 type NopAuthenticator struct{}
 
-// compile-time interface check.
 var _ Authenticator = NopAuthenticator{}
 
-// Authenticate implements [Authenticator]. It always succeeds and returns
-// [Anonymous] without inspecting conn or ctx.
+// Authenticate реализует [Authenticator]: всегда успех и [Anonymous].
 func (NopAuthenticator) Authenticate(_ context.Context, _ net.Conn) (TenantID, error) {
 	return Anonymous, nil
 }

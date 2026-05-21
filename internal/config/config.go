@@ -1,11 +1,11 @@
-// Package config parses CLI flags for the client and server binaries.
+// Package config парсит CLI-флаги клиента и сервера.
 //
-// Parse* functions are side-effect free: they validate inputs and decode the
-// wrap key, but do not touch the network, DNS, or process state. main() is
-// responsible for wiring those side effects after Parse* returns.
+// Функции Parse* без побочных эффектов: валидируют ввод и декодируют wrap-ключ,
+// но не трогают сеть, DNS и состояние процесса. Подключение этих эффектов —
+// ответственность main() после возврата Parse*.
 //
-// Options are grouped by domain (TURN, Obf, Proxy, VK, DNS, Log) so the struct
-// shape mirrors the conceptual layers of the proxy.
+// Опции сгруппированы по доменам (TURN, Obf, Proxy, VK, DNS, Log) — структура
+// зеркалит концептуальные слои прокси.
 package config
 
 import (
@@ -26,66 +26,66 @@ const (
 	defaultStreamsPerCache = 10
 )
 
-// ProxyMode selects the app-layer payload carried over the TURN tunnel.
-// On the client it can be all three; on the server only UDP / TCPFwd
-// (bond is auto-detected per stream by the magic prefix).
+// ProxyMode выбирает payload прикладного уровня, который идёт через TURN-туннель.
+// На клиенте доступны все три; на сервере только UDP / TCPFwd
+// (bond определяется автоматически per-stream по magic-префиксу).
 type ProxyMode string
 
 const (
-	ProxyModeUDP        ProxyMode = "udp"         // -vless=false: UDP packet relay (WireGuard)
-	ProxyModeTCPFwd     ProxyMode = "tcpfwd"      // -vless=true: TCP forwarder over smux
-	ProxyModeTCPFwdBond ProxyMode = "tcpfwd-bond" // -vless=true -vless-bond=true: bonded TCP across N smux sessions
+	ProxyModeUDP        ProxyMode = "udp"         // -vless=false: UDP-релей пакетов (WireGuard)
+	ProxyModeTCPFwd     ProxyMode = "tcpfwd"      // -vless=true: TCP-форвардер через smux
+	ProxyModeTCPFwdBond ProxyMode = "tcpfwd-bond" // -vless=true -vless-bond=true: bond TCP по N smux-сессиям
 )
 
-// TURNOpts groups TURN-server-side options (where and how to reach TURN).
+// TURNOpts — опции TURN-сервера (куда и как подключаться).
 type TURNOpts struct {
-	Host string // -turn: override the TURN server IP/host
-	Port string // -port: override the TURN port
-	UDP  bool   // -udp: dial TURN via UDP (default: TCP/TLS)
-	N    int    // -n: number of TURN streams (client only)
+	Host string // -turn: переопределить IP/host TURN-сервера
+	Port string // -port: переопределить порт TURN
+	UDP  bool   // -udp: подключение к TURN по UDP (по умолчанию TCP/TLS)
+	N    int    // -n: число TURN-потоков (только клиент)
 }
 
-// ObfOpts groups TURN-payload obfuscation options (SRTP-mimicry wrap).
+// ObfOpts — опции обфускации TURN-payload (SRTP-mimicry wrap).
 type ObfOpts struct {
-	WrapMode   bool   // -wrap: enable SRTP-mimicry AEAD wrap on TURN payload
-	WrapKey    []byte // -wrap-key (decoded): 32-byte shared key; nil unless WrapMode
-	GenWrapKey bool   // -gen-wrap-key: print a fresh key and exit
+	WrapMode   bool   // -wrap: включить SRTP-mimicry AEAD-обёртку
+	WrapKey    []byte // -wrap-key (декодированный): 32-байтовый общий ключ; nil если WrapMode=false
+	GenWrapKey bool   // -gen-wrap-key: напечатать новый ключ и выйти
 }
 
-// ProxyOpts groups app-layer proxy options.
+// ProxyOpts — опции прокси прикладного уровня.
 type ProxyOpts struct {
-	Mode    ProxyMode // udp | tcpfwd | tcpfwd-bond (server: udp | tcpfwd)
-	Listen  string    // -listen: local bind addr (client: WG/TCP entry; server: TURN entry)
-	Connect string    // -connect: upstream backend addr (server only)
-	Peer    string    // -peer: server-side proxy addr the client dials (client only)
+	Mode    ProxyMode // udp | tcpfwd | tcpfwd-bond (сервер: udp | tcpfwd)
+	Listen  string    // -listen: локальный bind (клиент: WG/TCP entry; сервер: TURN entry)
+	Connect string    // -connect: backend (только сервер)
+	Peer    string    // -peer: адрес серверного прокси, куда дозванивается клиент (только клиент)
 }
 
-// VKOpts groups VK-credentials and captcha options (client only).
+// VKOpts — опции VK-учёток и captcha (только клиент).
 type VKOpts struct {
-	Link           string // -vk-link (sanitized to the join-code suffix)
+	Link           string // -vk-link (нормализован до join-кода)
 	StreamsPerCred int    // -streams-per-cred
 	ManualCaptcha  bool   // -manual-captcha
 }
 
-// DNSOpts groups DNS-resolution options (client only).
+// DNSOpts — опции DNS-резолвинга (только клиент).
 type DNSOpts struct {
 	Mode    string   // -dns: udp | doh | auto
-	Servers []string // -dns-servers (comma-split); nil when flag empty
+	Servers []string // -dns-servers (через запятую); nil если флаг пуст
 }
 
-// LogOpts groups logging options.
+// LogOpts — опции логирования.
 type LogOpts struct {
 	Debug bool // -debug
 }
 
-// KCPOpts groups KCP tunnel options. Both sides of a tunnel must agree on
-// Profile and FEC; values currently come from VK_TURN_KCP_* env vars.
+// KCPOpts — опции KCP-туннеля. Обе стороны должны согласовать Profile и FEC;
+// значения берутся из переменных окружения VK_TURN_KCP_*.
 type KCPOpts struct {
 	Profile kcptun.Profile
 	FEC     kcptun.FEC
 }
 
-// Client holds parsed and validated client CLI options.
+// Client — разобранные и провалидированные CLI-опции клиента.
 type Client struct {
 	TURN  TURNOpts
 	Obf   ObfOpts
@@ -96,7 +96,7 @@ type Client struct {
 	KCP   KCPOpts
 }
 
-// Server holds parsed and validated server CLI options.
+// Server — разобранные и провалидированные CLI-опции сервера.
 type Server struct {
 	Obf   ObfOpts
 	Proxy ProxyOpts
@@ -104,8 +104,8 @@ type Server struct {
 	KCP   KCPOpts
 }
 
-// ParseClient parses args (excluding program name) into a Client.
-// On flag.ErrHelp it returns (nil, flag.ErrHelp) so the caller can exit cleanly.
+// ParseClient разбирает args (без имени программы) в Client.
+// При flag.ErrHelp возвращает (nil, flag.ErrHelp) — вызывающий выходит штатно.
 func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	fs := flag.NewFlagSet("client", flag.ContinueOnError)
 	if errOut != nil {
@@ -207,7 +207,7 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	return c, nil
 }
 
-// ParseServer parses args (excluding program name) into a Server.
+// ParseServer разбирает args (без имени программы) в Server.
 func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 	fs := flag.NewFlagSet("server", flag.ContinueOnError)
 	if errOut != nil {

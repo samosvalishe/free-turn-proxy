@@ -1,5 +1,5 @@
-// Package udpserver implements the server-side UDP relay: a DTLS-terminated
-// stream is forwarded to a UDP backend (WireGuard) and vice-versa.
+// Package udpserver реализует серверную UDP-ретрансляцию: DTLS-терминированный
+// поток форвардится к UDP-backend (WireGuard) и обратно.
 package udpserver
 
 import (
@@ -18,8 +18,8 @@ const (
 	udpIdleTimeout  = 30 * time.Minute
 )
 
-// Handle forwards DTLS packets between conn and a UDP backend at connectAddr
-// until either side closes. Blocks until both copy goroutines exit.
+// Handle форвардит DTLS-пакеты между conn и UDP-backend на connectAddr
+// до закрытия любой стороны. Блокируется до выхода обеих copy-горутин.
 func Handle(ctx context.Context, logger logx.Logger, conn net.Conn, connectAddr string) {
 	serverConn, err := net.Dial("udp", connectAddr)
 	if err != nil {
@@ -64,8 +64,8 @@ func Handle(ctx context.Context, logger logx.Logger, conn net.Conn, connectAddr 
 	wg.Wait()
 }
 
-// copyOne reads from src and writes to dst until ctx fires or either side errors.
-// Each read/write resets an idle timeout so a stuck side closes instead of hanging.
+// copyOne читает из src и пишет в dst до отмены ctx или ошибки любой стороны.
+// Каждый read/write сбрасывает idle timeout — зависший конец закрывается, а не висит.
 func copyOne(ctx context.Context, logger logx.Logger, src, dst net.Conn, count func(int)) {
 	buf := make([]byte, udpRelayBufSize)
 	for {

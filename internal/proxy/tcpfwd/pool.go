@@ -1,9 +1,9 @@
-// Package tcpfwd implements VLESS mode: TCP forwarding over a pool of TURN-tunneled
-// smux sessions. Each accepted local TCP connection is opened as a smux stream
-// (round-robin across sessions) or, with bond, striped across all live sessions.
+// Package tcpfwd реализует VLESS-режим: пересылка TCP через пул TURN-туннелированных
+// smux-сессий. Каждое принятое TCP-соединение открывается как smux-поток
+// (round-robin по сессиям) или, с bond, распределяется по всем активным сессиям.
 //
-// SessionPool/PooledSession are exported so the bond client (internal/proxy/bondclient)
-// can stripe a single TCP connection across multiple live sessions.
+// SessionPool/PooledSession экспортированы, чтобы bond-клиент (internal/proxy/bondclient)
+// мог распределять одно TCP-соединение по нескольким сессиям.
 package tcpfwd
 
 import (
@@ -13,9 +13,9 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// PooledSession is a single TURN+DTLS+KCP+smux session inside the pool, with
-// its lifetime counters. Fields are exported so internal/proxy/bondclient can
-// account per-lane traffic; mutate the atomics via their atomic methods only.
+// PooledSession — одна TURN+DTLS+KCP+smux сессия в пуле с lifetime-счётчиками.
+// Поля экспортированы для учёта per-lane трафика в bondclient;
+// атомики изменять только через их методы.
 type PooledSession struct {
 	ID          int
 	Sess        *smux.Session
@@ -26,7 +26,7 @@ type PooledSession struct {
 	FromSession atomic.Uint64
 }
 
-// SessionPool is a concurrency-safe round-robin pool of live smux sessions.
+// SessionPool — конкурентно-безопасный round-robin пул активных smux-сессий.
 type SessionPool struct {
 	mu          sync.RWMutex
 	sessions    []*PooledSession
@@ -37,7 +37,7 @@ type SessionPool struct {
 	ready     chan struct{}
 }
 
-// Ready returns a channel closed the first time the pool gains a session.
+// Ready возвращает канал, закрытый при первом появлении сессии в пуле.
 func (p *SessionPool) Ready() <-chan struct{} {
 	p.mu.Lock()
 	if p.ready == nil {
@@ -48,7 +48,7 @@ func (p *SessionPool) Ready() <-chan struct{} {
 	return ch
 }
 
-// Add registers a freshly connected session in the pool.
+// Add регистрирует только что подключённую сессию в пуле.
 func (p *SessionPool) Add(id int, s *smux.Session) *PooledSession {
 	ps := &PooledSession{ID: id, Sess: s}
 	p.mu.Lock()
@@ -62,7 +62,7 @@ func (p *SessionPool) Add(id int, s *smux.Session) *PooledSession {
 	return ps
 }
 
-// Remove drops ps from the pool. No-op if not present.
+// Remove удаляет ps из пула. No-op если не найден.
 func (p *SessionPool) Remove(ps *PooledSession) {
 	p.mu.Lock()
 	for i, sess := range p.sessions {
@@ -74,7 +74,7 @@ func (p *SessionPool) Remove(ps *PooledSession) {
 	p.mu.Unlock()
 }
 
-// Pick returns the next session in round-robin order, or nil if pool is empty.
+// Pick возвращает следующую сессию в round-robin порядке или nil если пул пуст.
 func (p *SessionPool) Pick() *PooledSession {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -86,12 +86,12 @@ func (p *SessionPool) Pick() *PooledSession {
 	return p.sessions[idx]
 }
 
-// NextConnID returns a monotonically increasing connection ID.
+// NextConnID возвращает монотонно возрастающий идентификатор соединения.
 func (p *SessionPool) NextConnID() uint64 {
 	return p.connCounter.Add(1)
 }
 
-// Snapshot returns a copy of all currently-live (non-closed) sessions.
+// Snapshot возвращает копию всех активных (незакрытых) сессий.
 func (p *SessionPool) Snapshot() []*PooledSession {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -104,8 +104,8 @@ func (p *SessionPool) Snapshot() []*PooledSession {
 	return out
 }
 
-// Count returns the number of sessions currently in the pool (including any
-// that may have just closed; use Snapshot for live-only).
+// Count возвращает число сессий в пуле (включая только что закрытые;
+// используй Snapshot для live-only).
 func (p *SessionPool) Count() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

@@ -1,20 +1,20 @@
-// Package logx is a minimal leveled logger over stdlib log. Callers receive a
-// Logger and call Debugf/Infof/Warnf/Errorf directly; Debugf is gated by a
-// debug flag, the other levels always print via stdlib log.
+// Package logx — минимальный уровневый логгер поверх stdlib log.
+// Вызывающий получает Logger и зовёт Debugf/Infof/Warnf/Errorf;
+// Debugf управляется debug-флагом, остальные уровни всегда пишут.
 package logx
 
 import "log"
 
-// Logger is the leveled-log interface used across the proxy. Debugf is gated by
-// the constructor's debug flag; the other levels always print via stdlib log.
+// Logger — интерфейс уровневого логирования.
+// Debugf гейтится debug-флагом конструктора; остальные уровни печатают всегда.
 type Logger interface {
 	Debugf(format string, v ...any)
 	Infof(format string, v ...any)
 	Warnf(format string, v ...any)
 	Errorf(format string, v ...any)
-	// DebugEnabled reports whether Debugf will produce output. Hot paths
-	// (stats counters, condition-gated branches) use this to skip work the
-	// logger would discard anyway.
+	// DebugEnabled сообщает, будет ли Debugf писать вывод. Hot-path
+	// (счётчики статистики, условные ветки) используют это, чтобы не
+	// делать работу, результат которой логгер всё равно отбросит.
 	DebugEnabled() bool
 }
 
@@ -22,13 +22,12 @@ type stdLogger struct {
 	debug bool
 }
 
-// New returns a Logger that prints via stdlib log. If debug is false, Debugf is
-// a no-op.
+// New возвращает Logger поверх stdlib log. При debug=false Debugf — no-op.
 func New(debug bool) Logger {
 	return &stdLogger{debug: debug}
 }
 
-// Nop returns a Logger whose every method discards its input. Useful in tests.
+// Nop возвращает Logger, отбрасывающий весь вывод. Полезно в тестах.
 func Nop() Logger { return nopLogger{} }
 
 func (l *stdLogger) Debugf(format string, v ...any) {
@@ -41,8 +40,8 @@ func (l *stdLogger) Warnf(format string, v ...any)  { log.Printf("[WARN] "+forma
 func (l *stdLogger) Errorf(format string, v ...any) { log.Printf("[ERROR] "+format, v...) }
 func (l *stdLogger) DebugEnabled() bool             { return l.debug }
 
-// OrNop returns l if non-nil, else a Nop logger. Use in package constructors
-// that accept a nullable Logger.
+// OrNop возвращает l, если он не nil, иначе Nop. Используется в конструкторах
+// пакетов, принимающих nullable Logger.
 func OrNop(l Logger) Logger {
 	if l == nil {
 		return Nop()

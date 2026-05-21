@@ -1,19 +1,17 @@
-// DTLS-as-obfuscation note (V2-8):
+// DTLS как обфускация (V2-8):
 //
-// DTLS in this project is used primarily as an *obfuscation* layer, not as a
-// security boundary. The VK TURN content-filter drops payloads that do not
-// look like a legitimate DTLS handshake followed by encrypted records, so the
-// handshake is what gets us through. The encryption it provides is a free
-// side-effect — we already trust the wrapped tunnel (WireGuard inside UDP
-// mode, or smux+KCP inside tcpfwd mode) to handle confidentiality and
-// integrity end-to-end.
+// DTLS в этом проекте используется прежде всего как слой *обфускации*, а не
+// как граница безопасности. VK TURN content-filter дропает payload, не
+// похожий на легитимный DTLS handshake с зашифрованными записями, — именно
+// handshake пропускает нас. Шифрование — бесплатный побочный эффект; мы уже
+// доверяем внутреннему туннелю (WireGuard в UDP-режиме или smux+KCP в tcpfwd)
+// для обеспечения конфиденциальности и целостности end-to-end.
 //
-// This is why the older `-no-dtls` / `Direct` flag was removed in V2-0: with
-// DTLS off, VK drops packets and the proxy effectively does not work in
-// production. There is no scenario in which disabling DTLS is the right
-// call against the live VK filter.
+// Именно поэтому старый флаг `-no-dtls` / `Direct` удалён в V2-0: без DTLS
+// VK дропает пакеты и прокси фактически не работает в production. Нет
+// сценария, в котором отключение DTLS против живого VK-фильтра — верное решение.
 //
-// Implication for future changes: do not treat the DTLS layer as if it were
-// security-critical (e.g. it is fine to use self-signed certs, send-only CID,
-// and no peer-cert validation — those are deliberate, not oversights).
+// Для будущих изменений: не трактуй DTLS-слой как security-critical
+// (самоподписанные сертификаты, send-only CID, отсутствие проверки peer-cert —
+// это намеренно, не упущения).
 package dtlsdial

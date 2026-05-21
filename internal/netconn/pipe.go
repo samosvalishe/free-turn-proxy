@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-// BiCopy runs io.Copy in both directions between c1 and c2, returning
-// (bytesC1FromC2, bytesC2FromC1). When either copy exits — by EOF, error, or
-// ctx cancellation — both sides get their deadlines pinned to time.Now() so the
-// peer goroutine unblocks. Errors are surfaced via errf when non-nil.
+// BiCopy запускает io.Copy в обе стороны между c1 и c2; возвращает
+// (bytesC1FromC2, bytesC2FromC1). Как только одна копия завершилась
+// (EOF/ошибка/cancel) — обоим концам выставляется deadline=time.Now(),
+// чтобы разблокировать парную горутину. Ошибки уходят в errf, если он не nil.
 func BiCopy(ctx context.Context, c1, c2 net.Conn, errf func(format string, v ...any)) (int64, int64) {
 	ctx2, cancel := context.WithCancel(ctx)
 	context.AfterFunc(ctx2, func() {

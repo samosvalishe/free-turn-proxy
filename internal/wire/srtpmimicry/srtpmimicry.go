@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: MIT
 
-// Package srtpmimicry implements an SRTP-mimicry AEAD framing used to bypass
-// the VK TURN content filter.
+// Package srtpmimicry реализует AEAD-фрейминг с мимикрией SRTP для обхода
+// VK TURN content-filter.
 //
-// Purpose: obfuscation, not security. DTLS already provides confidentiality
-// and integrity on the inner channel. This layer exists to make traffic look
-// like SRTP so the VK content-filter does not drop it; it is not a defense
-// against an active adversary on its own.
+// Назначение: обфускация, а не безопасность. DTLS уже обеспечивает
+// конфиденциальность и целостность внутреннего канала. Этот слой существует,
+// чтобы трафик выглядел как SRTP — VK content-filter его не дропает;
+// сам по себе не является защитой от активного противника.
 //
-// Wire format:
+// Wire-формат:
 //
 //	[12B RTP header | 12B explicit nonce | AEAD ciphertext | 16B tag]
 //
 // RTP header (RFC 3550):
 //
 //	byte 0: 0x80         V=2, P=0, X=0, CC=0
-//	byte 1: 0x6F         M=0, PT=111 (opus, typical voice PT)
-//	byte 2-3: seq16 BE   monotonic, init random
-//	byte 4-7: ts32 BE    monotonic, init random, increments by 960 (20ms @ 48kHz)
-//	byte 8-11: SSRC      random per conn, MSB encodes direction
+//	byte 1: 0x6F         M=0, PT=111 (opus, типичный voice PT)
+//	byte 2-3: seq16 BE   монотонный, init random
+//	byte 4-7: ts32 BE    монотонный, init random, шаг 960 (20ms @ 48kHz)
+//	byte 8-11: SSRC      random per conn, MSB кодирует направление
 //
-// 12B explicit nonce = 4B sessionID || 8B counter (BE). sessionID MSB
-// matches SSRC MSB (direction bit). counter starts at a random uint64.
-// AAD = first 24 bytes (RTP header || nonce).
+// 12B explicit nonce = 4B sessionID || 8B counter (BE). MSB sessionID
+// совпадает с MSB SSRC (direction bit). counter стартует с random uint64.
+// AAD = первые 24 байта (RTP header || nonce).
 //
-// Wire format is frozen — bit-exact compatibility with deployed peers is required.
+// Wire-формат заморожен — требуется побитовая совместимость с задеплоенными пирами.
 package srtpmimicry
 
 import (
@@ -51,11 +51,10 @@ const (
 	tsStep     = 960                  // 20ms @ 48kHz
 )
 
-// MaxWire returns max wire bytes for a given payload size.
 func MaxWire(payloadLen int) int { return Overhead + payloadLen }
 
-// State holds an AEAD instance derived from the shared key.
-// One State can be shared across many Conns (e.g. server-side listener).
+// State хранит AEAD-экземпляр, выведенный из общего ключа.
+// Один State может разделяться между многими Conn (напр. server-side listener).
 type State struct {
 	aead cipher.AEAD
 }
@@ -71,18 +70,17 @@ func NewState(key []byte) (*State, error) {
 	return &State{aead: aead}, nil
 }
 
-// Conn carries per-stream RTP state (seq/timestamp/SSRC/counter) plus a
-// reference to the shared AEAD State.
+// Conn несёт per-stream RTP-состояние (seq/timestamp/SSRC/counter) и
+// ссылку на общий AEAD State.
 type Conn struct {
 	state     *State
-	sessionID [4]byte // 4B prefix for nonce; MSB encodes direction
-	ssrc      [4]byte // SSRC for RTP header; MSB encodes direction
+	sessionID [4]byte // 4B префикс nonce; MSB кодирует направление
+	ssrc      [4]byte // SSRC для RTP header; MSB кодирует направление
 	counter   atomic.Uint64
 	seq       atomic.Uint32 // RTP sequence (used as uint16)
 	timestamp atomic.Uint32 // RTP timestamp
 }
 
-// NewConn allocates a fresh State from key and a Conn bound to it.
 func NewConn(key []byte, isServer bool) (*Conn, error) {
 	s, err := NewState(key)
 	if err != nil {
@@ -91,8 +89,8 @@ func NewConn(key []byte, isServer bool) (*Conn, error) {
 	return NewConnFromState(s, isServer)
 }
 
-// NewConnFromState builds a Conn with random per-stream RTP fields,
-// reusing the supplied State.
+// NewConnFromState создаёт Conn со случайными per-stream RTP-полями,
+// переиспользуя переданный State.
 func NewConnFromState(state *State, isServer bool) (*Conn, error) {
 	if state == nil {
 		return nil, errors.New("wrap: nil state")
@@ -123,15 +121,15 @@ func NewConnFromState(state *State, isServer bool) (*Conn, error) {
 	return c, nil
 }
 
-// WrapInto encodes payload into dst (must be at least MaxWire(len(payload)) bytes)
-// and returns the number of wire bytes written.
+// WrapInto кодирует payload в dst (минимум MaxWire(len(payload)) байт)
+// и возвращает число записанных wire-байт.
 func (c *Conn) WrapInto(dst, payload []byte) (int, error) {
 	wireLen := Overhead + len(payload)
 	if len(dst) < wireLen {
 		return 0, errors.New("wrap: dst buffer too small")
 	}
 
-	// RTP header.
+	// RTP-заголовок.
 	dst[0] = rtpVersion
 	dst[1] = rtpPT
 	seq := uint16(c.seq.Add(1) - 1)
@@ -140,7 +138,7 @@ func (c *Conn) WrapInto(dst, payload []byte) (int, error) {
 	binary.BigEndian.PutUint32(dst[4:8], ts)
 	copy(dst[8:12], c.ssrc[:])
 
-	// Explicit nonce.
+	// Явный nonce.
 	noncePos := rtpHdrLen
 	copy(dst[noncePos:noncePos+4], c.sessionID[:])
 	ctr := c.counter.Add(1) - 1
@@ -155,9 +153,9 @@ func (c *Conn) WrapInto(dst, payload []byte) (int, error) {
 	return wireLen, nil
 }
 
-// Unwrap decodes a wire packet into dst and returns the plaintext length.
-// Note: the AEAD opens in-place inside wire, so callers must treat wire as
-// consumed after this call (do not reuse its contents).
+// Unwrap декодирует wire-пакет в dst и возвращает длину plaintext.
+// AEAD открывает in-place внутри wire — вызывающий должен считать wire
+// потреблённым после вызова (содержимое нельзя переиспользовать).
 func (c *Conn) Unwrap(wire, dst []byte) (int, error) {
 	if len(wire) < Overhead {
 		return 0, errors.New("wrap: packet too short")
@@ -177,9 +175,6 @@ func (c *Conn) Unwrap(wire, dst []byte) (int, error) {
 	return len(plain), nil
 }
 
-// --- Key helpers ---
-
-// GenKeyHex returns a fresh hex-encoded random key.
 func GenKeyHex() (string, error) {
 	key := make([]byte, KeyLen)
 	if _, err := rand.Read(key); err != nil {
@@ -188,8 +183,8 @@ func GenKeyHex() (string, error) {
 	return hex.EncodeToString(key), nil
 }
 
-// DecodeKey decodes a hex key and validates length when enabled.
-// When enabled is false, returns (nil, nil).
+// DecodeKey декодирует hex-ключ и проверяет длину если enabled.
+// Если enabled=false, возвращает (nil, nil).
 func DecodeKey(enabled bool, raw string) ([]byte, error) {
 	if !enabled {
 		return nil, nil

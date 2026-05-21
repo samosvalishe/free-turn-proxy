@@ -1,6 +1,6 @@
-// Package bondframe contains the wire format used by the VLESS bond multi-lane
-// transport (hello + framed data/FIN). Both the client (initiator) and the
-// server (acceptor) speak the same encoding.
+// Package bondframe содержит wire-формат VLESS bond multi-lane transport
+// (hello + framed data/FIN). Клиент (инициатор) и сервер (акцептор) используют
+// одинаковую кодировку.
 package bondframe
 
 import (
@@ -24,21 +24,20 @@ const (
 	LaneAttachTimeout = 300 * time.Millisecond
 )
 
-// Hello is the per-lane handshake header sent right after a smux stream opens.
+// Hello — per-lane handshake header, отправляемый сразу после открытия smux-потока.
 type Hello struct {
 	ConnID    uint64
 	LaneIndex uint16
 	LaneCount uint16
 }
 
-// Frame is a single bonded data or FIN unit, identified by Seq within a ConnID.
+// Frame — одна bonded data или FIN единица, идентифицированная Seq внутри ConnID.
 type Frame struct {
 	Type byte
 	Seq  uint64
 	Data []byte
 }
 
-// WriteHello encodes and writes a Hello to w using the bond wire format.
 func WriteHello(w io.Writer, connID uint64, laneIndex, laneCount uint16) error {
 	var hdr [17]byte
 	copy(hdr[0:4], Magic)
@@ -50,8 +49,8 @@ func WriteHello(w io.Writer, connID uint64, laneIndex, laneCount uint16) error {
 	return err
 }
 
-// ReadHelloAfterMagic finishes reading a Hello whose first 4 magic bytes have
-// already been consumed (server pre-peeks the magic to multiplex protocols).
+// ReadHelloAfterMagic завершает чтение Hello, у которого первые 4 magic-байта
+// уже прочитаны (сервер pre-peek для мультиплексирования протоколов).
 func ReadHelloAfterMagic(r io.Reader, magic [4]byte) (Hello, error) {
 	var hdr [17]byte
 	copy(hdr[0:4], magic[:])
@@ -61,7 +60,6 @@ func ReadHelloAfterMagic(r io.Reader, magic [4]byte) (Hello, error) {
 	return ParseHelloHeader(hdr[:])
 }
 
-// ParseHelloHeader decodes a 17-byte Hello header from hdr.
 func ParseHelloHeader(hdr []byte) (Hello, error) {
 	if len(hdr) != 17 {
 		return Hello{}, fmt.Errorf("bad bond hello size: %d", len(hdr))
@@ -79,7 +77,6 @@ func ParseHelloHeader(hdr []byte) (Hello, error) {
 	}, nil
 }
 
-// WriteFrame writes a single Frame to w (header + payload).
 func WriteFrame(w io.Writer, typ byte, seq uint64, data []byte) error {
 	var hdr [13]byte
 	hdr[0] = typ
@@ -95,7 +92,6 @@ func WriteFrame(w io.Writer, typ byte, seq uint64, data []byte) error {
 	return err
 }
 
-// ReadFrame reads one Frame from r. Payloads over 4 MiB are rejected.
 func ReadFrame(r io.Reader) (Frame, error) {
 	var hdr [13]byte
 	if _, err := io.ReadFull(r, hdr[:]); err != nil {
@@ -118,11 +114,11 @@ func ReadFrame(r io.Reader) (Frame, error) {
 	return f, nil
 }
 
-// PendingCap bounds the per-bond reorder buffer. A peer that emits seq with
-// permanent gaps cannot grow it past this many frames.
+// PendingCap ограничивает per-bond буфер переупорядочивания. Пир, генерирующий
+// seq с постоянными пропусками, не вырастит его больше этого числа фреймов.
 const PendingCap = 1024
 
-// ReorderHooks plugs caller-specific logging into Reorder. All fields may be nil.
+// ReorderHooks подключает caller-специфичное логирование к Reorder. Все поля могут быть nil.
 type ReorderHooks struct {
 	OnOverflow    func(have int)
 	OnUnknownType func(typ byte)
@@ -130,12 +126,12 @@ type ReorderHooks struct {
 	OnCloseWrite  func(format string, v ...any)
 }
 
-// Reorder consumes Frames from recv, writes payloads to dst in Seq order, and
-// returns the number of fully delivered chunks. It returns when:
-//   - the FIN seq has been reached (CloseWrite is called on dst);
-//   - recv is closed;
-//   - ctx is cancelled;
-//   - an unknown frame type, pending overflow, or write error fires.
+// Reorder потребляет Frame из recv, пишет payload в dst в порядке Seq и
+// возвращает число полностью доставленных чанков. Возвращается когда:
+//   - достигнут FIN seq (на dst вызывается CloseWrite);
+//   - recv закрыт;
+//   - ctx отменён;
+//   - неизвестный тип фрейма, переполнение pending или ошибка записи.
 func Reorder(ctx context.Context, dst net.Conn, recv <-chan Frame, h ReorderHooks) uint64 {
 	pending := make(map[uint64][]byte)
 	var expect uint64
@@ -193,10 +189,9 @@ func Reorder(ctx context.Context, dst net.Conn, recv <-chan Frame, h ReorderHook
 	}
 }
 
-// CloseWrite half-closes the write side of conn if the underlying type
-// supports it (TCPConn, smux.Stream, …); otherwise it is a no-op. errf is
-// invoked with the error if CloseWrite fails; callers typically pass a
-// debug-gated log func.
+// CloseWrite полузакрывает write-сторону conn, если базовый тип поддерживает
+// это (TCPConn, smux.Stream, …); иначе no-op. errf вызывается с ошибкой при
+// сбое CloseWrite; вызывающие обычно передают debug-gated log func.
 func CloseWrite(conn net.Conn, errf func(format string, v ...any)) {
 	type closeWriter interface {
 		CloseWrite() error

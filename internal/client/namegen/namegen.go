@@ -1,5 +1,5 @@
-// Package namegen produces random Russian-style display names for
-// client identities. Name pools are embedded from data/*.txt.
+// Package namegen генерирует случайные русскоязычные display name'ы для
+// идентичностей клиента. Пулы имён встроены из data/*.txt.
 package namegen
 
 import (
@@ -35,10 +35,10 @@ func parseLines(s string) []string {
 	return out
 }
 
-// feminizeSurname converts a Russian male surname to its female form.
-// Operates on runes since Cyrillic letters are multibyte in UTF-8.
-// Surnames whose suffixes do not match Russian patterns are returned
-// unchanged (covers foreign / meme surnames).
+// feminizeSurname переводит мужскую фамилию в женскую форму.
+// Работает по рунам — кириллица многобайтовая в UTF-8.
+// Фамилии с не-русскими суффиксами возвращаются без изменений
+// (иностранные / мемные).
 func feminizeSurname(surname string) string {
 	rs := []rune(surname)
 	n := len(rs)
@@ -54,11 +54,11 @@ func feminizeSurname(surname string) string {
 	return surname
 }
 
-// SurnameProbability is the chance that Generate returns a name with a surname.
+// SurnameProbability — вероятность того, что Generate вернёт имя с фамилией.
 const SurnameProbability = 0.7
 
-// Generate returns a random "FirstName" or "FirstName LastName".
-// Gender is chosen uniformly; surnames are feminized for female names.
+// Generate возвращает случайное "Имя" или "Имя Фамилия".
+// Пол выбирается равномерно; женские фамилии феминизируются.
 func Generate() string {
 	isFemale := rand.IntN(2) == 0
 

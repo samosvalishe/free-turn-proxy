@@ -16,37 +16,38 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
-// Config configures a Client. Zero values pick safe defaults except for Dialer
-// (must be set explicitly to preserve the existing custom-DNS behavior).
+// Config конфигурирует Client. Нулевые значения — безопасные дефолты,
+// кроме Dialer (должен быть задан явно для кастомного DNS).
 type Config struct {
-	// Credentials to try in order. nil/empty -> DefaultCredentials.
+	// Credentials для перебора по порядку. nil/empty → DefaultCredentials.
 	Credentials []VKCredentials
 
-	// Dialer used by the HTTP transport for VK API requests.
+	// Dialer для HTTP-транспорта запросов к VK API.
 	Dialer net.Dialer
 
-	// ManualOnly forces the manual captcha path on the first attempt.
+	// ManualOnly форсирует ручной путь captcha с первой попытки.
 	ManualOnly bool
 
-	// StreamsPerCache is the divisor for streamID -> cacheID. <=0 -> default.
+	// StreamsPerCache — делитель streamID → cacheID. <=0 → дефолт.
 	StreamsPerCache int
 
-	// StreamsAlive returns the count of currently-connected streams; used to
-	// decide whether an exhausted captcha is fatal vs throttleable. nil -> 1.
+	// StreamsAlive возвращает число подключённых потоков; используется для
+	// решения, является ли исчерпанная captcha фатальной или только throttle.
+	// nil → 1.
 	StreamsAlive func() int32
 
-	// AutoSolver / ManualSolver are pluggable captcha solvers. nil values
-	// disable that path (the flow will fall through to the next attempt).
+	// AutoSolver / ManualSolver — подключаемые решалки captcha. nil отключает
+	// соответствующий путь (поток переходит к следующей попытке).
 	AutoSolver   AutoSolveFunc
 	ManualSolver ManualSolveFunc
 
-	// Log is the leveled logger. nil -> no-op.
+	// Log — уровневый логгер. nil → no-op.
 	Log logx.Logger
 }
 
-// Client is the VK auth + creds-cache facade used by callers. It owns the
-// per-stream-group cache, the global request throttle, the captcha lockout
-// timer, and the auth-error counter used to invalidate stale TURN creds.
+// Client — фасад VK-аутентификации и кэша реквизитов. Владеет кэшем группы
+// потоков, глобальным throttle запросов, таймером блокировки captcha и счётчиком
+// ошибок аутентификации для инвалидации устаревших TURN-реквизитов.
 type Client struct {
 	credentials []VKCredentials
 	dialer      net.Dialer
@@ -63,17 +64,16 @@ type Client struct {
 	fetchMu       sync.Mutex
 	lastFetchTime time.Time
 
-	// tokenChain is the per-creds 4-step fetcher. Production wires this to
-	// (*Client).getTokenChain; tests inject a fake.
+	// tokenChain — 4-шаговый получатель токена для пары credentials.
+	// В prod подключён (*Client).getTokenChain; тесты подменяют fake.
 	tokenChain tokenChainFn
 
-	// minFetchInterval gates back-to-back VK requests. Tests can lower this.
+	// minFetchIntervalFn ограничивает частоту запросов к VK. Тесты снижают.
 	minFetchIntervalFn func() time.Duration
 }
 
 type tokenChainFn func(ctx context.Context, link string, streamID int, creds VKCredentials, jar tlsclient.CookieJar) (string, string, []string, error)
 
-// New builds a Client from cfg.
 func New(cfg Config) *Client {
 	c := &Client{
 		credentials: cfg.Credentials,
@@ -101,8 +101,8 @@ func New(cfg Config) *Client {
 	return c
 }
 
-// GetCredentials returns (username, password, server-addr) suitable for a TURN
-// allocate, fetching from VK (with throttle + cache) only when needed.
+// GetCredentials возвращает (username, password, server-addr) для TURN-allocate,
+// обращаясь к VK (с throttle + кэшем) только при необходимости.
 func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) (string, string, string, error) {
 	cache := c.store.Get(streamID)
 	cacheID := c.store.CacheID(streamID)
@@ -142,9 +142,9 @@ func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) 
 	return user, pass, addr, nil
 }
 
-// HandleAuthError increments the auth-error counter for the stream's cache and
-// invalidates when the threshold is reached within the rolling window.
-// Returns true when the cache was invalidated.
+// HandleAuthError увеличивает счётчик ошибок аутентификации кэша потока и
+// инвалидирует кэш при достижении порога внутри скользящего окна.
+// Возвращает true при инвалидации.
 func (c *Client) HandleAuthError(streamID int) bool {
 	cache := c.store.Get(streamID)
 	cacheID := c.store.CacheID(streamID)
@@ -167,28 +167,27 @@ func (c *Client) HandleAuthError(streamID int) bool {
 	return false
 }
 
-// ResetErrors zeroes the auth-error counter (call on successful allocate).
+// ResetErrors обнуляет счётчик ошибок аутентификации (вызывать при успешном allocate).
 func (c *Client) ResetErrors(streamID int) {
 	c.store.Get(streamID).errorCount.Store(0)
 }
 
-// LockoutUntilUnix returns the unix-second deadline the global captcha lockout
-// is set to, or 0 when no lockout is active.
+// LockoutUntilUnix возвращает unix-секунду дедлайна глобальной блокировки captcha
+// или 0, если блокировки нет.
 func (c *Client) LockoutUntilUnix() int64 {
 	return c.lockout.Load()
 }
 
-// IsAuthError mirrors the package-level IsAuthError as a method so callers can
-// program against a small interface.
+// IsAuthError оборачивает пакетный IsAuthError как метод для работы через интерфейс.
 func (c *Client) IsAuthError(err error) bool { return IsAuthError(err) }
 
-// engageLockout arms the global captcha lockout for d from now.
+// engageLockout устанавливает глобальную блокировку captcha на d с момента вызова.
 func (c *Client) engageLockout(d time.Duration) {
 	c.lockout.Store(time.Now().Add(d).Unix())
 }
 
-// fetchSerialized enforces the 3s + jitter inter-request gap and then performs
-// the try-all-credentials fetch.
+// fetchSerialized соблюдает интервал 3s+jitter между запросами, затем
+// выполняет перебор всех credentials.
 func (c *Client) fetchSerialized(ctx context.Context, link string, streamID int) (string, string, []string, error) {
 	c.fetchMu.Lock()
 	defer c.fetchMu.Unlock()
@@ -208,7 +207,7 @@ func (c *Client) fetchSerialized(ctx context.Context, link string, streamID int)
 	return c.fetch(ctx, link, streamID)
 }
 
-// fetch loops over c.credentials, returning on first success or terminal error.
+// fetch перебирает c.credentials, возвращая первый успех или терминальную ошибку.
 func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, string, []string, error) {
 	if time.Now().Unix() < c.lockout.Load() {
 		return "", "", nil, fmt.Errorf("%w: %w", ErrCaptchaWaitRequired, ErrLockoutActive)

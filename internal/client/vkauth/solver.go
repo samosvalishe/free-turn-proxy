@@ -10,7 +10,7 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
-// CaptchaSolveMode selects between auto-solving and manual-browser fallback.
+// CaptchaSolveMode — выбор между автоматическим решением и ручным браузерным fallback.
 type CaptchaSolveMode int
 
 const (
@@ -18,8 +18,8 @@ const (
 	CaptchaSolveModeManual
 )
 
-// CaptchaSolveModeForAttempt picks the solver to use on a given retry attempt.
-// Returns (mode, true) when a mode is available, (_, false) when exhausted.
+// CaptchaSolveModeForAttempt выбирает решалку для конкретной попытки retry.
+// Возвращает (mode, true) если режим доступен, (_, false) если исчерпан.
 func CaptchaSolveModeForAttempt(attempt int, manualOnly bool) (CaptchaSolveMode, bool) {
 	if manualOnly {
 		return CaptchaSolveModeManual, attempt == 0
@@ -44,8 +44,8 @@ func CaptchaSolveModeLabel(mode CaptchaSolveMode) string {
 	}
 }
 
-// AutoSolveFunc returns a success_token for the captcha when solvable via the
-// in-page widget flow. Implementations must respect ctx cancellation.
+// AutoSolveFunc возвращает success_token для captcha через in-page widget flow.
+// Реализации обязаны соблюдать отмену ctx.
 type AutoSolveFunc func(
 	ctx context.Context,
 	captchaErr *captcha.Error,
@@ -54,9 +54,9 @@ type AutoSolveFunc func(
 	profile browserprofile.Profile,
 ) (token string, err error)
 
-// ManualSolveFunc opens the local browser-based fallback. Returns either a
-// success_token (token != "") or a captcha_key, depending on which path the
-// VK error exposed.
+// ManualSolveFunc открывает локальный браузерный fallback. Возвращает либо
+// success_token (token != ""), либо captcha_key — в зависимости от пути
+// ошибки VK.
 type ManualSolveFunc func(
 	ctx context.Context,
 	captchaErr *captcha.Error,

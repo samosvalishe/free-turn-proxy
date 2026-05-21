@@ -1,9 +1,8 @@
-// Package manual implements the manual CAPTCHA solving flow used as a
-// fallback when the auto solver (internal/client/captcha) fails or when
-// the user passes -manual-captcha. It runs a local HTTP server on
-// 127.0.0.1:8765 that proxies the VK CAPTCHA page (rewriting absolute
-// URLs and gzipping), opens it in the user's browser, and waits for the
-// token/key produced after the user completes the puzzle.
+// Package manual реализует ручное решение CAPTCHA — fallback, когда автосолвер
+// (internal/client/captcha) не справился или пользователь дал -manual-captcha.
+// Поднимает локальный HTTP-сервер 127.0.0.1:8765, проксирующий страницу VK
+// CAPTCHA (с переписыванием абсолютных URL и gzip), открывает её в браузере и
+// ждёт токен/ключ после решения пользователем.
 package manual
 
 import (
@@ -29,15 +28,15 @@ import (
 	"github.com/samosvalishe/btp/internal/logx"
 )
 
-// Debug toggles verbose request/response logging for the proxied browser
-// traffic. Set from main once cfg is parsed.
+// Debug включает подробное логирование request/response проксируемого
+// браузерного трафика. Ставится из main после разбора cfg.
 var Debug bool
 
-// Log is the package-level logger; defaults to no-op. main wires it via
-// SetLogger so manual-captcha output respects -debug and levels.
+// Log — пакетный логгер; по умолчанию no-op. main устанавливает его через
+// SetLogger, чтобы вывод подчинялся -debug.
 var Log logx.Logger = logx.Nop()
 
-// SetLogger installs a logger for this package.
+// SetLogger ставит логгер пакета.
 func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
 
 const captchaListenPort = "8765"
@@ -144,7 +143,7 @@ func rewriteProxyRequest(req *http.Request, targetURL *neturl.URL) {
 	req.Host = targetURL.Host
 
 	req.Header.Del("Accept-Encoding")
-	req.Header.Del("TE") // Disable transfer encoding compression
+	req.Header.Del("TE") // отключить transfer encoding compression
 	for _, h := range []string{
 		"X-Requested-With",
 		"X-Android-Package",
@@ -196,28 +195,21 @@ func rewriteProxyCookies(header http.Header) {
 	}
 }
 
-// htmlURLAttrDoubleRe matches src/href/action attributes with double-quoted absolute or protocol-relative URLs.
 var htmlURLAttrDoubleRe = regexp.MustCompile(`(?i)((?:src|href|action)\s*=\s*)"((?:https?:)?//[^"]+)"`)
-
-// htmlURLAttrSingleRe matches src/href/action attributes with single-quoted absolute or protocol-relative URLs.
 var htmlURLAttrSingleRe = regexp.MustCompile(`(?i)((?:src|href|action)\s*=\s*)'((?:https?:)?//[^']+)'`)
-
-// htmlScriptContentRe matches <script> tags to extract their content.
 var htmlScriptContentRe = regexp.MustCompile(`(?is)(<script[^>]*>)(.*?)(</script>)`)
-
-// htmlStyleContentRe matches <style> tags to extract their content.
 var htmlStyleContentRe = regexp.MustCompile(`(?is)(<style[^>]*>)(.*?)(</style>)`)
 
-// rewriteHTMLAttrsServerSide rewrites absolute and protocol-relative URLs in src/href/action
-// attributes of raw HTML. URLs matching the upstream origin are redirected to localhost;
-// all other absolute URLs are routed through /generic_proxy so that cross-domain resources
-// (st.vk.com, userapi.com, etc.) load correctly through the proxy.
+// rewriteHTMLAttrsServerSide переписывает абсолютные и protocol-relative URL
+// в src/href/action HTML на стороне сервера. URL, совпадающие с upstream origin,
+// идут на localhost; остальные — через /generic_proxy, чтобы cross-domain
+// ресурсы (st.vk.com, userapi.com и т.д.) грузились через прокси.
 func rewriteHTMLAttrsServerSide(html string, targetURL *neturl.URL) string {
 	localOrigin := localCaptchaOrigin()
 	upstreamOrigin := targetOrigin(targetURL)
 
 	rewriteURL := func(rawURL string) string {
-		// Normalise protocol-relative URL to absolute using the upstream scheme
+		// нормализовать protocol-relative URL в абсолютный по upstream scheme
 		absURL := rawURL
 		if strings.HasPrefix(rawURL, "//") {
 			absURL = targetURL.Scheme + ":" + rawURL
@@ -225,11 +217,10 @@ func rewriteHTMLAttrsServerSide(html string, targetURL *neturl.URL) string {
 		if strings.HasPrefix(absURL, upstreamOrigin) {
 			return localOrigin + absURL[len(upstreamOrigin):]
 		}
-		// Already points to local proxy — leave as-is
 		if strings.HasPrefix(absURL, localOrigin) {
 			return rawURL
 		}
-		// Any other absolute URL → route through generic_proxy
+		// прочие абсолютные URL → через generic_proxy
 		return "/generic_proxy?proxy_url=" + neturl.QueryEscape(absURL)
 	}
 
@@ -282,12 +273,12 @@ func rewriteCaptchaHTML(html string, targetURL *neturl.URL) string {
 	localOrigin := localCaptchaOrigin()
 	upstreamOrigin := targetOrigin(targetURL)
 
-	// Step 1: plain text replacement for the primary upstream origin
+	// Шаг 1: текстовая замена основного upstream origin
 	html = strings.ReplaceAll(html, upstreamOrigin, localOrigin)
 
-	// Step 2: rewrite all other absolute URLs in HTML attributes server-side.
-	// This is critical: the browser begins downloading <script src> / <link href> / <img src>
-	// resources immediately as it parses HTML — before any injected JS can intercept them.
+	// Шаг 2: серверный rewrite остальных абсолютных URL в HTML-атрибутах.
+	// Критично: браузер начинает грузить <script src> / <link href> / <img src>
+	// сразу при парсинге HTML — раньше любых инжектированных JS-перехватов.
 	html = rewriteHTMLAttrsServerSide(html, targetURL)
 
 	script := fmt.Sprintf(`
@@ -484,8 +475,8 @@ func rewriteCaptchaHTML(html string, targetURL *neturl.URL) string {
 </script>
 `, localOrigin, upstreamOrigin)
 
-	// Step 3: inject the client-side script as early as possible — at the opening <head> tag
-	// so that XHR/fetch overrides are active before any inline <script> block in <head> runs.
+	// Шаг 3: инжектируем клиентский скрипт как можно раньше — после <head>,
+	// чтобы XHR/fetch-перехваты были активны до любого inline <script> в <head>.
 	switch {
 	case strings.Contains(html, "<head>"):
 		return strings.Replace(html, "<head>", "<head>"+script, 1)
@@ -540,8 +531,8 @@ func startCaptchaServer(srv *http.Server, logPrefix string) error {
 	return fmt.Errorf("captcha listeners failed: %s", strings.Join(listenErrs, "; "))
 }
 
-// runCaptchaServerAndWait triggers the browser, and waiting gracefully for the solution token.
-// Returns ctx.Err() if ctx fires before a key arrives; in both cases the HTTP server is shut down.
+// runCaptchaServerAndWait открывает браузер и ждёт токен решения.
+// При срабатывании ctx возвращает ctx.Err(); в обоих случаях HTTP-сервер останавливается.
 func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaURL string, keyCh <-chan string, logPrefix string) (string, error) {
 	srv := &http.Server{Handler: handler}
 
@@ -550,8 +541,8 @@ func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaU
 	}
 
 	defer func() {
-		// Best-effort shutdown. On iSH SetDeadline is a no-op and Shutdown may
-		// time out while listeners drain; we still propagate the result.
+		// best-effort shutdown. На iSH SetDeadline — no-op, Shutdown может
+		// таймаутить при сливе listener'ов; результат всё равно прокидываем.
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer shutCancel()
 		if err := srv.Shutdown(shutCtx); err != nil {
@@ -577,7 +568,7 @@ func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaU
 	}
 }
 
-// notifyKey pushes the key string to the given channel without blocking
+// notifyKey пушит ключ в канал без блокировки.
 func notifyKey(keyCh chan<- string, key string) {
 	if key != "" {
 		select {
@@ -587,9 +578,8 @@ func notifyKey(keyCh chan<- string, key string) {
 	}
 }
 
-// SolveViaHTTP serves a tiny HTML page asking the user to solve the
-// pictured CAPTCHA, opens it in the browser, and blocks until the key
-// is posted back.
+// SolveViaHTTP отдаёт минимальную HTML-страницу для решения картинки CAPTCHA,
+// открывает её в браузере и блокируется до прихода ключа.
 func SolveViaHTTP(ctx context.Context, captchaImg string) (string, error) {
 	keyCh := make(chan string, 1)
 	mux := http.NewServeMux()
@@ -651,7 +641,7 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			device := parsedBody.Get("device")
 			browserFp := parsedBody.Get("browser_fp")
 
-			// We only save it if device is present. componentDone usually has it.
+			// сохраняем только если есть device. componentDone обычно его содержит.
 			if device != "" && browserFp != "" {
 				sp := browserprofile.Saved{
 					Profile: browserprofile.Profile{
@@ -674,10 +664,9 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return t.rt.RoundTrip(req)
 }
 
-// SolveViaProxy proxies the VK redirect_uri page through a local HTTP
-// server, rewriting absolute URLs so the browser stays on
-// 127.0.0.1:8765 throughout the puzzle, then returns the resulting
-// auth token.
+// SolveViaProxy проксирует VK redirect_uri через локальный HTTP-сервер,
+// переписывая абсолютные URL так, чтобы браузер всё время оставался на
+// 127.0.0.1:8765; возвращает результирующий auth-токен.
 func SolveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer) (string, error) {
 	keyCh := make(chan string, 1)
 
@@ -704,7 +693,7 @@ func SolveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer) (
 
 			if res.StatusCode >= 300 && res.StatusCode < 400 {
 				if loc := res.Header.Get("Location"); loc != "" {
-					// Don't log the full redirect URL to keep console clean
+					// не логируем полный redirect URL — шум в консоли
 					if rewritten, ok := rewriteProxyRedirectLocation(loc, targetURL); ok {
 						res.Header.Set("Location", rewritten)
 					} else {
@@ -809,8 +798,8 @@ func SolveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer) (
 				rewriteProxyRequest(req.Out, targetParsed)
 			},
 			ModifyResponse: func(res *http.Response) error {
-				// Strip security headers that can block cross-origin resource loading
-				// when static assets (JS/CSS) are served through the proxy.
+				// убираем security-заголовки, блокирующие cross-origin загрузку
+				// статики (JS/CSS) при проксировании.
 				for _, h := range []string{
 					"Content-Security-Policy",
 					"Content-Security-Policy-Report-Only",
@@ -824,13 +813,13 @@ func SolveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer) (
 				} {
 					res.Header.Del(h)
 				}
-				// Allow the browser to use the resource cross-origin
+				// разрешаем cross-origin доступ к ресурсу
 				res.Header.Set("Access-Control-Allow-Origin", "*")
 
-				// captchaNotRobot.check goes to api.vk.ru (different host from the main
-				// proxy upstream vk.com), so it is routed through /generic_proxy.
-				// Extract the success_token here so the server path works on iOS
-				// even if the browser-side JS callback never fires.
+				// captchaNotRobot.check уходит на api.vk.ru (другой хост, чем
+				// upstream vk.com), поэтому идёт через /generic_proxy. Извлекаем
+				// success_token здесь — серверный путь работает на iOS даже если
+				// JS-callback в браузере не сработал.
 				if strings.Contains(targetAuthURL, "captchaNotRobot.check") {
 					bodyBytes, readErr := io.ReadAll(res.Body)
 					if readErr == nil {
@@ -851,7 +840,7 @@ func SolveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer) (
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		Log.Debugf("[Captcha Proxy] HTTP %s %s", r.Method, r.URL.Path)
 		if r.URL.Path == "/" && targetURL.Path != "" && targetURL.Path != "/" && r.URL.RawQuery == "" {
-			// Don't log the full redirect URL to keep console clean
+			// не логируем полный redirect URL — шум в консоли
 			http.Redirect(w, r, localCaptchaURLForTarget(targetURL), http.StatusTemporaryRedirect)
 			return
 		}
@@ -872,11 +861,11 @@ func openBrowser(url string) {
 func browserOpenCommands(goos string, url string) []browserCommand {
 	switch goos {
 	case "windows":
-		// 'rundll32 url.dll,FileProtocolHandler' is more reliable than 'cmd /c start'
-		// because it doesn't involve the shell (cmd.exe), avoiding issues with '&' and other special characters.
+		// 'rundll32 url.dll,FileProtocolHandler' надёжнее 'cmd /c start' —
+		// не задействует shell (cmd.exe), нет проблем с '&' и спец-символами.
 		return []browserCommand{
 			{name: "rundll32", args: []string{"url.dll,FileProtocolHandler", url}},
-			// Fallback with empty title argument for 'start' to handle potential quoting issues
+			// fallback с пустым title для 'start' — обход проблем с кавычками
 			{name: "cmd", args: []string{"/c", "start", "", url}},
 		}
 	case "darwin":

@@ -13,8 +13,8 @@ import (
 	pionudp "github.com/pion/transport/v4/udp"
 )
 
-// bufPool eliminates per-packet heap allocation on the hot read/write paths
-// of the server-side wrapped PacketConn.
+// bufPool устраняет per-packet heap-аллокацию на горячих путях чтения/записи
+// серверного wrapped PacketConn.
 var bufPool = sync.Pool{
 	New: func() any {
 		b := make([]byte, 1600+Overhead)
@@ -22,7 +22,7 @@ var bufPool = sync.Pool{
 	},
 }
 
-// Listen returns a dtls PacketListener that AEAD-wraps every accepted PacketConn.
+// Listen возвращает dtls PacketListener, AEAD-оборачивающий каждый принятый PacketConn.
 func Listen(addr *net.UDPAddr, key []byte) (dtlsnet.PacketListener, error) {
 	state, err := NewState(key)
 	if err != nil {
@@ -58,8 +58,8 @@ func (l *packetListener) Accept() (net.PacketConn, net.Addr, error) {
 func (l *packetListener) Close() error   { return l.inner.Close() }
 func (l *packetListener) Addr() net.Addr { return l.inner.Addr() }
 
-// packetConn is a per-peer net.PacketConn that AEAD-wraps reads and writes
-// using bufPool to keep the hot path allocation-free.
+// packetConn — per-peer net.PacketConn, AEAD-оборачивающий чтение/запись
+// через bufPool для allocation-free горячего пути.
 type packetConn struct {
 	inner net.PacketConn
 	conn  *Conn

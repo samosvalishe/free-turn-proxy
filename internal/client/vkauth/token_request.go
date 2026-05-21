@@ -14,8 +14,8 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
-// doRequest sends a POST form request to url using the given tls client and
-// browser profile, and unmarshals the JSON response body.
+// doRequest отправляет POST form-запрос по url через tls-клиент с браузерным
+// профилем и десериализует JSON-тело ответа.
 func (c *Client) doRequest(ctx context.Context, httpClient tlsclient.HttpClient, profile browserprofile.Profile, data, url string) (map[string]any, error) {
 	parsedURL, err := neturl.Parse(url)
 	if err != nil {

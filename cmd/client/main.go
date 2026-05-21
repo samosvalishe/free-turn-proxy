@@ -25,8 +25,8 @@ import (
 	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 )
 
-// manualCaptchaSolver bridges the vkauth.ManualSolveFunc contract to the
-// local captcha bouncer (internal/client/captcha/manual).
+// manualCaptchaSolver связывает контракт vkauth.ManualSolveFunc
+// с локальным captcha-обработчиком (internal/client/captcha/manual).
 func manualCaptchaSolver(ctx context.Context, e *captcha.Error, d net.Dialer) (string, string, error) {
 	if e.RedirectURI != "" {
 		t, err := manualcaptcha.SolveViaProxy(ctx, e.RedirectURI, d)
@@ -42,7 +42,7 @@ func manualCaptchaSolver(ctx context.Context, e *captcha.Error, d net.Dialer) (s
 func main() {
 	cfg, err := config.ParseClient(os.Args[1:], os.Stderr)
 	if err != nil {
-		// logger not built yet — config parse failure is the only pre-logger fatal.
+		// логгер ещё не создан — единственный fatal до его инициализации.
 		log.Fatalf("%v", err)
 	}
 

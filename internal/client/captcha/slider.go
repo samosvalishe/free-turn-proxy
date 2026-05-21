@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	_ "image/jpeg" // register JPEG decoder for image.Decode
+	_ "image/jpeg" // регистрация JPEG-декодера для image.Decode
 	"math"
 	mathrand "math/rand"
 	"runtime"

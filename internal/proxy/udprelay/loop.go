@@ -17,11 +17,11 @@ import (
 	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 )
 
-// DTLSLoop keeps a single DTLS termination alive for streamID, restarting it
-// on failure with a 10-30s backoff (skipped while a captcha lockout is active
-// and the prior error was a deadline). connchan is fed a fresh AsyncPacketPipe
-// half on each attempt; okchan (non-nil only for stream 1) signals the first
-// successful handshake.
+// DTLSLoop поддерживает единственное DTLS-подключение для streamID, перезапуская
+// его при сбое с backoff 10-30s (пропускается при активной captcha-блокировке,
+// если предыдущая ошибка — дедлайн). connchan получает свежую половину
+// AsyncPacketPipe на каждой попытке; okchan (non-nil только для потока 1)
+// сигнализирует о первом успешном handshake.
 func DTLSLoop(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) {
 	for {
 		select {
@@ -29,9 +29,9 @@ func DTLSLoop(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net
 			return
 		default:
 			err := oneDTLS(ctx, deps, peer, listenConn, inboundChan, connchan, okchan, streamID)
-			// During captcha lockout the handshake deadline fires before
-			// auth retries can succeed; back off briefly to avoid a tight
-			// retry spin until the lockout clears.
+			// При captcha-блокировке дедлайн handshake срабатывает раньше,
+			// чем auth-retry успевает отработать; делаем краткий backoff,
+			// чтобы не крутиться в tight spin до снятия блокировки.
 			if err != nil && time.Now().Unix() < deps.Auth.LockoutUntilUnix() && errors.Is(err, context.DeadlineExceeded) {
 				select {
 				case <-ctx.Done():
@@ -51,9 +51,9 @@ func DTLSLoop(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net
 	}
 }
 
-// TURNLoop drives the TURN allocation half. It waits for a fresh conn2 from
-// the DTLS loop, throttles via t (the global 200ms tick), runs one TURN
-// session, and reacts to FATAL_CAPTCHA / CAPTCHA_WAIT_REQUIRED accordingly.
+// TURNLoop ведёт половину TURN-аллокации. Ждёт свежий conn2 от DTLS-цикла,
+// тормозит через t (глобальный тик 200ms), выполняет одну TURN-сессию
+// и реагирует на FATAL_CAPTCHA / CAPTCHA_WAIT_REQUIRED соответственно.
 func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, connchan <-chan net.PacketConn, t <-chan time.Time, streamID int) {
 	for {
 		select {
@@ -127,9 +127,8 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 	defer dtlscancel()
 
 	conn1, conn2 := connutil.AsyncPacketPipe()
-	// TURNLoop may restart oneTURN several times within a single DTLS lifetime,
-	// re-reading conn2 on each restart; keep publishing until the DTLS attempt
-	// itself ends.
+	// TURNLoop может перезапускать oneTURN несколько раз в рамках одного DTLS
+	// соединения, каждый раз перечитывая conn2; публикуем до завершения DTLS.
 	go func() {
 		for {
 			select {
@@ -230,8 +229,8 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	relayConn := stream.Relay
 	deps.log().Debugf("[STREAM %d] TURN server IP: %s", streamID, stream.ServerUDPAddr.IP)
 
-	// Increment before ResetErrors so concurrent HandleAuthError observers see
-	// the stream as connected before its error counter clears.
+	// Инкремент до ResetErrors — конкурентные наблюдатели HandleAuthError видят
+	// поток подключённым до сброса счётчика ошибок.
 	deps.ConnectedStreams.Add(1)
 	deps.Auth.ResetErrors(streamID)
 

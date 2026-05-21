@@ -10,9 +10,9 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
-// DefaultAutoSolve drives the in-page widget flow. It loads a saved real
-// browser profile when available so the captcha origin sees consistent
-// fingerprints across the page load and the solve POST.
+// DefaultAutoSolve запускает in-page widget flow. Загружает сохранённый профиль
+// браузера, если доступен, — капча видит стабильные fingerprints на этапе
+// загрузки страницы и POST-запроса.
 func DefaultAutoSolve(
 	ctx context.Context,
 	captchaErr *captcha.Error,

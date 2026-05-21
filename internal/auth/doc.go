@@ -1,23 +1,22 @@
-// Package auth defines the Authenticator interface and tenant identity types
-// for multi-tenant support.
+// Package auth определяет интерфейс Authenticator и типы идентификации тенантов
+// для multi-tenant конфигурации.
 //
-// # Current state
+// # Текущее состояние
 //
-// Only the scaffold is present. The [NopAuthenticator] is used everywhere and
-// returns [Anonymous], preserving existing single-tenant behaviour.
+// Реализован только каркас. Везде используется [NopAuthenticator] —
+// возвращает [Anonymous], сохраняя single-tenant поведение.
 //
-// # Planned multi-tenant flow
+// # Планируемый multi-tenant поток
 //
-//  1. A real Authenticator (e.g. HMACAuthenticator backed by SQLite) reads a
-//     short token from the first bytes of conn, validates it against a per-tenant
-//     shared secret, and returns the matching [TenantID].
-//  2. bondserver.Registry uses the TenantID as part of its de-duplication key so
-//     ConnIDs from different tenants never collide.
-//  3. tcpfwdserver and udpserver resolve connectAddr per-tenant, allowing each
-//     tenant to target a different backend.
-//  4. Deep-link provisioning delivers per-tenant secrets to mobile clients without
-//     manual configuration.
+//  1. Реальный Authenticator (например HMACAuthenticator поверх SQLite) читает
+//     короткий токен из первых байт conn, проверяет его против per-tenant
+//     общего секрета и возвращает соответствующий [TenantID].
+//  2. bondserver.Registry использует TenantID как часть ключа дедупликации —
+//     ConnID разных тенантов не пересекаются.
+//  3. tcpfwdserver и udpserver резолвят connectAddr per-tenant — каждый тенант
+//     указывает на свой backend.
+//  4. Deep-link provisioning доставляет per-tenant секреты мобильным клиентам
+//     без ручной настройки.
 //
-// None of the items above are implemented yet. See notes/AUTH_PLAN.md for the
-// detailed design.
+// Ничего из перечисленного пока не реализовано. См. notes/AUTH_PLAN.md.
 package auth

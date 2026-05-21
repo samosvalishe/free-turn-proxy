@@ -1,7 +1,7 @@
-// Package netconn holds small net.Conn / transport.Net adapters used by both
-// client and server: a passthrough transport.Net (for pion turn),
-// ConnectedUDPConn (Write-only WriteTo on a dialed UDPConn), and
-// SplitFirstWriteConn (DPI evasion via first-segment split).
+// Package netconn — мелкие net.Conn / transport.Net адаптеры для клиента
+// и сервера: passthrough transport.Net (для pion turn), ConnectedUDPConn
+// (WriteTo поверх dialed UDPConn) и SplitFirstWriteConn (обход DPI через
+// разбиение первого сегмента).
 package netconn
 
 import (
@@ -14,10 +14,10 @@ import (
 	"github.com/pion/transport/v4"
 )
 
-// DirectNet implements transport.Net by delegating to the std net package.
+// DirectNet реализует transport.Net через стандартный net.
 type DirectNet struct{}
 
-// New returns a transport.Net that delegates to the standard net package.
+// New возвращает transport.Net поверх стандартного net.
 func New() transport.Net {
 	return DirectNet{}
 }
@@ -110,22 +110,21 @@ func (l directTCPListener) AcceptTCP() (transport.TCPConn, error) {
 	return l.TCPListener.AcceptTCP()
 }
 
-// ConnectedUDPConn lets a dialed (connected) *net.UDPConn satisfy
-// net.PacketConn semantics: WriteTo ignores the destination since the kernel
-// already has it from connect().
+// ConnectedUDPConn адаптирует dialed (connected) *net.UDPConn к семантике
+// net.PacketConn: WriteTo игнорирует адрес, т.к. ядро уже знает его из connect().
 type ConnectedUDPConn struct {
 	*net.UDPConn
 }
 
-// WriteTo discards the addr (UDP is already connected) and writes p.
+// WriteTo игнорирует addr (UDP уже connected) и пишет p.
 func (c *ConnectedUDPConn) WriteTo(p []byte, _ net.Addr) (int, error) {
 	return c.Write(p)
 }
 
-// SplitFirstWriteConn wraps a TCP net.Conn and splits the very first Write
-// into two segments (SplitAt bytes + remainder) with an optional Delay between
-// them. This breaks DPI rules that match a fixed offset in the first segment
-// without TCP reassembly (e.g. the STUN magic cookie at offset 4-7).
+// SplitFirstWriteConn оборачивает TCP net.Conn и разбивает самый первый Write
+// на два сегмента (SplitAt байт + остаток) с опциональной паузой Delay между ними.
+// Ломает DPI-правила, матчащие фиксированный offset в первом сегменте без
+// TCP-реассемблинга (например STUN magic cookie на offset 4-7).
 type SplitFirstWriteConn struct {
 	net.Conn
 	SplitAt int
@@ -133,7 +132,7 @@ type SplitFirstWriteConn struct {
 	done    atomic.Bool
 }
 
-// Write performs the one-shot split on the first call, then forwards directly.
+// Write делает one-shot разбиение при первом вызове, далее проксирует напрямую.
 func (s *SplitFirstWriteConn) Write(b []byte) (int, error) {
 	if s.done.CompareAndSwap(false, true) && len(b) > s.SplitAt {
 		n1, err := s.Conn.Write(b[:s.SplitAt])

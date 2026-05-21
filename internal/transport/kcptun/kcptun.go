@@ -11,7 +11,7 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// Profile holds the tunable KCP parameters. Both sides of a tunnel must agree.
+// Profile — настраиваемые KCP-параметры. Обе стороны туннеля должны совпадать.
 type Profile struct {
 	NoDelay    int
 	Interval   int
@@ -23,13 +23,13 @@ type Profile struct {
 	ACKNoDelay bool
 }
 
-// FEC controls KCP forward-error-correction shards. Zero values disable FEC.
+// FEC управляет шардами KCP forward-error-correction. Нулевые значения отключают FEC.
 type FEC struct {
 	Data   int
 	Parity int
 }
 
-// DefaultProfile mirrors the historical balanced profile shipped with the proxy.
+// DefaultProfile — исторический balanced-профиль, поставляемый с прокси.
 func DefaultProfile() Profile {
 	return Profile{
 		NoDelay:    1,
@@ -43,8 +43,8 @@ func DefaultProfile() Profile {
 	}
 }
 
-// LoadProfileFromEnv reads VK_TURN_KCP_PROFILE and per-field VK_TURN_KCP_*
-// overrides. Unknown profile name → DefaultProfile.
+// LoadProfileFromEnv читает VK_TURN_KCP_PROFILE и per-field переопределения
+// VK_TURN_KCP_*. Неизвестное имя профиля → DefaultProfile.
 func LoadProfileFromEnv() Profile {
 	name := strings.ToLower(strings.TrimSpace(os.Getenv("VK_TURN_KCP_PROFILE")))
 	var p Profile
@@ -69,8 +69,8 @@ func LoadProfileFromEnv() Profile {
 	return p
 }
 
-// LoadFECFromEnv parses VK_TURN_KCP_FEC as "data:parity" (e.g. "10:3").
-// Empty/invalid → disabled.
+// LoadFECFromEnv парсит VK_TURN_KCP_FEC как "data:parity" (напр. "10:3").
+// Пустое/невалидное → отключено.
 func LoadFECFromEnv() FEC {
 	raw := strings.TrimSpace(os.Getenv("VK_TURN_KCP_FEC"))
 	if raw == "" {
@@ -112,8 +112,8 @@ func envBool(name string, fallback bool) bool {
 	}
 }
 
-// DtlsPacketConn wraps a net.Conn (DTLS) as a net.PacketConn for KCP.
-// Each DTLS Read/Write preserves message boundaries (datagram semantics).
+// DtlsPacketConn оборачивает net.Conn (DTLS) как net.PacketConn для KCP.
+// Каждый DTLS Read/Write сохраняет границы сообщений (datagram семантика).
 type DtlsPacketConn struct {
 	conn net.Conn
 }
@@ -151,12 +151,12 @@ func (d *DtlsPacketConn) SetWriteDeadline(t time.Time) error {
 	return d.conn.SetWriteDeadline(t)
 }
 
-// NewKCPOverDTLS creates a KCP session over a DTLS connection.
-// isServer: true for server-side (listener), false for client-side (dialer).
+// NewKCPOverDTLS создаёт KCP-сессию поверх DTLS-соединения.
+// isServer: true — серверная сторона (listener), false — клиентская (dialer).
 func NewKCPOverDTLS(dtlsConn net.Conn, isServer bool, profile Profile, fec FEC) (*kcp.UDPSession, error) {
 	pc := NewDtlsPacketConn(dtlsConn)
 
-	block, err := kcp.NewNoneBlockCrypt(nil) // DTLS already encrypts
+	block, err := kcp.NewNoneBlockCrypt(nil) // DTLS уже шифрует
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +193,7 @@ func NewKCPOverDTLS(dtlsConn net.Conn, isServer bool, profile Profile, fec FEC) 
 	return sess, nil
 }
 
-// DefaultSmuxConfig returns smux config tuned for TURN tunnel.
+// DefaultSmuxConfig возвращает smux-конфигурацию, настроенную под TURN-туннель.
 func DefaultSmuxConfig() *smux.Config {
 	cfg := smux.DefaultConfig()
 	cfg.MaxReceiveBuffer = 4 * 1024 * 1024
