@@ -9,11 +9,6 @@ if [ "${VLESS_MODE}" = "true" ]; then
     VLESS_FLAG="-vless"
 fi
 
-BOND_FLAG=""
-if [ "${VLESS_BOND}" = "true" ]; then
-    BOND_FLAG="-vless-bond"
-fi
-
 WRAP_FLAG=""
 WRAP_KEY_FLAG=""
 if [ "${WRAP_MODE}" = "true" ]; then
@@ -22,4 +17,9 @@ if [ "${WRAP_MODE}" = "true" ]; then
     WRAP_KEY_FLAG="-wrap-key $WRAP"
 fi
 
-exec ./vk-turn-proxy -listen "$LISTEN" -connect "$CONNECT" $VLESS_FLAG $BOND_FLAG $WRAP_FLAG $WRAP_KEY_FLAG
+DEBUG_FLAG=""
+if [ "${DEBUG}" = "true" ]; then
+    DEBUG_FLAG="-debug"
+fi
+
+exec ./server -listen "$LISTEN" -connect "$CONNECT" $VLESS_FLAG $WRAP_FLAG $WRAP_KEY_FLAG $DEBUG_FLAG
