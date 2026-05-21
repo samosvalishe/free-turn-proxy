@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/auth"
 	"github.com/samosvalishe/btp/internal/logx"
 	"github.com/samosvalishe/btp/internal/wire/bondframe"
 	"github.com/xtaci/smux"
@@ -39,40 +38,29 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-// connKey — составной ключ дедупликации для карты Registry.
-// TenantID в ключе гарантирует, что ConnID разных тенантов никогда не пересекаются
-// (обязательно для multi-tenant). В single-tenant режиме у всех ключей Tenant == auth.Anonymous.
-type connKey struct {
-	Tenant auth.TenantID
-	ConnID uint64
-}
-
-// Registry дедуплицирует одновременные lane с одинаковой парой (TenantID, ConnID)
+// Registry дедуплицирует одновременные lane с одинаковым ConnID
 // в одно backend TCP-соединение.
 type Registry struct {
 	deps Deps
 
 	mu    sync.Mutex
-	conns map[connKey]*serverConn
+	conns map[uint64]*serverConn
 }
 
 func NewRegistry(deps Deps) *Registry {
-	return &Registry{deps: deps, conns: make(map[connKey]*serverConn)}
+	return &Registry{deps: deps, conns: make(map[uint64]*serverConn)}
 }
 
 // HandleStreamAfterMagic принимает smux-поток, у которого первые 4 magic-байта
 // уже прочитаны (server-side multiplex pre-peek), читает Hello, прикрепляет
 // lane и блокируется до завершения bond-соединения.
-//
-// tenant ограничивает ключ дедупликации. В single-tenant — [auth.Anonymous];
-// в multi-tenant — значение от реального Authenticator.
-func (r *Registry) HandleStreamAfterMagic(ctx context.Context, tenant auth.TenantID, stream *smux.Stream, connectAddr string, magic [4]byte) {
-	r.handleStream(ctx, tenant, stream, connectAddr, func(rd io.Reader) (bondframe.Hello, error) {
+func (r *Registry) HandleStreamAfterMagic(ctx context.Context, stream *smux.Stream, connectAddr string, magic [4]byte) {
+	r.handleStream(ctx, stream, connectAddr, func(rd io.Reader) (bondframe.Hello, error) {
 		return bondframe.ReadHelloAfterMagic(rd, magic)
 	})
 }
 
-func (r *Registry) handleStream(ctx context.Context, tenant auth.TenantID, stream *smux.Stream, connectAddr string, readHello func(io.Reader) (bondframe.Hello, error)) {
+func (r *Registry) handleStream(ctx context.Context, stream *smux.Stream, connectAddr string, readHello func(io.Reader) (bondframe.Hello, error)) {
 	defer func() {
 		if err := stream.Close(); err != nil && !errors.Is(err, smux.ErrGoAway) {
 			r.deps.log().Errorf("bondserver: close smux stream: %v", err)
@@ -85,7 +73,7 @@ func (r *Registry) handleStream(ctx context.Context, tenant auth.TenantID, strea
 		return
 	}
 
-	conn := r.get(ctx, tenant, hello.ConnID, connectAddr)
+	conn := r.get(ctx, hello.ConnID, connectAddr)
 	conn.addLane(&serverLane{
 		index:  hello.LaneIndex,
 		stream: stream,
@@ -97,17 +85,15 @@ func (r *Registry) handleStream(ctx context.Context, tenant auth.TenantID, strea
 	}
 }
 
-func (r *Registry) get(ctx context.Context, tenant auth.TenantID, id uint64, connectAddr string) *serverConn {
+func (r *Registry) get(ctx context.Context, id uint64, connectAddr string) *serverConn {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	key := connKey{Tenant: tenant, ConnID: id}
-	if c := r.conns[key]; c != nil {
+	if c := r.conns[id]; c != nil {
 		return c
 	}
 	connCtx, cancel := context.WithCancel(ctx)
 	c := &serverConn{
 		deps:        &r.deps,
-		tenantID:    tenant,
 		id:          id,
 		connectAddr: connectAddr,
 		ctx:         connCtx,
@@ -116,12 +102,12 @@ func (r *Registry) get(ctx context.Context, tenant auth.TenantID, id uint64, con
 		ready:       make(chan struct{}, 1),
 		recvCh:      make(chan bondframe.Frame, 1024),
 	}
-	r.conns[key] = c
+	r.conns[id] = c
 	go func() {
 		<-c.done
 		r.mu.Lock()
-		if r.conns[key] == c {
-			delete(r.conns, key)
+		if r.conns[id] == c {
+			delete(r.conns, id)
 		}
 		r.mu.Unlock()
 	}()
@@ -136,7 +122,6 @@ type serverLane struct {
 
 type serverConn struct {
 	deps        *Deps
-	tenantID    auth.TenantID
 	id          uint64
 	connectAddr string
 	ctx         context.Context

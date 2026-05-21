@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/auth"
 	"github.com/samosvalishe/btp/internal/wire/bondframe"
 )
 
@@ -252,19 +251,17 @@ func TestRegistryGetDedup(t *testing.T) {
 	r := NewRegistry(Deps{})
 	ctx := t.Context()
 
-	c1 := r.get(ctx, auth.Anonymous, 7, "127.0.0.1:1")
-	c2 := r.get(ctx, auth.Anonymous, 7, "127.0.0.1:1")
+	c1 := r.get(ctx, 7, "127.0.0.1:1")
+	c2 := r.get(ctx, 7, "127.0.0.1:1")
 	if c1 != c2 {
 		t.Fatal("expected same conn for same id")
 	}
 
 	close(c1.done)
-	// give the cleanup goroutine a chance to run
-	key := connKey{Tenant: auth.Anonymous, ConnID: 7}
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		r.mu.Lock()
-		_, ok := r.conns[key]
+		_, ok := r.conns[7]
 		r.mu.Unlock()
 		if !ok {
 			return
@@ -272,23 +269,4 @@ func TestRegistryGetDedup(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("registry did not drop conn after done")
-}
-
-// TestRegistryTenantIsolation ensures that the same ConnID under different
-// tenant scopes resolves to distinct serverConn instances. Guards against a
-// regression where the map key reverts to plain uint64.
-func TestRegistryTenantIsolation(t *testing.T) {
-	r := NewRegistry(Deps{})
-	ctx := t.Context()
-
-	ca := r.get(ctx, auth.TenantID("A"), 7, "127.0.0.1:1")
-	cb := r.get(ctx, auth.TenantID("B"), 7, "127.0.0.1:1")
-	if ca == cb {
-		t.Fatal("expected distinct conns for different tenants on same ConnID")
-	}
-	if ca.tenantID != auth.TenantID("A") || cb.tenantID != auth.TenantID("B") {
-		t.Fatalf("tenantID mismatch: ca=%q cb=%q", ca.tenantID, cb.tenantID)
-	}
-	close(ca.done)
-	close(cb.done)
 }

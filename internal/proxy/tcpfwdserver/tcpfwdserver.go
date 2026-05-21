@@ -11,7 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/auth"
 	"github.com/samosvalishe/btp/internal/logx"
 	"github.com/samosvalishe/btp/internal/netconn"
 	"github.com/samosvalishe/btp/internal/proxy/bondserver"
@@ -91,7 +90,7 @@ func handleStream(ctx context.Context, logger logx.Logger, registry *bondserver.
 	}
 	if string(prefix[:]) == bondframe.Magic {
 		logger.Debugf("auto-detected bond smux stream")
-		registry.HandleStreamAfterMagic(ctx, auth.Anonymous, s, connectAddr, prefix)
+		registry.HandleStreamAfterMagic(ctx, s, connectAddr, prefix)
 		return
 	}
 
