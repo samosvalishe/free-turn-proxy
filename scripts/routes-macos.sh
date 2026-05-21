@@ -1,4 +1,5 @@
 #!/bin/zsh
+# Usage: ./client -debug ... 2>&1 | ./scripts/routes-macos.sh
 set -u
 
 default_info="$(route -n get default 2>/dev/null || true)"
@@ -18,11 +19,9 @@ fi
 while IFS= read -r line; do
   line="${line//$'\r'/}"
 
-  # Try to extract:
-  # - plain IPv4
-  # - IPv4/CIDR
-  # - relayed-address=IPv4:port  -> use only IPv4
   remote="$(printf '%s\n' "$line" | sed -nE '
+    s/.*TURN server IP: (([0-9]{1,3}\.){3}[0-9]{1,3}).*/\1/p
+    t done
     s/.*relayed-address=(([0-9]{1,3}\.){3}[0-9]{1,3}):[0-9]+.*/\1/p
     t done
     s/^(([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2})$/\1/p
