@@ -31,14 +31,14 @@ WireGuard забирает весь трафик, включая трафик к
 ```bash
 curl -L -o client https://github.com/samosvalishe/btp/releases/latest/download/client-linux-amd64
 chmod +x client
-./client -listen 127.0.0.1:9000 -peer <vps>:56000 -vk-link "<vk-link>" -debug 2>&1 | ./scripts/routes.sh
+./client -listen 127.0.0.1:9000 -peer <vps>:56000 -link "<vk-link>" -debug 2>&1 | ./scripts/routes.sh
 ```
 
 **Windows (PowerShell от администратора):**
 
 ```powershell
 Invoke-WebRequest -Uri https://github.com/samosvalishe/btp/releases/latest/download/client-windows-amd64.exe -OutFile client.exe
-.\client.exe -listen 127.0.0.1:9000 -peer <vps>:56000 -vk-link "<vk-link>" -debug 2>&1 | .\scripts\routes.ps1
+.\client.exe -listen 127.0.0.1:9000 -peer <vps>:56000 -link "<vk-link>" -debug 2>&1 | .\scripts\routes.ps1
 ```
 
 **macOS:**
@@ -46,7 +46,7 @@ Invoke-WebRequest -Uri https://github.com/samosvalishe/btp/releases/latest/downl
 ```bash
 curl -L -o client https://github.com/samosvalishe/btp/releases/latest/download/client-darwin-arm64
 chmod +x client
-./client -listen 127.0.0.1:9000 -peer <vps>:56000 -vk-link "<vk-link>" -debug 2>&1 | ./scripts/routes-macos.sh
+./client -listen 127.0.0.1:9000 -peer <vps>:56000 -link "<vk-link>" -debug 2>&1 | ./scripts/routes-macos.sh
 ```
 
 Когда скрипт напечатает `Ensuring route to ...` — включайте WireGuard.

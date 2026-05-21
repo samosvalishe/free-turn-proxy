@@ -9,9 +9,9 @@
 ```
 backend (WireGuard UDP | TCP service)
   ↑
-[app proxy mode]                  ← UDP-relay   |  TCP-forward (vless)  |  TCP-forward+bond
+[app proxy mode]                  ← UDP-relay (-mode udp)  |  TCP-forward (-mode tcp)  |  TCP-forward+bond (-mode tcp -bond)
   ↑
-[wrap / SRTP-mimicry]   (optional, AEAD obfuscation поверх payload)
+[srtpmimicry]           (optional, AEAD обфускация поверх payload)
   ↑
 [DTLS]                  ← обфускация (не security): VK content-filter ожидает DTLS handshake
   ↑
@@ -30,19 +30,19 @@ client ←→ VK TURN-relay
 Standard relay protocol (RFC 5766/8656). VK выдаёт креды на свои TURN-реле. Мы используем эти реле как транзит к собственному серверу. Транспорт до TURN выбирается флагом `-udp` (UDP/TCP).
 
 ### DTLS — это **обфускация, не security**
-VK content-filter дропает payload, который не похож на legit DTLS-handshake. Мы используем `pion/dtls` чтобы пройти фильтр. Шифрование DTLS — побочный эффект, не цель. Флаг `-no-dtls` был помечен DO NOT USE и удалён в V2-0 (в проде не работал).
+VK content-filter дропает payload, который не похож на legit DTLS-handshake. Мы используем `pion/dtls` чтобы пройти фильтр. Шифрование DTLS — побочный эффект, не цель.
 
-### wrap / SRTP-mimicry
-Внутреннее имя пакета — `wrap` (планируется переименование в `srtpmimicry` на V2-4). CLI флаг `-wrap`. Это **ChaCha20-Poly1305 AEAD** с RTP-like wire-header (mimicry). Включается опционально поверх DTLS — даёт дополнительный слой обфускации с RTP-видимостью на проводе. CLI help говорит «ChaCha20-XOR» — **врёт**, реально AEAD. Не путать с Go-термином wrap (`errors.Wrap`).
+### srtpmimicry
+Пакет `internal/wire/srtpmimicry`. CLI флаг `-obf`. Это **ChaCha20-Poly1305 AEAD** с RTP-like wire-header (mimicry). Включается опционально поверх DTLS — даёт дополнительный слой обфускации с RTP-видимостью на проводе. Не путать с Go-термином wrap (`errors.Wrap`).
 
 ### app proxy mode (3 значения)
 Что копируется поверх DTLS:
-- **UDP-relay** (default): UDP-пакеты 1-в-1. Для WireGuard.
-- **TCP-forward** (`-vless`): TCP-байты в smux-стрим, на сервере `net.Dial("tcp", backend)`. Generic, имя историческое (первый потребитель — Xray VLESS). Внутренний кандидат имени: `tcpfwd`.
-- **TCP-forward + bond** (`-vless-bond` на клиенте): один TCP-коннект страйпится по N smux-сессиям. Сервер автоопределяет по magic первых байтов (`bond-autodetect=true`). Серверный флаг `-vless-bond` удалён в V2-0 как избыточный.
+- **UDP-relay** (`-mode udp`, default): UDP-пакеты 1-в-1. Для WireGuard.
+- **TCP-forward** (`-mode tcp`): TCP-байты в smux-стрим, на сервере `net.Dial("tcp", backend)`. Для Xray/sing-box. Пакет `internal/proxy/tcpfwd`.
+- **TCP-forward + bond** (`-mode tcp -bond` на клиенте): один TCP-коннект страйпится по N smux-сессиям. Сервер автоопределяет по magic первых байтов (`bond-autodetect=true`).
 
 ### bond
-Опция TCP-forward режима. Не отдельная подсистема — feature `vless`. Wire-формат: magic + frame с seq/type/data. Кодек в `internal/bond`, клиент-handler в `internal/bond/client`, сервер-registry в `internal/bond/server` (планируется переезд в `internal/proxy/bond{client,server}` на V2-4).
+Опция TCP-forward режима (`-mode tcp -bond`). Wire-формат: magic + frame с seq/type/data. Кодек в `internal/wire/bondframe`, клиент-handler в `internal/proxy/bondclient`, сервер-registry в `internal/proxy/bondserver`.
 
 ### TURN stream
 Одна из N TURN-connection'ов клиента. Флаг `-n` (default 10). Каждый stream = отдельный TURN-allocate + DTLS-session. Не путать с smux stream.
@@ -62,43 +62,37 @@ VK content-filter дропает payload, который не похож на le
 При чтении кода держи контекст.
 
 ### VLESS
-Имя проксирующего протокола Xray. **Внутри этого репо** означает только «TCP-forwarder режим». Никакой VLESS-логики в коде нет — мы просто гоним TCP-байты. Имя историческое; внутреннее переименование в `tcpfwd` запланировано на V2-4 (CLI флаг `-vless` остаётся).
+Имя проксирующего протокола Xray. В коде нет VLESS-логики — просто TCP-форвардер. CLI флаг: `-mode tcp`. Внутренний пакет: `tcpfwd`.
 
 ### iSH
-Linux user-mode environment для iOS (через usermode x86 emulation). Пакет `internal/ish` — listener shim вокруг iOS sandbox-ограничений. Только клиент-only; переедет в `internal/client/ish` на V2-4.
+Linux user-mode environment для iOS (через usermode x86 emulation). Пакет `internal/client/ish` — listener shim вокруг iOS sandbox-ограничений. Только клиент-only.
 
-### tcputil
-Top-level пакет с **KCP/smux**-профилями. Имя врёт (никакого TCP внутри). Запланировано переименование в `internal/transport/kcptun` на V2-4.
+### kcptun
+Пакет `internal/transport/kcptun` с KCP/smux-профилями. Используется только в TCP-forward режиме.
 
-### turnpipe
-Пакет с TURN dial + allocate. Имя `pipe` создаёт коллизию с `pipeConn` (bidi data-copy loop в server). Переедет в `internal/transport/turndial` на V2-4.
+### turndial
+Пакет `internal/transport/turndial` — TURN dial + allocate.
 
-### netadapt
-Conn wrappers (DirectNet, ConnectedUDPConn, SplitFirstWriteConn). Имя не отражает суть — переедет в `internal/netconn` на V2-4.
+### netconn
+Пакет `internal/netconn` — Conn wrappers (DirectNet, ConnectedUDPConn, SplitFirstWriteConn).
 
 ### Mode (5 разных в CLI)
 Все ортогональны:
-- `-udp` — TURN transport (UDP|TCP к TURN).
-- `-vless` — app proxy mode (UDP-relay|TCP-forward).
-- `-vless-bond` — внутри TCP-forward (только client).
-- `-wrap` — wrap-обфускация (off|SRTP-mimicry).
-- `-dns` — DNS resolver (udp|doh|auto).
+- `-transport tcp|udp` — транспорт до TURN (TCP/TLS или UDP).
+- `-mode udp|tcp` — app proxy mode (UDP-relay|TCP-forward).
+- `-bond` — bonding внутри TCP-forward (только client).
+- `-obf` — srtpmimicry-обфускация.
+- `-dns-mode` — транспорт резолвера клиента (plain|doh|auto).
 
 ### captcha (auto / manual)
 Один домен, два пути:
-- **auto** (`internal/client/captcha`): VK slider-puzzle решается программно через `client/internal/captcha`.
-- **manual** (пока в `cmd/client/manual_captcha.go`, package main): HTTP-сервер на 127.0.0.1:8765, запуск браузера, gzip-rewrite VK-страниц. Запланирован вынос в `internal/client/captcha/manual` на V2-2.
+- **auto** (`internal/client/captcha`): VK slider-puzzle решается программно.
+- **manual** (`internal/client/captcha/manual`): HTTP-сервер на 127.0.0.1:8765, запуск браузера, gzip-rewrite VK-страниц.
 
 Переключение: `vkauth.Client` пробует auto, при провале → manual fallback. Флаг `-manual-captcha` сразу идёт в manual.
 
 ### libvkturn.so
 Мобильная (Android) сборка клиента в виде shared library. Собирается **вручную** разработчиком и переносится в Android-приложение. CI не строит. Внешних `//export`-функций нет — `package main` ← buildmode определяется на стороне разработчика.
 
-### globalBondRegistry
-Server-side глобал, держит активные bond-сессии. Инициализируется на package init — известная фрагильность (`isDebug` ещё false), работает только потому что bondserver `Debug`-поле не читается. Переедет в локальную переменную `cmd/server/main.go` на V2-3.
-
-### `-no-dtls` (УДАЛЕНО)
-Был помечен DO NOT USE — в проде не работал, VK content-filter дропает payload без DTLS-handshake. Удалён в V2-0.
-
-### `-vless-bond` на сервере (УДАЛЕНО)
-Сервер автоопределяет bond по magic первых байтов. Флаг был избыточен, удалён в V2-0. На клиенте — остаётся.
+### `-bond` на сервере
+Серверного `-bond` нет — сервер автоопределяет bond по magic первых байтов в стриме. Только клиентский флаг.

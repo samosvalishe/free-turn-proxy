@@ -10,7 +10,7 @@ docker compose logs -f
 
 По умолчанию: WireGuard backend `127.0.0.1:51820`, host network, порт `56000/udp`.
 
-Для VLESS/Xray раскомментируйте `VLESS_MODE: "true"` и смените `CONNECT_ADDR` на `127.0.0.1:443`.
+Для Xray/sing-box: `MODE=tcp` и смените `CONNECT_ADDR` на `127.0.0.1:443`. Для SRTP-мимикрии: `OBF_MODE=true` и `OBF_KEY=<64-hex>`.
 
 ## Docker Run
 
@@ -38,12 +38,10 @@ docker run -d --name btp -p 56000:56000/udp --restart unless-stopped \
 | --- | --- | --- |
 | `CONNECT_ADDR` | **обязательна** | backend сервера |
 | `LISTEN_ADDR` | `0.0.0.0:56000` | адрес прослушивания |
-| `VLESS_MODE` | `false` | включает `-vless` |
-| `WRAP_MODE` | `false` | включает `-wrap` |
-| `WRAP_KEY` | пусто | значение `-wrap-key` |
+| `MODE` | `udp` | режим туннеля: `udp` \| `tcp` |
+| `OBF_MODE` | `false` | включает `-obf` |
+| `OBF_KEY` | пусто | значение `-obf-key` |
 | `DEBUG` | `false` | включает `-debug` |
-| `VK_TURN_KCP_PROFILE` | `balanced` | профиль KCP: `fast` \| `balanced` \| `slow` |
-| `VK_TURN_KCP_FEC` | `0:0` | Reed-Solomon FEC: `data:parity` (напр. `10:3`) |
 
 Сборка образа:
 
