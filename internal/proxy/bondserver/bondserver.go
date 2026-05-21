@@ -151,10 +151,10 @@ func (c *serverConn) addLane(l *serverLane, laneCount uint16) {
 	default:
 	}
 
-	go c.readLane(l)
 	c.once.Do(func() {
 		go c.run()
 	})
+	go c.readLane(l)
 }
 
 func (c *serverConn) snapshotLanes() []*serverLane {
@@ -207,7 +207,7 @@ func (c *serverConn) readLane(l *serverLane) {
 			select {
 			case <-c.ctx.Done():
 			default:
-				if err != io.EOF {
+				if !errors.Is(err, io.EOF) {
 					c.deps.log().Debugf("[bond %d] lane %d read error: %v (lanes=%d)", c.id, l.index, err, left)
 				}
 				if left == 0 {

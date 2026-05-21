@@ -25,6 +25,8 @@ import (
 	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 )
 
+const dtlsHandshakeConcurrency = 3
+
 // manualCaptchaSolver связывает контракт vkauth.ManualSolveFunc
 // с локальным captcha-обработчиком (internal/client/captcha/manual).
 func manualCaptchaSolver(ctx context.Context, e *captcha.Error, d net.Dialer) (string, string, error) {
@@ -107,7 +109,7 @@ func main() {
 	if cfg.Proxy.Mode != config.ProxyModeUDP {
 		tcpDtlsDialer := &dtlsdial.Dialer{
 			HandshakeTimeout: 30 * time.Second,
-			HandshakeSem:     make(chan struct{}, 3),
+			HandshakeSem:     make(chan struct{}, dtlsHandshakeConcurrency),
 		}
 		bondH := &bondclient.Handler{Deps: bondclient.Deps{Log: logger}}
 		tcpDeps := &tcpfwd.Deps{
@@ -134,7 +136,7 @@ func main() {
 
 	udpDtlsDialer := &dtlsdial.Dialer{
 		HandshakeTimeout: 20 * time.Second,
-		HandshakeSem:     make(chan struct{}, 3),
+		HandshakeSem:     make(chan struct{}, dtlsHandshakeConcurrency),
 	}
 	udpParams := &udprelay.Params{
 		Host:     cfg.TURN.Host,

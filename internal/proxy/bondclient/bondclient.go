@@ -6,6 +6,7 @@ package bondclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -129,7 +130,7 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 					select {
 					case <-ctx.Done():
 					default:
-						if err != io.EOF {
+						if !errors.Is(err, io.EOF) {
 							h.Deps.log().Debugf("[bond %d] session %d read frame error: %v", connID, l.ps.ID, err)
 						}
 					}
@@ -178,7 +179,7 @@ func (h *Handler) copyTCPToBond(ctx context.Context, connID uint64, tcpConn net.
 			seq++
 		}
 		if err != nil {
-			if err != io.EOF {
+			if !errors.Is(err, io.EOF) {
 				h.Deps.log().Debugf("[bond %d] local TCP read finished with error: %v", connID, err)
 			}
 			for _, l := range lanes {

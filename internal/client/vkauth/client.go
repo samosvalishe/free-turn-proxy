@@ -237,7 +237,12 @@ func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, 
 	return "", "", nil, fmt.Errorf("all VK credentials failed: %w", lastErr)
 }
 
-func vkDelayRandom(minMs, maxMs int) {
+func vkDelayRandom(ctx context.Context, minMs, maxMs int) error {
 	ms := minMs + rand.Intn(maxMs-minMs+1)
-	time.Sleep(time.Duration(ms) * time.Millisecond)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(time.Duration(ms) * time.Millisecond):
+		return nil
+	}
 }

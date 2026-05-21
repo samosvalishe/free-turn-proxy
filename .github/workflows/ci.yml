@@ -27,8 +27,7 @@ jobs:
         with:
           path: |
             ~/.cache/go-build
-            # Module cache
-            ${{ github.workspace }}/pkg/mod
+            ~/go/pkg/mod
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
@@ -54,7 +53,7 @@ jobs:
 
       - name: Run tests
         run: |
-          go test ./... -v
+          go test -race ./... -v
           
   build:
     name: Build binaries

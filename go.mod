@@ -1,6 +1,6 @@
 module github.com/samosvalishe/btp
 
-go 1.25.5
+go 1.25.0
 
 require (
 	github.com/bogdanfinn/fhttp v0.6.8

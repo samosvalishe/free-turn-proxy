@@ -1,6 +1,6 @@
 # Сборка
 
-Нужен Go 1.25.x.
+Нужен Go 1.24.x.
 
 ```bash
 go build -o client ./cmd/client
@@ -44,3 +44,33 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -checklinkname=0"
 ```
 
 > Все `.so` выше — обычные ELF под `.so`-именем (`CGO_ENABLED=0`, не настоящий shared library). Настоящий `c-shared` — `CGO_ENABLED=1` + NDK toolchain (см. `.github/workflows/release.yml`).
+
+**Windows amd64:**
+
+```powershell
+$env:GOOS="windows"; $env:GOARCH="amd64"; $env:CGO_ENABLED="0"
+go build -ldflags="-s -w -checklinkname=0" -trimpath -o client-windows-amd64.exe ./cmd/client
+go build -ldflags="-s -w -checklinkname=0" -trimpath -o server-windows-amd64.exe ./cmd/server
+```
+
+**Windows arm64:**
+
+```powershell
+$env:GOOS="windows"; $env:GOARCH="arm64"; $env:CGO_ENABLED="0"
+go build -ldflags="-s -w -checklinkname=0" -trimpath -o client-windows-arm64.exe ./cmd/client
+go build -ldflags="-s -w -checklinkname=0" -trimpath -o server-windows-arm64.exe ./cmd/server
+```
+
+**macOS amd64 (Intel):**
+
+```bash
+GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o client-darwin-amd64 ./cmd/client
+GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o server-darwin-amd64 ./cmd/server
+```
+
+**macOS arm64 (Apple Silicon):**
+
+```bash
+GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o client-darwin-arm64 ./cmd/client
+GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o server-darwin-arm64 ./cmd/server
+```

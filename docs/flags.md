@@ -10,7 +10,7 @@
 | `-n` | `10` | параллельных TURN-потоков |
 | `-transport` | `tcp` | транспорт до TURN-реле: `tcp` (TCP/TLS) \| `udp` |
 | `-mode` | `udp` | режим туннеля: `udp` (UDP-релей для WireGuard) \| `tcp` (TCP-форвардер для Xray/sing-box) |
-| `-bond` | `false` | распределять TCP-соединение по smux-сессиям (только с `-mode tcp`) |
+| `-bond` | `false` | распределять одно TCP-соединение по всем активным smux-сессиям (только с `-mode tcp`) |
 | `-turn` | из ссылки | переопределить IP TURN-сервера |
 | `-port` | из ссылки | переопределить порт TURN-сервера |
 | `-obf` | `false` | SRTP-мимикрия payload |

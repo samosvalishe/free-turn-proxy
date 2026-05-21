@@ -65,6 +65,20 @@ func localCaptchaHosts() []string {
 	}
 }
 
+func isAllowedProxyHost(hostname string) bool {
+	allowed := []string{
+		".vk.com", ".vk.ru", ".vkontakte.ru",
+		".userapi.com", ".okcdn.ru", ".mycdn.me",
+		".api.vk.ru",
+	}
+	for _, suffix := range allowed {
+		if strings.HasSuffix(hostname, suffix) || hostname == suffix[1:] {
+			return true
+		}
+	}
+	return false
+}
+
 func isLocalCaptchaHost(host string) bool {
 	for _, localHost := range localCaptchaHosts() {
 		if strings.EqualFold(host, localHost) {
@@ -788,6 +802,10 @@ func SolveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer) (
 		targetParsed, err := neturl.Parse(targetAuthURL)
 		if err != nil || targetParsed.Host == "" {
 			http.Error(w, "Bad URL", http.StatusBadRequest)
+			return
+		}
+		if !isAllowedProxyHost(targetParsed.Hostname()) {
+			http.Error(w, "Forbidden host", http.StatusForbidden)
 			return
 		}
 		genericReverse := &httputil.ReverseProxy{

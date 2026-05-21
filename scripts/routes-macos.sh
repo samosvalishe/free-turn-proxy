@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Usage: ./client -debug ... 2>&1 | ./scripts/routes-macos.sh
-set -u
+set -eu
 
 default_info="$(route -n get default 2>/dev/null || true)"
 default_if="$(printf '%s\n' "$default_info" | awk '/interface:/{print $2; exit}')"

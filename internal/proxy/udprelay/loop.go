@@ -127,6 +127,8 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 	defer dtlscancel()
 
 	conn1, conn2 := connutil.AsyncPacketPipe()
+	defer conn1.Close()
+	defer conn2.Close()
 	// TURNLoop может перезапускать oneTURN несколько раз в рамках одного DTLS
 	// соединения, каждый раз перечитывая conn2; публикуем до завершения DTLS.
 	go func() {
@@ -177,6 +179,7 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 				_, werr := dtlsConn.Write(pkt.Data[:pkt.N])
 				packetPool.Put(pkt)
 				if werr != nil {
+					deps.log().Debugf("[STREAM %d] DTLS write error: %v", streamID, werr)
 					return
 				}
 			}

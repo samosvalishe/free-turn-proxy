@@ -44,7 +44,9 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 		return "", "", nil, err
 	}
 
-	vkDelayRandom(100, 150)
+	if err := vkDelayRandom(ctx, 100, 150); err != nil {
+		return "", "", nil, err
+	}
 
 	// Шаг 1a: прогрев getCallPreview (не критично).
 	previewData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&fields=photo_200&access_token=%s", link, token1)
@@ -53,7 +55,9 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 		c.log.Warnf("[STREAM %d] [VK Auth] getCallPreview failed: %v", streamID, prevErr)
 	}
 
-	vkDelayRandom(200, 400)
+	if err := vkDelayRandom(ctx, 200, 400); err != nil {
+		return "", "", nil, err
+	}
 
 	// Шаг 2: анонимный call-токен (здесь может сработать captcha).
 	token2, err := c.fetchCallToken(ctx, httpClient, profile, streamID, link, escapedName, token1, creds)
@@ -61,7 +65,9 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 		return "", "", nil, err
 	}
 
-	vkDelayRandom(100, 150)
+	if err := vkDelayRandom(ctx, 100, 150); err != nil {
+		return "", "", nil, err
+	}
 
 	// Шаг 3: ok.ru session_key.
 	sessionKey, err := c.fetchOkRuSession(ctx, httpClient, profile)
@@ -69,7 +75,9 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 		return "", "", nil, err
 	}
 
-	vkDelayRandom(100, 150)
+	if err := vkDelayRandom(ctx, 100, 150); err != nil {
+		return "", "", nil, err
+	}
 
 	// Шаг 4: TURN-реквизиты.
 	return c.fetchTurnCreds(ctx, httpClient, profile, streamID, link, token2, sessionKey)

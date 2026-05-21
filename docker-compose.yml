@@ -4,11 +4,16 @@ services:
     # build: .
     network_mode: host
     restart: unless-stopped
+    # Секретные переменные (OBF_KEY) храните в .env рядом с этим файлом,
+    # а не здесь. Пример: echo "OBF_KEY=<64hex>" >> .env
+    env_file:
+      - path: .env
+        required: false
     environment:
       # Backend address: WireGuard → 127.0.0.1:51820 | Xray/sing-box → 127.0.0.1:443
       CONNECT_ADDR: "127.0.0.1:51820"
       # LISTEN_ADDR: "0.0.0.0:56000"
       # MODE: "tcp"           # tcp = TCP-форвардер для Xray/sing-box; default udp = WireGuard
       # OBF_MODE: "true"
-      # OBF_KEY: ""           # 64 hex chars; required when OBF_MODE=true
+      # OBF_KEY задаётся в .env (не коммитьте ключ в git)
       # DEBUG: "false"

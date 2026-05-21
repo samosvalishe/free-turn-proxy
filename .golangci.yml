@@ -13,6 +13,8 @@ linters:
     - unparam
     - gocritic
     - prealloc
+    - gosec
+    - staticcheck
   settings:
     errcheck:
       check-type-assertions: true

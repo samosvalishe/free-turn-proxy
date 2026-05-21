@@ -2,4 +2,10 @@
 .claude
 *.exe
 *.so
+*.tmp
 *.tmp.*
+/dist/
+/build/
+*.test
+coverage.out
+.env

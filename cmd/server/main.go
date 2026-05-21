@@ -96,7 +96,7 @@ func main() {
 		os.Exit(1)
 	}
 	context.AfterFunc(ctx, func() {
-		if err = listener.Close(); err != nil {
+		if err := listener.Close(); err != nil {
 			logger.Errorf("listener close: %v", err)
 		}
 	})

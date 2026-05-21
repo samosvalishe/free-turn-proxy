@@ -41,10 +41,18 @@ Invoke-WebRequest -Uri https://github.com/samosvalishe/btp/releases/latest/downl
 .\client.exe -listen 127.0.0.1:9000 -peer <vps>:56000 -link "<vk-link>" -debug 2>&1 | .\scripts\routes.ps1
 ```
 
-**macOS:**
+**macOS (Apple Silicon / ARM):**
 
 ```bash
 curl -L -o client https://github.com/samosvalishe/btp/releases/latest/download/client-darwin-arm64
+chmod +x client
+./client -listen 127.0.0.1:9000 -peer <vps>:56000 -link "<vk-link>" -debug 2>&1 | ./scripts/routes-macos.sh
+```
+
+**macOS (Intel / amd64):**
+
+```bash
+curl -L -o client https://github.com/samosvalishe/btp/releases/latest/download/client-darwin-amd64
 chmod +x client
 ./client -listen 127.0.0.1:9000 -peer <vps>:56000 -link "<vk-link>" -debug 2>&1 | ./scripts/routes-macos.sh
 ```
