@@ -5,12 +5,10 @@ services:
     network_mode: host
     restart: unless-stopped
     environment:
-      # Backend address: WireGuard → 127.0.0.1:51820 | VLESS/Xray → 127.0.0.1:443
+      # Backend address: WireGuard → 127.0.0.1:51820 | Xray/sing-box → 127.0.0.1:443
       CONNECT_ADDR: "127.0.0.1:51820"
       # LISTEN_ADDR: "0.0.0.0:56000"
-      # VLESS_MODE: "true"
-      # WRAP_MODE: "true"
-      # WRAP_KEY: ""          # 64 hex chars; required when WRAP_MODE=true
-      # VK_TURN_KCP_PROFILE: "balanced"   # fast | balanced | slow
-      # VK_TURN_KCP_FEC: "10:3"           # Reed-Solomon FEC, data:parity
+      # MODE: "tcp"           # tcp = TCP-форвардер для Xray/sing-box; default udp = WireGuard
+      # OBF_MODE: "true"
+      # OBF_KEY: ""           # 64 hex chars; required when OBF_MODE=true
       # DEBUG: "false"
