@@ -12,7 +12,7 @@ import (
 func validClientArgs() []string {
 	return []string{
 		"-peer", "1.2.3.4:5000",
-		"-vk-link", "https://vk.com/call/join/abcdef",
+		"-link", "https://vk.com/call/join/abcdef",
 	}
 }
 
@@ -36,8 +36,8 @@ func TestParseClient_Defaults(t *testing.T) {
 	if c.VK.Link != "abcdef" {
 		t.Errorf("VK.Link: %q (expected abcdef)", c.VK.Link)
 	}
-	if c.Obf.WrapKey != nil {
-		t.Errorf("Obf.WrapKey should be nil when -wrap absent")
+	if c.Obf.Key != nil {
+		t.Errorf("Obf.Key should be nil when -obf absent")
 	}
 	if c.Proxy.Mode != ProxyModeUDP {
 		t.Errorf("Proxy.Mode default: %q (expected udp)", c.Proxy.Mode)
@@ -47,7 +47,7 @@ func TestParseClient_Defaults(t *testing.T) {
 func TestParseClient_VKLinkStrip(t *testing.T) {
 	args := []string{
 		"-peer", "1.2.3.4:5000",
-		"-vk-link", "https://vk.com/call/join/CODE123?foo=bar",
+		"-link", "https://vk.com/call/join/CODE123?foo=bar",
 	}
 	c, err := ParseClient(args, io.Discard)
 	if err != nil {
@@ -59,7 +59,7 @@ func TestParseClient_VKLinkStrip(t *testing.T) {
 }
 
 func TestParseClient_MissingPeer(t *testing.T) {
-	_, err := ParseClient([]string{"-vk-link", "https://vk.com/call/join/X"}, io.Discard)
+	_, err := ParseClient([]string{"-link", "https://vk.com/call/join/X"}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "peer") {
 		t.Errorf("expected peer error, got %v", err)
 	}
@@ -67,35 +67,43 @@ func TestParseClient_MissingPeer(t *testing.T) {
 
 func TestParseClient_MissingVKLink(t *testing.T) {
 	_, err := ParseClient([]string{"-peer", "1.2.3.4:5000"}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "vk-link") {
+	if err == nil || !strings.Contains(err.Error(), "-link") {
 		t.Errorf("expected vk-link error, got %v", err)
 	}
 }
 
 func TestParseClient_InvalidDNS(t *testing.T) {
-	args := append(validClientArgs(), "-dns", "garbage")
+	args := append(validClientArgs(), "-dns-mode", "garbage")
 	_, err := ParseClient(args, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "invalid -dns") {
+	if err == nil || !strings.Contains(err.Error(), "invalid -dns-mode") {
 		t.Errorf("expected dns error, got %v", err)
 	}
 }
 
-func TestParseClient_WrapMissingKey(t *testing.T) {
-	args := append(validClientArgs(), "-wrap")
+func TestParseClient_BondWithoutTCPMode(t *testing.T) {
+	args := append(validClientArgs(), "-bond")
 	_, err := ParseClient(args, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "-wrap requires -wrap-key") {
-		t.Errorf("expected wrap-key error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "-bond requires -mode tcp") {
+		t.Errorf("expected bond error, got %v", err)
 	}
 }
 
-func TestParseClient_WrapKeyOK(t *testing.T) {
-	args := append(validClientArgs(), "-wrap", "-wrap-key", strings.Repeat("ab", 32))
+func TestParseClient_ObfMissingKey(t *testing.T) {
+	args := append(validClientArgs(), "-obf")
+	_, err := ParseClient(args, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "-obf requires -obf-key") {
+		t.Errorf("expected obf-key error, got %v", err)
+	}
+}
+
+func TestParseClient_ObfKeyOK(t *testing.T) {
+	args := append(validClientArgs(), "-obf", "-obf-key", strings.Repeat("ab", 32))
 	c, err := ParseClient(args, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.Obf.WrapKey) != 32 {
-		t.Errorf("Obf.WrapKey len: %d", len(c.Obf.WrapKey))
+	if len(c.Obf.Key) != 32 {
+		t.Errorf("Obf.Key len: %d", len(c.Obf.Key))
 	}
 }
 
@@ -129,13 +137,13 @@ func TestParseClient_DNSServersSplit(t *testing.T) {
 	}
 }
 
-func TestParseClient_GenWrapKeySkipsPeerCheck(t *testing.T) {
-	c, err := ParseClient([]string{"-gen-wrap-key"}, io.Discard)
+func TestParseClient_GenObfKeySkipsPeerCheck(t *testing.T) {
+	c, err := ParseClient([]string{"-gen-obf-key"}, io.Discard)
 	if err != nil {
-		t.Fatalf("gen-wrap-key should not require peer/vk-link: %v", err)
+		t.Fatalf("gen-obf-key should not require peer/vk-link: %v", err)
 	}
-	if !c.Obf.GenWrapKey {
-		t.Errorf("Obf.GenWrapKey not set")
+	if !c.Obf.GenKey {
+		t.Errorf("Obf.GenKey not set")
 	}
 }
 
@@ -154,9 +162,9 @@ func TestParseClient_ProxyMode(t *testing.T) {
 		want ProxyMode
 	}{
 		{"default-udp", nil, ProxyModeUDP},
-		{"vless", []string{"-vless"}, ProxyModeTCPFwd},
-		{"vless-bond", []string{"-vless", "-vless-bond"}, ProxyModeTCPFwdBond},
-		{"bond-without-vless-ignored", []string{"-vless-bond"}, ProxyModeUDP},
+		{"tcp", []string{"-mode", "tcp"}, ProxyModeTCPFwd},
+		{"tcp-bond", []string{"-mode", "tcp", "-bond"}, ProxyModeTCPFwdBond},
+		{"default-udp-no-bond", nil, ProxyModeUDP},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -195,42 +203,42 @@ func TestParseServer_MissingConnect(t *testing.T) {
 	}
 }
 
-func TestParseServer_WrapMissingKey(t *testing.T) {
-	_, err := ParseServer([]string{"-connect", "x:1", "-wrap"}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "-wrap requires -wrap-key") {
-		t.Errorf("expected wrap-key error, got %v", err)
+func TestParseServer_ObfMissingKey(t *testing.T) {
+	_, err := ParseServer([]string{"-connect", "x:1", "-obf"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "-obf requires -obf-key") {
+		t.Errorf("expected obf-key error, got %v", err)
 	}
 }
 
-func TestParseServer_WrapKeyBadHex(t *testing.T) {
-	_, err := ParseServer([]string{"-connect", "x:1", "-wrap", "-wrap-key", "zz"}, io.Discard)
+func TestParseServer_ObfKeyBadHex(t *testing.T) {
+	_, err := ParseServer([]string{"-connect", "x:1", "-obf", "-obf-key", "zz"}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "invalid hex") {
 		t.Errorf("expected hex error, got %v", err)
 	}
 }
 
-func TestParseServer_WrapKeyOK(t *testing.T) {
-	s, err := ParseServer([]string{"-connect", "x:1", "-wrap", "-wrap-key", strings.Repeat("cd", 32)}, io.Discard)
+func TestParseServer_ObfKeyOK(t *testing.T) {
+	s, err := ParseServer([]string{"-connect", "x:1", "-obf", "-obf-key", strings.Repeat("cd", 32)}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Obf.WrapKey) != 32 {
-		t.Errorf("Obf.WrapKey len: %d", len(s.Obf.WrapKey))
+	if len(s.Obf.Key) != 32 {
+		t.Errorf("Obf.Key len: %d", len(s.Obf.Key))
 	}
 }
 
-func TestParseServer_GenWrapKeySkipsConnectCheck(t *testing.T) {
-	s, err := ParseServer([]string{"-gen-wrap-key"}, io.Discard)
+func TestParseServer_GenObfKeySkipsConnectCheck(t *testing.T) {
+	s, err := ParseServer([]string{"-gen-obf-key"}, io.Discard)
 	if err != nil {
-		t.Fatalf("gen-wrap-key should not require -connect: %v", err)
+		t.Fatalf("gen-obf-key should not require -connect: %v", err)
 	}
-	if !s.Obf.GenWrapKey {
-		t.Errorf("Obf.GenWrapKey not set")
+	if !s.Obf.GenKey {
+		t.Errorf("Obf.GenKey not set")
 	}
 }
 
 func TestParseServer_ProxyMode(t *testing.T) {
-	s, err := ParseServer([]string{"-connect", "x:1", "-vless"}, io.Discard)
+	s, err := ParseServer([]string{"-connect", "x:1", "-mode", "tcp"}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	dnsModeUDP             = "udp"
+	dnsModePlain             = "plain"
 	dnsModeDoH             = "doh"
 	dnsModeAuto            = "auto"
 	defaultStreamsPerCache = 10
@@ -32,24 +32,24 @@ const (
 type ProxyMode string
 
 const (
-	ProxyModeUDP        ProxyMode = "udp"         // -vless=false: UDP-релей пакетов (WireGuard)
-	ProxyModeTCPFwd     ProxyMode = "tcpfwd"      // -vless=true: TCP-форвардер через smux
-	ProxyModeTCPFwdBond ProxyMode = "tcpfwd-bond" // -vless=true -vless-bond=true: bond TCP по N smux-сессиям
+	ProxyModeUDP        ProxyMode = "udp"         // -mode udp (default): UDP-релей пакетов (WireGuard)
+	ProxyModeTCPFwd     ProxyMode = "tcpfwd"      // -mode tcp: TCP-форвардер через smux
+	ProxyModeTCPFwdBond ProxyMode = "tcpfwd-bond" // -mode tcp -bond: bond TCP по N smux-сессиям
 )
 
 // TURNOpts — опции TURN-сервера (куда и как подключаться).
 type TURNOpts struct {
-	Host string // -turn: переопределить IP/host TURN-сервера
-	Port string // -port: переопределить порт TURN
-	UDP  bool   // -udp: подключение к TURN по UDP (по умолчанию TCP/TLS)
-	N    int    // -n: число TURN-потоков (только клиент)
+	Host      string // -turn: переопределить IP/host TURN-сервера
+	Port      string // -port: переопределить порт TURN
+	TransportUDP bool   // -transport udp: подключение к TURN по UDP (по умолчанию TCP/TLS)
+	N         int    // -n: число TURN-потоков (только клиент)
 }
 
-// ObfOpts — опции обфускации TURN-payload (SRTP-mimicry wrap).
+// ObfOpts — опции обфускации TURN-payload (SRTP-mimicry).
 type ObfOpts struct {
-	WrapMode   bool   // -wrap: включить SRTP-mimicry AEAD-обёртку
-	WrapKey    []byte // -wrap-key (декодированный): 32-байтовый общий ключ; nil если WrapMode=false
-	GenWrapKey bool   // -gen-wrap-key: напечатать новый ключ и выйти
+	Mode   bool   // -obf: включить SRTP-mimicry AEAD-обёртку
+	Key    []byte // -obf-key (декодированный): 32-байтовый общий ключ; nil если Mode=false
+	GenKey bool   // -gen-obf-key: напечатать новый ключ и выйти
 }
 
 // ProxyOpts — опции прокси прикладного уровня.
@@ -62,14 +62,14 @@ type ProxyOpts struct {
 
 // VKOpts — опции VK-учёток и captcha (только клиент).
 type VKOpts struct {
-	Link           string // -vk-link (нормализован до join-кода)
+	Link           string // -link (нормализован до join-кода)
 	StreamsPerCred int    // -streams-per-cred
 	ManualCaptcha  bool   // -manual-captcha
 }
 
 // DNSOpts — опции DNS-резолвинга (только клиент).
 type DNSOpts struct {
-	Mode    string   // -dns: udp | doh | auto
+	Mode    string   // -dns-mode: plain | doh | auto
 	Servers []string // -dns-servers (через запятую); nil если флаг пуст
 }
 
@@ -78,8 +78,7 @@ type LogOpts struct {
 	Debug bool // -debug
 }
 
-// KCPOpts — опции KCP-туннеля. Обе стороны должны согласовать Profile и FEC;
-// значения берутся из переменных окружения VK_TURN_KCP_*.
+// KCPOpts — параметры KCP-туннеля, хардкодятся из DefaultProfile/FEC{}.
 type KCPOpts struct {
 	Profile kcptun.Profile
 	FEC     kcptun.FEC
@@ -115,19 +114,19 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	host := fs.String("turn", "", "переопределить IP TURN-сервера (по умолчанию берётся из VK Calls ссылки)")
 	port := fs.String("port", "", "переопределить порт TURN-сервера (по умолчанию берётся из VK Calls ссылки)")
 	listen := fs.String("listen", "127.0.0.1:9000", "локальный адрес ip:port, куда подключается WireGuard или Xray клиент")
-	vklink := fs.String("vk-link", "", "ссылка VK Calls вида https://vk.com/call/join/... (обязательно)")
+	vklink := fs.String("link", "", "ссылка VK Calls вида https://vk.com/call/join/... (обязательно)")
 	peerAddr := fs.String("peer", "", "адрес сервера VK TURN Proxy на VPS, host:port (обязательно)")
 	n := fs.Int("n", 10, "количество параллельных TURN-потоков (соединений к TURN-реле)")
-	udp := fs.Bool("udp", false, "подключаться к TURN-реле по UDP (по умолчанию TCP/TLS)")
-	vlessMode := fs.Bool("vless", false, "режим TCP-форвардера (VLESS/Xray) вместо UDP-релея для WireGuard")
-	vlessBond := fs.Bool("vless-bond", false, "распределять одно VLESS TCP-соединение по всем активным smux-сессиям (только с -vless)")
-	wrapMode := fs.Bool("wrap", false, "маскировать TURN-payload под SRTP (RTP/opus + ChaCha20-Poly1305 AEAD) для обхода content-filter VK; ключ должен совпадать на клиенте и сервере")
-	wrapKeyHex := fs.String("wrap-key", "", "общий ключ для -wrap, 32 байта в hex (64 символа)")
-	genWrapKey := fs.Bool("gen-wrap-key", false, "напечатать новый ключ для -wrap-key и выйти")
+	transportFlag := fs.String("transport", "tcp", "транспорт до TURN-реле: tcp (TCP/TLS, default) | udp")
+	modeFlag := fs.String("mode", "udp", "режим туннеля: udp (UDP-релей для WireGuard, default) | tcp (TCP-форвардер для Xray/sing-box)")
+	bondFlag := fs.Bool("bond", false, "распределять одно TCP-соединение по всем активным smux-сессиям (только с -mode tcp)")
+	wrapMode := fs.Bool("obf", false, "маскировать TURN-payload под SRTP (RTP/opus + ChaCha20-Poly1305 AEAD) для обхода content-filter VK; ключ должен совпадать на клиенте и сервере")
+	wrapKeyHex := fs.String("obf-key", "", "общий ключ для -obf, 32 байта в hex (64 символа)")
+	genWrapKey := fs.Bool("gen-obf-key", false, "напечатать новый ключ для -obf-key и выйти")
 	streamsPerCredFlag := fs.Int("streams-per-cred", defaultStreamsPerCache, "сколько TURN-потоков делят один кеш VK-учёток")
 	debugFlag := fs.Bool("debug", false, "включить подробные debug-логи")
 	manualCaptchaFlag := fs.Bool("manual-captcha", false, "пропустить авто-решение VK captcha и сразу открыть ручной режим в локальном браузере")
-	dnsFlag := fs.String("dns", dnsModeAuto, "режим DNS-резолвинга: udp | doh | auto (auto: сначала UDP/53, sticky-fallback на DoH при полном отказе)")
+	dnsFlag := fs.String("dns-mode", dnsModeAuto, "транспорт резолвера клиента: plain (UDP/53) | doh (DNS-over-HTTPS) | auto (UDP/53 → sticky DoH при отказе)")
 	dnsServersFlag := fs.String("dns-servers", "", "список UDP/53 DNS-серверов через запятую вместо встроенных (напр. резолверы оператора из Android LinkProperties). Формат: ip[:port][,ip[:port]...]")
 
 	if err := fs.Parse(args); err != nil {
@@ -138,15 +137,15 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 		TURN: TURNOpts{
 			Host: *host,
 			Port: *port,
-			UDP:  *udp,
+			TransportUDP: *transportFlag == "udp",
 			N:    *n,
 		},
 		Obf: ObfOpts{
-			WrapMode:   *wrapMode,
-			GenWrapKey: *genWrapKey,
+			Mode:   *wrapMode,
+			GenKey: *genWrapKey,
 		},
 		Proxy: ProxyOpts{
-			Mode:   clientProxyMode(*vlessMode, *vlessBond),
+			Mode:   clientProxyMode(*modeFlag, *bondFlag),
 			Listen: *listen,
 			Peer:   *peerAddr,
 		},
@@ -161,21 +160,34 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 			Debug: *debugFlag,
 		},
 		KCP: KCPOpts{
-			Profile: kcptun.LoadProfileFromEnv(),
-			FEC:     kcptun.LoadFECFromEnv(),
+			Profile: kcptun.DefaultProfile(),
+			FEC:     kcptun.FEC{},
 		},
 	}
 
-	switch c.DNS.Mode {
-	case dnsModeUDP, dnsModeDoH, dnsModeAuto:
+	switch *transportFlag {
+	case "tcp", "udp":
 	default:
-		return nil, fmt.Errorf("invalid -dns value %q: must be udp | doh | auto", c.DNS.Mode)
+		return nil, fmt.Errorf("invalid -transport value %q: must be tcp | udp", *transportFlag)
+	}
+	switch *modeFlag {
+	case "udp", "tcp":
+	default:
+		return nil, fmt.Errorf("invalid -mode value %q: must be udp | tcp", *modeFlag)
+	}
+	if *bondFlag && *modeFlag != "tcp" {
+		return nil, fmt.Errorf("-bond requires -mode tcp")
+	}
+	switch c.DNS.Mode {
+	case dnsModePlain, dnsModeDoH, dnsModeAuto:
+	default:
+		return nil, fmt.Errorf("invalid -dns-mode value %q: must be plain | doh | auto", c.DNS.Mode)
 	}
 	if *dnsServersFlag != "" {
 		c.DNS.Servers = strings.Split(*dnsServersFlag, ",")
 	}
 
-	if c.Obf.GenWrapKey {
+	if c.Obf.GenKey {
 		return c, nil
 	}
 
@@ -183,13 +195,13 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 		return nil, errors.New("need peer address")
 	}
 	if *vklink == "" {
-		return nil, errors.New("need vk-link")
+		return nil, errors.New("need -link")
 	}
-	key, err := srtpmimicry.DecodeKey(c.Obf.WrapMode, *wrapKeyHex)
+	key, err := srtpmimicry.DecodeKey(c.Obf.Mode, *wrapKeyHex)
 	if err != nil {
 		return nil, err
 	}
-	c.Obf.WrapKey = key
+	c.Obf.Key = key
 	if c.VK.StreamsPerCred <= 0 {
 		return nil, fmt.Errorf("-streams-per-cred must be positive")
 	}
@@ -216,10 +228,10 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 
 	listen := fs.String("listen", "0.0.0.0:56000", "локальный адрес прослушивания ip:port")
 	connect := fs.String("connect", "", "адрес локального бэкенда, host:port (обязательно: WireGuard 127.0.0.1:51820 или Xray 127.0.0.1:443)")
-	vlessMode := fs.Bool("vless", false, "режим TCP-форвардера (VLESS/Xray) вместо UDP-релея для WireGuard; bond определяется автоматически по magic-префиксу в стриме")
-	wrapMode := fs.Bool("wrap", false, "маскировать TURN-payload под SRTP (RTP/opus + ChaCha20-Poly1305 AEAD) для обхода content-filter VK; ключ должен совпадать с клиентом")
-	wrapKeyHex := fs.String("wrap-key", "", "общий ключ для -wrap, 32 байта в hex (64 символа)")
-	genWrapKey := fs.Bool("gen-wrap-key", false, "напечатать новый ключ для -wrap-key и выйти")
+	modeFlag := fs.String("mode", "udp", "режим туннеля: udp (UDP-релей для WireGuard, default) | tcp (TCP-форвардер для Xray/sing-box; bond определяется автоматически)")
+	wrapMode := fs.Bool("obf", false, "маскировать TURN-payload под SRTP (RTP/opus + ChaCha20-Poly1305 AEAD) для обхода content-filter VK; ключ должен совпадать с клиентом")
+	wrapKeyHex := fs.String("obf-key", "", "общий ключ для -obf, 32 байта в hex (64 символа)")
+	genWrapKey := fs.Bool("gen-obf-key", false, "напечатать новый ключ для -obf-key и выйти")
 	debugFlag := fs.Bool("debug", false, "включить подробные debug-логи")
 
 	if err := fs.Parse(args); err != nil {
@@ -228,11 +240,11 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 
 	s := &Server{
 		Obf: ObfOpts{
-			WrapMode:   *wrapMode,
-			GenWrapKey: *genWrapKey,
+			Mode:   *wrapMode,
+			GenKey: *genWrapKey,
 		},
 		Proxy: ProxyOpts{
-			Mode:    serverProxyMode(*vlessMode),
+			Mode:    serverProxyMode(*modeFlag),
 			Listen:  *listen,
 			Connect: *connect,
 		},
@@ -240,40 +252,46 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 			Debug: *debugFlag,
 		},
 		KCP: KCPOpts{
-			Profile: kcptun.LoadProfileFromEnv(),
-			FEC:     kcptun.LoadFECFromEnv(),
+			Profile: kcptun.DefaultProfile(),
+			FEC:     kcptun.FEC{},
 		},
 	}
 
-	if s.Obf.GenWrapKey {
+	switch *modeFlag {
+	case "udp", "tcp":
+	default:
+		return nil, fmt.Errorf("invalid -mode value %q: must be udp | tcp", *modeFlag)
+	}
+
+	if s.Obf.GenKey {
 		return s, nil
 	}
 
 	if s.Proxy.Connect == "" {
 		return nil, fmt.Errorf("server address is required")
 	}
-	key, err := srtpmimicry.DecodeKey(s.Obf.WrapMode, *wrapKeyHex)
+	key, err := srtpmimicry.DecodeKey(s.Obf.Mode, *wrapKeyHex)
 	if err != nil {
 		return nil, err
 	}
-	s.Obf.WrapKey = key
+	s.Obf.Key = key
 
 	return s, nil
 }
 
-func clientProxyMode(vless, bond bool) ProxyMode {
+func clientProxyMode(mode string, bond bool) ProxyMode {
 	switch {
-	case vless && bond:
+	case mode == "tcp" && bond:
 		return ProxyModeTCPFwdBond
-	case vless:
+	case mode == "tcp":
 		return ProxyModeTCPFwd
 	default:
 		return ProxyModeUDP
 	}
 }
 
-func serverProxyMode(vless bool) ProxyMode {
-	if vless {
+func serverProxyMode(mode string) ProxyMode {
+	if mode == "tcp" {
 		return ProxyModeTCPFwd
 	}
 	return ProxyModeUDP

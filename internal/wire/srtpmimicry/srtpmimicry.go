@@ -190,14 +190,14 @@ func DecodeKey(enabled bool, raw string) ([]byte, error) {
 		return nil, nil
 	}
 	if raw == "" {
-		return nil, errors.New("-wrap requires -wrap-key")
+		return nil, errors.New("-obf requires -obf-key")
 	}
 	key, err := hex.DecodeString(raw)
 	if err != nil {
-		return nil, fmt.Errorf("-wrap-key invalid hex: %w", err)
+		return nil, fmt.Errorf("-obf-key invalid hex: %w", err)
 	}
 	if len(key) != KeyLen {
-		return nil, fmt.Errorf("-wrap-key must decode to %d bytes (got %d)", KeyLen, len(key))
+		return nil, fmt.Errorf("-obf-key must decode to %d bytes (got %d)", KeyLen, len(key))
 	}
 	return key, nil
 }

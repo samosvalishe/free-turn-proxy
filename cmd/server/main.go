@@ -29,10 +29,10 @@ func main() {
 	}
 	logger := logx.New(cfg.Log.Debug)
 
-	if cfg.Obf.GenWrapKey {
+	if cfg.Obf.GenKey {
 		key, gerr := srtpmimicry.GenKeyHex()
 		if gerr != nil {
-			logger.Errorf("gen-wrap-key: %v", gerr)
+			logger.Errorf("gen-obf-key: %v", gerr)
 			os.Exit(1)
 		}
 		fmt.Println(key)
@@ -61,10 +61,10 @@ func main() {
 		logger.Errorf("resolve listen addr: %v", err)
 		os.Exit(1)
 	}
-	logger.Infof("Starting server listen=%s connect=%s vless=%t wrap=%t bond-autodetect=true",
-		cfg.Proxy.Listen, cfg.Proxy.Connect, cfg.Proxy.Mode == config.ProxyModeTCPFwd, cfg.Obf.WrapMode)
-	if !cfg.Obf.WrapMode {
-		logger.Warnf("running without -wrap: any client reaching %s can relay to %s (no shared-key auth)", cfg.Proxy.Listen, cfg.Proxy.Connect)
+	logger.Infof("Starting server listen=%s connect=%s mode=%s obf=%t bond-autodetect=true",
+		cfg.Proxy.Listen, cfg.Proxy.Connect, cfg.Proxy.Mode, cfg.Obf.Mode)
+	if !cfg.Obf.Mode {
+		logger.Warnf("running without -obf: any client reaching %s can relay to %s (no shared-key auth)", cfg.Proxy.Listen, cfg.Proxy.Connect)
 	}
 
 	certificate, genErr := dtlsdial.GenerateSelfSignedCert()
@@ -80,9 +80,9 @@ func main() {
 		dtls.WithConnectionIDGenerator(dtls.RandomCIDGenerator(8)),
 	}
 	var listener net.Listener
-	if cfg.Obf.WrapMode {
-		logger.Infof("WRAP mode enabled: listener only accepts clients with matching -wrap-key")
-		wrapListener, werr := srtpmimicry.Listen(addr, cfg.Obf.WrapKey)
+	if cfg.Obf.Mode {
+		logger.Infof("OBF mode enabled: listener only accepts clients with matching -obf-key")
+		wrapListener, werr := srtpmimicry.Listen(addr, cfg.Obf.Key)
 		if werr != nil {
 			logger.Errorf("wrap listen: %v", werr)
 			os.Exit(1)

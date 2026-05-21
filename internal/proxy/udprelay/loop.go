@@ -218,7 +218,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		err = ctx.Err()
 		return
 	}
-	stream, err1 := common.DialTURN(ctx, params.Host, params.Port, params.UDP, peer, params.Link, streamID, params.GetCreds)
+	stream, err1 := common.DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, params.Link, streamID, params.GetCreds)
 	if err1 != nil {
 		if deps.Auth.IsAuthError(err1) {
 			deps.Auth.HandleAuthError(streamID)
@@ -254,7 +254,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		}
 	})
 	var internalPipeAddr atomic.Value
-	wc, wcErr := common.NewClientWrap(params.WrapKey)
+	wc, wcErr := common.NewClientWrap(params.ObfKey)
 	if wcErr != nil {
 		deps.log().Errorf("[STREAM %d] WRAP init failed: %v", streamID, wcErr)
 		turncancel()

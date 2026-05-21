@@ -2,9 +2,6 @@ package kcptun
 
 import (
 	"net"
-	"os"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/xtaci/kcp-go/v5"
@@ -40,75 +37,6 @@ func DefaultProfile() Profile {
 		RcvWnd:     512,
 		MTU:        1200,
 		ACKNoDelay: true,
-	}
-}
-
-// LoadProfileFromEnv читает VK_TURN_KCP_PROFILE и per-field переопределения
-// VK_TURN_KCP_*. Неизвестное имя профиля → DefaultProfile.
-func LoadProfileFromEnv() Profile {
-	name := strings.ToLower(strings.TrimSpace(os.Getenv("VK_TURN_KCP_PROFILE")))
-	var p Profile
-	switch name {
-	case "legacy", "fast":
-		p = Profile{NoDelay: 1, Interval: 10, Resend: 2, NC: 1, SndWnd: 4096, RcvWnd: 4096, MTU: 1280, ACKNoDelay: true}
-	case "cc", "balanced":
-		p = Profile{NoDelay: 1, Interval: 20, Resend: 2, NC: 0, SndWnd: 512, RcvWnd: 512, MTU: 1200, ACKNoDelay: true}
-	case "slow", "conservative":
-		p = Profile{NoDelay: 0, Interval: 40, Resend: 2, NC: 0, SndWnd: 256, RcvWnd: 256, MTU: 1150, ACKNoDelay: false}
-	default:
-		p = DefaultProfile()
-	}
-	p.NoDelay = envInt("VK_TURN_KCP_NODELAY", p.NoDelay)
-	p.Interval = envInt("VK_TURN_KCP_INTERVAL", p.Interval)
-	p.Resend = envInt("VK_TURN_KCP_RESEND", p.Resend)
-	p.NC = envInt("VK_TURN_KCP_NC", p.NC)
-	p.SndWnd = envInt("VK_TURN_KCP_SNDWND", p.SndWnd)
-	p.RcvWnd = envInt("VK_TURN_KCP_RCVWND", p.RcvWnd)
-	p.MTU = envInt("VK_TURN_KCP_MTU", p.MTU)
-	p.ACKNoDelay = envBool("VK_TURN_KCP_ACK_NODELAY", p.ACKNoDelay)
-	return p
-}
-
-// LoadFECFromEnv парсит VK_TURN_KCP_FEC как "data:parity" (напр. "10:3").
-// Пустое/невалидное → отключено.
-func LoadFECFromEnv() FEC {
-	raw := strings.TrimSpace(os.Getenv("VK_TURN_KCP_FEC"))
-	if raw == "" {
-		return FEC{}
-	}
-	parts := strings.SplitN(raw, ":", 2)
-	if len(parts) != 2 {
-		return FEC{}
-	}
-	d, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
-	p, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
-	if err1 != nil || err2 != nil || d <= 0 || p <= 0 {
-		return FEC{}
-	}
-	return FEC{Data: d, Parity: p}
-}
-
-func envInt(name string, fallback int) int {
-	raw := strings.TrimSpace(os.Getenv(name))
-	if raw == "" {
-		return fallback
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil {
-		return fallback
-	}
-	return value
-}
-
-func envBool(name string, fallback bool) bool {
-	raw := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
-	switch raw {
-	case "1", "true", "yes", "on":
-		return true
-	case "0", "false", "no", "off":
-		return false
-	default:
-		return fallback
 	}
 }
 

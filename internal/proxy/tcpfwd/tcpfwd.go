@@ -26,8 +26,8 @@ type Params struct {
 	Host       string
 	Port       string
 	Link       string
-	UDP        bool
-	WrapKey    []byte
+	TransportUDP bool
+	ObfKey     []byte
 	GetCreds   GetCredsFunc
 	KCPProfile kcptun.Profile
 	KCPFEC     kcptun.FEC
@@ -38,7 +38,7 @@ type Params struct {
 // Реализация — internal/proxy/bondclient.
 type BondHandler func(ctx context.Context, tcpConn net.Conn, connID uint64, lanes []*PooledSession)
 
-// Deps — зависимости хост-процесса для VLESS-цикла.
+// Deps — зависимости хост-процесса для TCP-forward цикла.
 type Deps struct {
 	DTLSDialer  *dtlsdial.Dialer
 	Log         logx.Logger
@@ -52,7 +52,7 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-// Run — точка входа VLESS-режима. Запускает numSessions maintainer-горутин, ждёт
+// Run — точка входа TCP-forward режима. Запускает numSessions maintainer-горутин, ждёт
 // первого подключения, затем принимает локальные TCP-соединения и форвардит
 // каждое как smux-поток (round-robin) или bonded по всем активным сессиям.
 func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenAddr string, numSessions int, useBond bool) error {
@@ -70,7 +70,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 		})
 	}
 
-	deps.log().Infof("VLESS mode: waiting for sessions to connect (total: %d)...", numSessions)
+	deps.log().Infof("TCP mode: waiting for sessions to connect (total: %d)...", numSessions)
 	select {
 	case <-ctx.Done():
 		wgMaint.Wait()
@@ -92,9 +92,9 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 
 	context.AfterFunc(ctx, func() { _ = wrappedListener.Close() })
 	if useBond {
-		deps.log().Infof("VLESS bond mode: listening on %s (striping each TCP connection across active sessions)", listenAddr)
+		deps.log().Infof("TCP bond mode: listening on %s (striping each TCP connection across active sessions)", listenAddr)
 	} else {
-		deps.log().Infof("VLESS mode: listening on %s (round-robin across %d sessions)", listenAddr, numSessions)
+		deps.log().Infof("TCP mode: listening on %s (round-robin across %d sessions)", listenAddr, numSessions)
 	}
 
 	var wgConn sync.WaitGroup
@@ -232,7 +232,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 		}
 	}
 
-	stream, err := common.DialTURN(ctx, params.Host, params.Port, params.UDP, peer, params.Link, id, params.GetCreds)
+	stream, err := common.DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, params.Link, id, params.GetCreds)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -241,7 +241,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	deps.log().Debugf("[session %d] TURN server IP: %s", id, stream.ServerUDPAddr.IP)
 	deps.log().Debugf("relayed-address=%s", relayConn.LocalAddr().String())
 
-	relayWC, err := common.NewClientWrap(params.WrapKey)
+	relayWC, err := common.NewClientWrap(params.ObfKey)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("wrap init: %w", err)
@@ -258,7 +258,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	statsCtx, statsCancel := context.WithCancel(ctx)
 	cleanupFns = append(cleanupFns, statsCancel)
 	st := stats.New(deps.log().DebugEnabled())
-	go st.LogEvery(statsCtx, deps.log().Debugf, fmt.Sprintf("[session %d] VLESS", id), "to-turn", "from-turn")
+	go st.LogEvery(statsCtx, deps.log().Debugf, fmt.Sprintf("[session %d] TCP", id), "to-turn", "from-turn")
 
 	kcpSess, err := kcptun.NewKCPOverDTLS(&stats.CountingConn{Conn: dtlsConn, Stats: st}, false, params.KCPProfile, params.KCPFEC)
 	if err != nil {

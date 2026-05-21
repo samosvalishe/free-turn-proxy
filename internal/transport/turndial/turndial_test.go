@@ -26,7 +26,7 @@ func TestOpen_HostOverrideApplied(t *testing.T) {
 	peer := &net.UDPAddr{IP: net.ParseIP("1.2.3.4"), Port: 1}
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	_, err := Open(ctx, Config{HostOverride: "127.0.0.1", PortOverride: "1", UDP: false, DialTimeout: 200 * time.Millisecond}, peer, "u", "p", "8.8.8.8:443")
+	_, err := Open(ctx, Config{HostOverride: "127.0.0.1", PortOverride: "1", TransportUDP: false,DialTimeout: 200 * time.Millisecond}, peer, "u", "p", "8.8.8.8:443")
 	if err == nil {
 		t.Fatal("expected dial error against unreachable :1")
 	}

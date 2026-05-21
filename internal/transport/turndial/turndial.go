@@ -24,8 +24,8 @@ type Config struct {
 	HostOverride string
 	// PortOverride, если непустой, заменяет port из lookup credentials.
 	PortOverride string
-	// UDP=true — dial TURN по UDP; иначе по TCP через STUNConn.
-	UDP bool
+	// TransportUDP=true — dial TURN по UDP; иначе по TCP через STUNConn.
+	TransportUDP bool
 	// DialTimeout ограничивает TCP dial. Ноль → 5s.
 	DialTimeout time.Duration
 }
@@ -77,7 +77,7 @@ func Open(ctx context.Context, cfg Config, peer *net.UDPAddr, user, pass, rawAdd
 		turnConn  net.PacketConn
 		closeConn func() error
 	)
-	if cfg.UDP {
+	if cfg.TransportUDP {
 		c, derr := net.DialUDP("udp", nil, turnServerUDPAddr) //nolint:noctx
 		if derr != nil {
 			return nil, fmt.Errorf("dial TURN (udp): %w", derr)

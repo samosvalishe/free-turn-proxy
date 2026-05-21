@@ -28,7 +28,7 @@ func DialTURN(ctx context.Context, host, port string, udp bool, peer *net.UDPAdd
 	return turndial.Open(ctx, turndial.Config{
 		HostOverride: host,
 		PortOverride: port,
-		UDP:          udp,
+		TransportUDP: udp,
 	}, peer, user, pass, rawURL)
 }
 

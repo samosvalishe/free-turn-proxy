@@ -75,10 +75,10 @@ func main() {
 	}
 	appDialer := dnsdial.AppDialer(cfg.DNS.Mode)
 	dnsdial.InstallGlobalResolver(cfg.DNS.Mode)
-	if cfg.Obf.GenWrapKey {
+	if cfg.Obf.GenKey {
 		key, gerr := srtpmimicry.GenKeyHex()
 		if gerr != nil {
-			logger.Errorf("gen-wrap-key: %v", gerr)
+			logger.Errorf("gen-obf-key: %v", gerr)
 			os.Exit(1)
 		}
 		fmt.Println(key)
@@ -89,8 +89,8 @@ func main() {
 		logger.Errorf("resolve peer addr: %v", err)
 		os.Exit(1)
 	}
-	if cfg.Obf.WrapMode {
-		logger.Infof("WRAP mode enabled: peer server must use matching -wrap-key")
+	if cfg.Obf.Mode {
+		logger.Infof("OBF mode enabled: peer server must use matching -obf-key")
 	}
 
 	var connectedStreams atomic.Int32
@@ -105,27 +105,27 @@ func main() {
 	})
 
 	if cfg.Proxy.Mode != config.ProxyModeUDP {
-		vlessDtlsDialer := &dtlsdial.Dialer{
+		tcpDtlsDialer := &dtlsdial.Dialer{
 			HandshakeTimeout: 30 * time.Second,
 			HandshakeSem:     make(chan struct{}, 3),
 		}
 		bondH := &bondclient.Handler{Deps: bondclient.Deps{Log: logger}}
-		vlessDeps := &tcpfwd.Deps{
-			DTLSDialer:  vlessDtlsDialer,
+		tcpDeps := &tcpfwd.Deps{
+			DTLSDialer:  tcpDtlsDialer,
 			Log:         logger,
 			BondHandler: bondH.Handle,
 		}
-		vlessParams := &tcpfwd.Params{
+		tcpParams := &tcpfwd.Params{
 			Host:       cfg.TURN.Host,
 			Port:       cfg.TURN.Port,
 			Link:       cfg.VK.Link,
-			UDP:        cfg.TURN.UDP,
-			WrapKey:    cfg.Obf.WrapKey,
+			TransportUDP: cfg.TURN.TransportUDP,
+			ObfKey:     cfg.Obf.Key,
 			GetCreds:   tcpfwd.GetCredsFunc(vkAuth.GetCredentials),
 			KCPProfile: cfg.KCP.Profile,
 			KCPFEC:     cfg.KCP.FEC,
 		}
-		if err := tcpfwd.Run(ctx, vlessDeps, vlessParams, peer, cfg.Proxy.Listen, cfg.TURN.N, cfg.Proxy.Mode == config.ProxyModeTCPFwdBond); err != nil {
+		if err := tcpfwd.Run(ctx, tcpDeps, tcpParams, peer, cfg.Proxy.Listen, cfg.TURN.N, cfg.Proxy.Mode == config.ProxyModeTCPFwdBond); err != nil {
 			logger.Errorf("tcpfwd: %v", err)
 			os.Exit(1)
 		}
@@ -140,8 +140,8 @@ func main() {
 		Host:     cfg.TURN.Host,
 		Port:     cfg.TURN.Port,
 		Link:     cfg.VK.Link,
-		UDP:      cfg.TURN.UDP,
-		WrapKey:  cfg.Obf.WrapKey,
+		TransportUDP: cfg.TURN.TransportUDP,
+		ObfKey:   cfg.Obf.Key,
 		GetCreds: udprelay.GetCredsFunc(vkAuth.GetCredentials),
 	}
 	if err := udprelay.Run(ctx, udpDtlsDialer, vkAuth, logger, &connectedStreams, udpParams, peer, cfg.Proxy.Listen, cfg.TURN.N); err != nil {

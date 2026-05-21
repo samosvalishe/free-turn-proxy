@@ -364,7 +364,7 @@ func dohForwarderDial(r *DohResolver) dialFunc {
 }
 
 const (
-	DNSModeUDP  = "udp"
+	DNSModePlain  = "plain"
 	DNSModeDoH  = "doh"
 	DNSModeAuto = "auto"
 )
@@ -417,7 +417,7 @@ type dialFunc = func(context.Context, string, string) (net.Conn, error)
 // залипает процесс на DoH до конца его жизни.
 func buildDialer(mode string, r *DohResolver) net.Dialer {
 	switch mode {
-	case DNSModeUDP:
+	case DNSModePlain:
 		return newAppDialer(udpDNSDial)
 	case DNSModeDoH:
 		return newAppDialer(dohForwarderDial(r))

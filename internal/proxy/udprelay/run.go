@@ -36,8 +36,8 @@ type Params struct {
 	Host     string
 	Port     string
 	Link     string
-	UDP      bool
-	WrapKey  []byte
+	TransportUDP bool
+	ObfKey  []byte
 	GetCreds GetCredsFunc
 }
 
