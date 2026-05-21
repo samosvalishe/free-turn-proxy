@@ -230,7 +230,7 @@ func (c *serverConn) run() {
 
 	c.waitForInitialLanes()
 
-	backendConn, err := net.DialTimeout("tcp", c.connectAddr, 10*time.Second)
+	backendConn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(c.ctx, "tcp", c.connectAddr)
 	if err != nil {
 		c.deps.log().Errorf("[bond %d] backend dial: %s", c.id, err)
 		return
@@ -266,7 +266,7 @@ func (c *serverConn) run() {
 
 func (c *serverConn) copyBondToBackend(backendConn net.Conn) {
 	chunks := bondframe.Reorder(c.ctx, backendConn, c.recvCh, bondframe.ReorderHooks{
-		OnOverflow:    func(have int) { c.deps.log().Errorf("[bond %d] pending map overflow (>%d), closing", c.id, bondframe.PendingCap) },
+		OnOverflow:    func(_ int) { c.deps.log().Errorf("[bond %d] pending map overflow (>%d), closing", c.id, bondframe.PendingCap) },
 		OnUnknownType: func(typ byte) { c.deps.log().Errorf("[bond %d] unknown frame type %d", c.id, typ) },
 		OnWriteError:  func(err error) { c.deps.log().Errorf("[bond %d] backend write error: %v", c.id, err) },
 		OnCloseWrite:  c.deps.log().Debugf,
@@ -283,7 +283,7 @@ func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
 		if n > 0 {
 			// writeToNextLane — синхронная запись (WriteFrame возвращается до
 			// переключения lane), поэтому buf[:n] передаётся напрямую — аналог bondclient.
-			if writeErr := c.writeToNextLane(bondframe.FrameData, seq, buf[:n], &laneIdx); writeErr != nil {
+			if writeErr := c.writeToNextLane(seq, buf[:n], &laneIdx); writeErr != nil {
 				c.deps.log().Errorf("[bond %d] lane write data error: %v", c.id, writeErr)
 				return
 			}
@@ -310,7 +310,7 @@ func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
 	}
 }
 
-func (c *serverConn) writeToNextLane(typ byte, seq uint64, data []byte, laneIdx *uint64) error {
+func (c *serverConn) writeToNextLane(seq uint64, data []byte, laneIdx *uint64) error {
 	lanes := c.snapshotLanes()
 	for {
 		if len(lanes) == 0 {
@@ -327,7 +327,7 @@ func (c *serverConn) writeToNextLane(typ byte, seq uint64, data []byte, laneIdx 
 			lane := lanes[*laneIdx%uint64(len(lanes))]
 			*laneIdx++
 			lane.mu.Lock()
-			err := bondframe.WriteFrame(lane.stream, typ, seq, data)
+			err := bondframe.WriteFrame(lane.stream, bondframe.FrameData, seq, data)
 			lane.mu.Unlock()
 			if err == nil {
 				written = true

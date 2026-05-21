@@ -100,7 +100,7 @@ func handleStream(ctx context.Context, logger logx.Logger, registry *bondserver.
 		}
 	}()
 
-	backendConn, err := net.DialTimeout("tcp", connectAddr, 10*time.Second)
+	backendConn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, "tcp", connectAddr)
 	if err != nil {
 		logger.Errorf("tcpfwdserver: backend dial: %s", err)
 		return

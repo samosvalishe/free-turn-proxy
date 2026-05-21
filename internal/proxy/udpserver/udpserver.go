@@ -21,7 +21,7 @@ const (
 // Handle форвардит DTLS-пакеты между conn и UDP-backend на connectAddr
 // до закрытия любой стороны. Блокируется до выхода обеих copy-горутин.
 func Handle(ctx context.Context, logger logx.Logger, conn net.Conn, connectAddr string) {
-	serverConn, err := net.Dial("udp", connectAddr)
+	serverConn, err := (&net.Dialer{}).DialContext(ctx, "udp", connectAddr)
 	if err != nil {
 		logger.Errorf("udpserver: dial backend: %v", err)
 		return

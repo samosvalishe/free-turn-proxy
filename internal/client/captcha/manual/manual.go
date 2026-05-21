@@ -506,7 +506,7 @@ func startCaptchaServer(srv *http.Server, logPrefix string) error {
 	var listening bool
 
 	for _, addr := range localCaptchaListenAddrs() {
-		listener, err := net.Listen("tcp", addr)
+		listener, err := net.Listen("tcp", addr) //nolint:noctx
 		if err != nil {
 			listenErrs = append(listenErrs, fmt.Sprintf("%s (%v)", addr, err))
 			continue
@@ -540,7 +540,7 @@ func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaU
 		return "", err
 	}
 
-	defer func() {
+	defer func() { //nolint:contextcheck // shutdown intentionally uses fresh context after parent is cancelled
 		// best-effort shutdown. На iSH SetDeadline — no-op, Shutdown может
 		// таймаутить при сливе listener'ов; результат всё равно прокидываем.
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -584,7 +584,7 @@ func SolveViaHTTP(ctx context.Context, captchaImg string) (string, error) {
 	keyCh := make(chan string, 1)
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
 <html><head>
@@ -852,7 +852,7 @@ func SolveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer) (
 
 func openBrowser(url string) {
 	for _, cmd := range browserOpenCommands(runtime.GOOS, url) {
-		if err := exec.Command(cmd.name, cmd.args...).Start(); err == nil {
+		if err := exec.Command(cmd.name, cmd.args...).Start(); err == nil { //nolint:noctx
 			return
 		}
 	}

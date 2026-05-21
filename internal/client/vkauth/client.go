@@ -179,7 +179,7 @@ func (c *Client) LockoutUntilUnix() int64 {
 }
 
 // IsAuthError оборачивает пакетный IsAuthError как метод для работы через интерфейс.
-func (c *Client) IsAuthError(err error) bool { return IsAuthError(err) }
+func (*Client) IsAuthError(err error) bool { return IsAuthError(err) }
 
 // engageLockout устанавливает глобальную блокировку captcha на d с момента вызова.
 func (c *Client) engageLockout(d time.Duration) {

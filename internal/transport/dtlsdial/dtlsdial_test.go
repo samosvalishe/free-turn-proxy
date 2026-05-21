@@ -12,7 +12,7 @@ import (
 // DTLS handshake stuck so we can exercise the gate/cancel paths.
 type fakePC struct{}
 
-func (fakePC) ReadFrom(b []byte) (int, net.Addr, error) {
+func (fakePC) ReadFrom(_ []byte) (int, net.Addr, error) {
 	select {} // block forever
 }
 func (fakePC) WriteTo(b []byte, _ net.Addr) (int, error) { return len(b), nil }

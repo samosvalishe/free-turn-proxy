@@ -76,7 +76,7 @@ func (d *Deps) log() logx.Logger {
 // При фатальном captcha-условии возвращает ErrFatal — вызывающий делает os.Exit
 // без вмешательства udprelay в хост-процесс.
 func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, params *Params, peer *net.UDPAddr, listenAddr string, numStreams int) error {
-	listenConn, err := net.ListenPacket("udp", listenAddr)
+	listenConn, err := (&net.ListenConfig{}).ListenPacket(ctx, "udp", listenAddr)
 	if err != nil {
 		return fmt.Errorf("udprelay listen %s: %w", listenAddr, err)
 	}

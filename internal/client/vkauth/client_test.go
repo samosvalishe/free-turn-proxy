@@ -13,7 +13,7 @@ import (
 
 // newTestClient builds a Client with a zero-interval throttle and the supplied
 // fake token-chain fetcher.
-func newTestClient(t *testing.T, fake tokenChainFn, opts ...func(*Client)) *Client {
+func newTestClient(t *testing.T, fake tokenChainFn, opts ...func(*Client)) *Client { //nolint:unparam
 	t.Helper()
 	c := New(Config{
 		StreamsPerCache: 10,

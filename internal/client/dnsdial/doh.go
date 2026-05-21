@@ -168,14 +168,14 @@ func newBootstrapTransport(endpoints []DohEndpoint) *http.Transport {
 // Каждому endpoint'у — свой per-attempt deadline (dohQueryTimeout), чтобы
 // медленный первый не сожрал весь бюджет и не зарезал fallback'и. Parent ctx
 // всё ещё ограничивает общее ожидание через cancel chain.
-func (r *DohResolver) forwardRaw(ctx context.Context, query []byte) ([]byte, DohEndpoint, error) {
+func (r *DohResolver) forwardRaw(ctx context.Context, query []byte) ([]byte, error) {
 	if len(r.endpoints) == 0 {
-		return nil, DohEndpoint{}, errors.New("doh: no endpoints configured")
+		return nil, errors.New("doh: no endpoints configured")
 	}
 	var lastErr error
 	for _, ep := range r.endpoints {
 		if err := ctx.Err(); err != nil {
-			return nil, DohEndpoint{}, err
+			return nil, err
 		}
 		epCtx, cancel := context.WithTimeout(ctx, dohQueryTimeout)
 		body, err := r.postWire(epCtx, ep, query)
@@ -185,9 +185,9 @@ func (r *DohResolver) forwardRaw(ctx context.Context, query []byte) ([]byte, Doh
 			lastErr = err
 			continue
 		}
-		return body, ep, nil
+		return body, nil
 	}
-	return nil, DohEndpoint{}, lastErr
+	return nil, lastErr
 }
 
 // postWire делает один application/dns-message POST к одному endpoint'у.
@@ -273,7 +273,7 @@ func startDohForwarder(r *DohResolver) (_ *dohForwarder, err error) {
 	return fwd, nil
 }
 
-func (f *dohForwarder) serveUDP(conn *net.UDPConn, r *DohResolver) {
+func (*dohForwarder) serveUDP(conn *net.UDPConn, r *DohResolver) {
 	defer func() { _ = conn.Close() }()
 	buf := make([]byte, forwarderUDPBufSize)
 	for {
@@ -286,7 +286,7 @@ func (f *dohForwarder) serveUDP(conn *net.UDPConn, r *DohResolver) {
 		go func(q []byte, c *net.UDPAddr) {
 			ctx, cancel := context.WithTimeout(context.Background(), dohForwardBudget)
 			defer cancel()
-			resp, _, err := r.forwardRaw(ctx, q)
+			resp, err := r.forwardRaw(ctx, q)
 			if err != nil {
 				Log.Warnf("[DoH] udp forward failed: %v", err)
 				return
@@ -298,7 +298,7 @@ func (f *dohForwarder) serveUDP(conn *net.UDPConn, r *DohResolver) {
 	}
 }
 
-func (f *dohForwarder) serveTCP(ln *net.TCPListener, r *DohResolver) {
+func (*dohForwarder) serveTCP(ln *net.TCPListener, r *DohResolver) {
 	defer func() { _ = ln.Close() }()
 	for {
 		conn, err := ln.Accept()
@@ -328,7 +328,7 @@ func handleDohForwarderTCP(conn net.Conn, r *DohResolver) {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), dohQueryTimeout)
-		resp, _, err := r.forwardRaw(ctx, query)
+		resp, err := r.forwardRaw(ctx, query)
 		cancel()
 		if err != nil {
 			Log.Warnf("[DoH] tcp forward failed: %v", err)
@@ -349,7 +349,7 @@ func handleDohForwarderTCP(conn net.Conn, r *DohResolver) {
 // форвардеру по UDP или TCP (что запросил резолвер).
 func dohForwarderDial(r *DohResolver) dialFunc {
 	return func(ctx context.Context, network, _ string) (net.Conn, error) {
-		fwd, err := sharedDohForwarder(r)
+		fwd, err := sharedDohForwarder(r) //nolint:contextcheck
 		if err != nil {
 			return nil, err
 		}
@@ -506,7 +506,7 @@ func udpProbe(timeout time.Duration) bool {
 		if remaining <= 0 {
 			break
 		}
-		conn, err := net.DialTimeout("udp", server, remaining)
+		conn, err := net.DialTimeout("udp", server, remaining) //nolint:noctx
 		if err != nil {
 			continue
 		}

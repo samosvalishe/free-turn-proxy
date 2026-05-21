@@ -18,11 +18,11 @@ func TestHandshakeSemBlocksWhenFull(t *testing.T) {
 
 	d := &Dialer{HandshakeSem: sem}
 
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0") //nolint:noctx
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	defer pc.Close()
+	defer pc.Close() //nolint:errcheck
 	peer := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 1}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

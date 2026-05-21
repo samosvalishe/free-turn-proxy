@@ -65,6 +65,7 @@ func main() {
 		case <-time.After(5 * time.Second):
 		}
 		logger.Errorf("Exit...")
+		cancel()
 		os.Exit(1)
 	}()
 
@@ -98,7 +99,7 @@ func main() {
 		Dialer:          appDialer,
 		ManualOnly:      cfg.VK.ManualCaptcha,
 		StreamsPerCache: cfg.VK.StreamsPerCred,
-		StreamsAlive:    func() int32 { return connectedStreams.Load() },
+		StreamsAlive:    connectedStreams.Load,
 		ManualSolver:    manualCaptchaSolver,
 		Log:             logger,
 	})

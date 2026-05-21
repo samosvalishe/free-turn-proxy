@@ -35,7 +35,7 @@ type directTCPListener struct {
 }
 
 func (DirectNet) ListenPacket(network string, address string) (net.PacketConn, error) {
-	return net.ListenPacket(network, address)
+	return net.ListenPacket(network, address) //nolint:noctx
 }
 
 func (DirectNet) ListenUDP(network string, locAddr *net.UDPAddr) (transport.UDPConn, error) {
@@ -51,7 +51,7 @@ func (DirectNet) ListenTCP(network string, laddr *net.TCPAddr) (transport.TCPLis
 }
 
 func (DirectNet) Dial(network, address string) (net.Conn, error) {
-	return net.Dial(network, address)
+	return net.Dial(network, address) //nolint:noctx
 }
 
 func (DirectNet) DialUDP(network string, laddr, raddr *net.UDPAddr) (transport.UDPConn, error) {

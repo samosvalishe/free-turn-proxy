@@ -233,7 +233,7 @@ func writeBondFrameToNextLane(ctx context.Context, lanes []*lane, typ byte, seq 
 
 func (h *Handler) copyBondToTCP(ctx context.Context, connID uint64, tcpConn net.Conn, recvCh <-chan bondframe.Frame) {
 	chunks := bondframe.Reorder(ctx, tcpConn, recvCh, bondframe.ReorderHooks{
-		OnOverflow:    func(have int) { h.Deps.log().Errorf("[bond %d] pending map overflow (>%d), closing", connID, bondframe.PendingCap) },
+		OnOverflow:    func(_ int) { h.Deps.log().Errorf("[bond %d] pending map overflow (>%d), closing", connID, bondframe.PendingCap) },
 		OnUnknownType: func(typ byte) { h.Deps.log().Errorf("[bond %d] unknown frame type %d", connID, typ) },
 		OnWriteError:  func(err error) { h.Deps.log().Errorf("[bond %d] local TCP write error: %v", connID, err) },
 		OnCloseWrite:  h.Deps.log().Debugf,

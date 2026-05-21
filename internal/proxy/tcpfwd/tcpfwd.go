@@ -78,7 +78,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 	case <-pool.Ready():
 	}
 
-	listener, err := net.Listen("tcp", listenAddr)
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", listenAddr)
 	if err != nil {
 		wgMaint.Wait()
 		return fmt.Errorf("tcpfwd listen %s: %w", listenAddr, err)
@@ -104,7 +104,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 			if ctx.Err() != nil {
 				wgConn.Wait()
 				wgMaint.Wait()
-				return nil
+				return nil //nolint:nilerr // ctx cancel = clean shutdown, not an error
 			}
 			deps.log().Errorf("TCP accept error: %s", err)
 			continue

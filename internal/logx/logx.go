@@ -35,9 +35,9 @@ func (l *stdLogger) Debugf(format string, v ...any) {
 		log.Printf("[DEBUG] "+format, v...)
 	}
 }
-func (l *stdLogger) Infof(format string, v ...any)  { log.Printf("[INFO] "+format, v...) }
-func (l *stdLogger) Warnf(format string, v ...any)  { log.Printf("[WARN] "+format, v...) }
-func (l *stdLogger) Errorf(format string, v ...any) { log.Printf("[ERROR] "+format, v...) }
+func (*stdLogger) Infof(format string, v ...any)  { log.Printf("[INFO] "+format, v...) }
+func (*stdLogger) Warnf(format string, v ...any)  { log.Printf("[WARN] "+format, v...) }
+func (*stdLogger) Errorf(format string, v ...any) { log.Printf("[ERROR] "+format, v...) }
 func (l *stdLogger) DebugEnabled() bool             { return l.debug }
 
 // OrNop возвращает l, если он не nil, иначе Nop. Используется в конструкторах

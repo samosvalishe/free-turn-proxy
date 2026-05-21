@@ -6,13 +6,18 @@ linters:
     - bodyclose
     - misspell
     - revive
+    - nilerr
+    - contextcheck
+    - noctx
+    - unconvert
+    - unparam
+    - gocritic
+    - prealloc
   settings:
     errcheck:
       check-type-assertions: true
-      check-blank: true
       exclude-functions:
         - (net.PacketConn).WriteTo
-        - (net.Conn).Write
         - encoding/json.MarshalIndent
         - (*github.com/pion/dtls/v3.Conn).SetDeadline
     govet:
@@ -38,13 +43,15 @@ linters:
         - name: unexported-return
         - name: indent-error-flow
         - name: errorf
+        - name: unused-parameter
+        - name: superfluous-else
+        - name: unused-receiver
   exclusions:
     generated: lax
     presets:
       - comments
       - common-false-positives
       - legacy
-      - std-error-handling
     paths:
       - third_party$
       - builtin$
@@ -53,6 +60,10 @@ linters:
       - linters:
           - errcheck
         source: "doRequest|packetPool\\.Get"
+      - linters:
+          - gocritic
+        path: "^cmd/"
+        text: "exitAfterDefer"
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

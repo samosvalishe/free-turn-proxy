@@ -39,7 +39,7 @@ func (dummyConn) RemoteAddr() net.Addr             { return nil }
 func (dummyConn) SetDeadline(time.Time) error      { return nil }
 func (dummyConn) SetReadDeadline(time.Time) error  { return nil }
 func (dummyConn) SetWriteDeadline(time.Time) error { return nil }
-func (dummyConn) Read(b []byte) (int, error)       { return 0, nil }
+func (dummyConn) Read(_ []byte) (int, error)       { return 0, nil }
 
 func TestSplitFirstWriteConn_SplitsFirstWrite(t *testing.T) {
 	t.Parallel()

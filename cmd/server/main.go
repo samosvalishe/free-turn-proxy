@@ -52,6 +52,7 @@ func main() {
 		case <-time.After(5 * time.Second):
 		}
 		logger.Warnf("Forced exit after shutdown timeout")
+		cancel()
 		os.Exit(1)
 	}()
 

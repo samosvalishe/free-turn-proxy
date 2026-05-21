@@ -23,7 +23,7 @@ type fakeStream struct {
 
 func newFakeStream() *fakeStream { return &fakeStream{} }
 
-func (f *fakeStream) Read([]byte) (int, error) { return 0, io.EOF }
+func (*fakeStream) Read([]byte) (int, error) { return 0, io.EOF }
 
 func (f *fakeStream) Write(p []byte) (int, error) {
 	if f.writeFn != nil {
@@ -34,7 +34,7 @@ func (f *fakeStream) Write(p []byte) (int, error) {
 	return f.sink.Write(p)
 }
 
-func (f *fakeStream) SetDeadline(time.Time) error { return nil }
+func (*fakeStream) SetDeadline(time.Time) error { return nil }
 
 func (f *fakeStream) writtenFrames(t *testing.T) []bondframe.Frame {
 	t.Helper()
@@ -75,8 +75,8 @@ func newTestConn(t *testing.T) *serverConn {
 func TestCopyBondToBackendReorder(t *testing.T) {
 	c := newTestConn(t)
 	backendA, backendB := net.Pipe()
-	defer backendA.Close()
-	defer backendB.Close()
+	defer backendA.Close() //nolint:errcheck
+	defer backendB.Close() //nolint:errcheck
 
 	collected := make(chan []byte, 1)
 	go func() {
@@ -116,8 +116,8 @@ func TestCopyBondToBackendReorder(t *testing.T) {
 func TestCopyBondToBackendPendingDrains(t *testing.T) {
 	c := newTestConn(t)
 	backendA, backendB := net.Pipe()
-	defer backendA.Close()
-	defer backendB.Close()
+	defer backendA.Close() //nolint:errcheck
+	defer backendB.Close() //nolint:errcheck
 
 	collected := make(chan []byte, 1)
 	go func() {
@@ -172,7 +172,7 @@ func TestWriteToNextLaneRoundRobin(t *testing.T) {
 
 	var idx uint64
 	for seq := range 6 {
-		if err := c.writeToNextLane(bondframe.FrameData, uint64(seq), []byte{byte(seq)}, &idx); err != nil {
+		if err := c.writeToNextLane(uint64(seq), []byte{byte(seq)}, &idx); err != nil {
 			t.Fatalf("write seq %d: %v", seq, err)
 		}
 	}
@@ -198,14 +198,14 @@ func TestWriteToNextLaneChurn(t *testing.T) {
 	c := newTestConn(t)
 	good := newFakeStream()
 	bad := newFakeStream()
-	bad.writeFn = func(p []byte) (int, error) { return 0, errors.New("boom") }
+	bad.writeFn = func(_ []byte) (int, error) { return 0, errors.New("boom") }
 	l0 := &serverLane{index: 0, stream: bad}
 	l1 := &serverLane{index: 1, stream: good}
 	c.lanes = []*serverLane{l0, l1}
 
 	var idx uint64
 	for seq := range 4 {
-		if err := c.writeToNextLane(bondframe.FrameData, uint64(seq), []byte{byte(seq)}, &idx); err != nil {
+		if err := c.writeToNextLane(uint64(seq), []byte{byte(seq)}, &idx); err != nil {
 			t.Fatalf("seq %d: %v", seq, err)
 		}
 	}
@@ -230,13 +230,13 @@ func TestWriteToNextLaneAllFail(t *testing.T) {
 	c := newTestConn(t)
 	mk := func(idx uint16) *serverLane {
 		s := newFakeStream()
-		s.writeFn = func(p []byte) (int, error) { return 0, errors.New("boom") }
+		s.writeFn = func(_ []byte) (int, error) { return 0, errors.New("boom") }
 		return &serverLane{index: idx, stream: s}
 	}
 	c.lanes = []*serverLane{mk(0), mk(1)}
 
 	var idx uint64
-	err := c.writeToNextLane(bondframe.FrameData, 0, []byte("x"), &idx)
+	err := c.writeToNextLane(0, []byte("x"), &idx)
 	if err == nil {
 		t.Fatal("expected error when all lanes fail")
 	}
