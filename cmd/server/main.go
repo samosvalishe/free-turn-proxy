@@ -51,7 +51,7 @@ func main() {
 		case <-signalChan:
 		case <-time.After(5 * time.Second):
 		}
-		logger.Errorf("Exit...")
+		logger.Warnf("Forced exit after shutdown timeout")
 		os.Exit(1)
 	}()
 
@@ -114,6 +114,10 @@ func main() {
 		}
 		conn, err := listener.Accept()
 		if err != nil {
+			if ctx.Err() != nil {
+				wg.Wait()
+				return
+			}
 			logger.Warnf("accept: %v", err)
 			continue
 		}

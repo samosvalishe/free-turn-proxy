@@ -6,6 +6,7 @@ package bondserver
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -75,7 +76,7 @@ func (r *Registry) HandleStreamAfterMagic(ctx context.Context, tenant auth.Tenan
 
 func (r *Registry) handleStream(ctx context.Context, tenant auth.TenantID, stream *smux.Stream, connectAddr string, readHello func(io.Reader) (bondframe.Hello, error)) {
 	defer func() {
-		if err := stream.Close(); err != nil && err != smux.ErrGoAway {
+		if err := stream.Close(); err != nil && !errors.Is(err, smux.ErrGoAway) {
 			r.deps.log().Errorf("bondserver: close smux stream: %v", err)
 		}
 	}()
@@ -297,9 +298,9 @@ func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
 	for {
 		n, err := backendConn.Read(buf)
 		if n > 0 {
-			data := make([]byte, n)
-			copy(data, buf[:n])
-			if writeErr := c.writeToNextLane(bondframe.FrameData, seq, data, &laneIdx); writeErr != nil {
+			// writeToNextLane is synchronous (WriteFrame returns before lane
+			// switch), so buf[:n] can be passed directly — matches bondclient.
+			if writeErr := c.writeToNextLane(bondframe.FrameData, seq, buf[:n], &laneIdx); writeErr != nil {
 				c.deps.log().Errorf("[bond %d] lane write data error: %v", c.id, writeErr)
 				return
 			}
