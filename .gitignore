@@ -1,5 +1,6 @@
 .idea
 .claude
+CLAUDE.md
 *.exe
 *.so
 *.tmp

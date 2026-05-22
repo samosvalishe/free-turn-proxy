@@ -132,7 +132,7 @@ func (c *Conn) WrapInto(dst, payload []byte) (int, error) {
 	// RTP-заголовок.
 	dst[0] = rtpVersion
 	dst[1] = rtpPT
-	seq := uint16(c.seq.Add(1) - 1)
+	seq := uint16(c.seq.Add(1) - 1) //nolint:gosec // RTP sequence number is intentionally mod 2^16
 	binary.BigEndian.PutUint16(dst[2:4], seq)
 	ts := c.timestamp.Add(tsStep) - tsStep
 	binary.BigEndian.PutUint32(dst[4:8], ts)

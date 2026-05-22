@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"time"
 )
@@ -78,10 +79,13 @@ func ParseHelloHeader(hdr []byte) (Hello, error) {
 }
 
 func WriteFrame(w io.Writer, typ byte, seq uint64, data []byte) error {
+	if uint64(len(data)) > math.MaxUint32 {
+		return fmt.Errorf("bondframe: data too large: %d", len(data))
+	}
 	var hdr [13]byte
 	hdr[0] = typ
 	binary.BigEndian.PutUint64(hdr[1:9], seq)
-	binary.BigEndian.PutUint32(hdr[9:13], uint32(len(data)))
+	binary.BigEndian.PutUint32(hdr[9:13], uint32(len(data))) //nolint:gosec // bounded above
 	if _, err := w.Write(hdr[:]); err != nil {
 		return err
 	}

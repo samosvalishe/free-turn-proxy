@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -13,6 +12,7 @@ import (
 	"github.com/cbeuw/connutil"
 	"github.com/samosvalishe/btp/internal/client/vkauth"
 	"github.com/samosvalishe/btp/internal/proxy/common"
+	"github.com/samosvalishe/btp/internal/randx"
 	"github.com/samosvalishe/btp/internal/stats"
 	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 )
@@ -36,7 +36,7 @@ func DTLSLoop(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(time.Duration(1+rand.Intn(2)) * time.Second):
+				case <-time.After(time.Duration(1+randx.Intn(2)) * time.Second):
 				}
 				continue
 			}
@@ -44,7 +44,7 @@ func DTLSLoop(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(time.Duration(10+rand.Intn(20)) * time.Second):
+				case <-time.After(time.Duration(10+randx.Intn(20)) * time.Second):
 				}
 			}
 		}
@@ -118,7 +118,7 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 
 func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) error {
 	select {
-	case <-time.After(time.Duration(rand.Intn(400)+100) * time.Millisecond):
+	case <-time.After(time.Duration(randx.Intn(400)+100) * time.Millisecond):
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -127,8 +127,8 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 	defer dtlscancel()
 
 	conn1, conn2 := connutil.AsyncPacketPipe()
-	defer conn1.Close()
-	defer conn2.Close()
+	defer func() { _ = conn1.Close() }()
+	defer func() { _ = conn2.Close() }()
 	// TURNLoop может перезапускать oneTURN несколько раз в рамках одного DTLS
 	// соединения, каждый раз перечитывая conn2; публикуем до завершения DTLS.
 	go func() {
@@ -216,7 +216,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	var err error
 	defer func() { c <- err }()
 	select {
-	case <-time.After(time.Duration(rand.Intn(400)+100) * time.Millisecond):
+	case <-time.After(time.Duration(randx.Intn(400)+100) * time.Millisecond):
 	case <-ctx.Done():
 		err = ctx.Err()
 		return

@@ -167,10 +167,11 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 				}
 			}
 			fromSession, toSession := netconn.BiCopy(ctx, tc, stream, errf)
-			sessRef.FromSession.Add(uint64(fromSession))
-			sessRef.ToSession.Add(uint64(toSession))
+			fromU, toU := nonNegUint64(fromSession), nonNegUint64(toSession)
+			sessRef.FromSession.Add(fromU)
+			sessRef.ToSession.Add(toU)
 			deps.log().Debugf("[session %d] TCP done #%d local<-session=%s local->session=%s",
-				sessRef.ID, cid, stats.FormatByteCount(uint64(fromSession)), stats.FormatByteCount(uint64(toSession)))
+				sessRef.ID, cid, stats.FormatByteCount(fromU), stats.FormatByteCount(toU))
 		})
 	}
 }
@@ -255,7 +256,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	cleanupFns = append(cleanupFns, func() { _ = dtlsConn.Close() })
 	deps.log().Debugf("DTLS connection established")
 
-	statsCtx, statsCancel := context.WithCancel(ctx)
+	statsCtx, statsCancel := context.WithCancel(ctx) //nolint:gosec // cancel is held in cleanupFns and invoked via cleanup() LIFO
 	cleanupFns = append(cleanupFns, statsCancel)
 	st := stats.New(deps.log().DebugEnabled())
 	go st.LogEvery(statsCtx, deps.log().Debugf, fmt.Sprintf("[session %d] TCP", id), "to-turn", "from-turn")
@@ -277,4 +278,13 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	deps.log().Debugf("smux session established")
 
 	return smuxSess, cleanup, nil
+}
+
+// nonNegUint64 безопасно приводит int64-счётчик байт к uint64 (io.Copy
+// возвращает n >= 0 при успехе, но на ошибке n может быть отрицательным).
+func nonNegUint64(n int64) uint64 {
+	if n < 0 {
+		return 0
+	}
+	return uint64(n)
 }

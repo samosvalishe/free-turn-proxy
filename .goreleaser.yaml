@@ -149,51 +149,23 @@ release:
   draft: false
   name_template: "{{ .ProjectName }} {{ .Version }}"
 
-dockers:
-  - id: server-amd64
+dockers_v2:
+  - id: server
     ids:
       - server
-    image_templates:
-      - "ghcr.io/samosvalishe/btp:{{ .Version }}-amd64"
     dockerfile: Dockerfile.goreleaser
-    use: buildx
-    goos: linux
-    goarch: amd64
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.source=https://github.com/samosvalishe/btp"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-      - "--label=org.opencontainers.image.created={{ .Date }}"
+    images:
+      - ghcr.io/samosvalishe/btp
+    tags:
+      - "{{ .Version }}"
+      - '{{ if not .Prerelease }}latest{{ end }}'
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.source: https://github.com/samosvalishe/btp
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .Date }}"
     extra_files:
       - docker/entrypoint.sh
-
-  - id: server-arm64
-    ids:
-      - server
-    image_templates:
-      - "ghcr.io/samosvalishe/btp:{{ .Version }}-arm64"
-    dockerfile: Dockerfile.goreleaser
-    use: buildx
-    goos: linux
-    goarch: arm64
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.source=https://github.com/samosvalishe/btp"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-      - "--label=org.opencontainers.image.created={{ .Date }}"
-    extra_files:
-      - docker/entrypoint.sh
-
-docker_manifests:
-  - name_template: "ghcr.io/samosvalishe/btp:{{ .Version }}"
-    image_templates:
-      - "ghcr.io/samosvalishe/btp:{{ .Version }}-amd64"
-      - "ghcr.io/samosvalishe/btp:{{ .Version }}-arm64"
-
-  - name_template: "ghcr.io/samosvalishe/btp:latest"
-    skip_push: "{{ .Prerelease }}"
-    image_templates:
-      - "ghcr.io/samosvalishe/btp:{{ .Version }}-amd64"
-      - "ghcr.io/samosvalishe/btp:{{ .Version }}-arm64"

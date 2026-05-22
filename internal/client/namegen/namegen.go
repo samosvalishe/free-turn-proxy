@@ -4,8 +4,9 @@ package namegen
 
 import (
 	_ "embed"
-	"math/rand/v2"
 	"strings"
+
+	"github.com/samosvalishe/btp/internal/randx"
 )
 
 //go:embed data/first_names_male.txt
@@ -60,19 +61,19 @@ const SurnameProbability = 0.7
 // Generate возвращает случайное "Имя" или "Имя Фамилия".
 // Пол выбирается равномерно; женские фамилии феминизируются.
 func Generate() string {
-	isFemale := rand.IntN(2) == 0
+	isFemale := randx.IntN(2) == 0
 
 	pool := maleFirstNames
 	if isFemale {
 		pool = femaleFirstNames
 	}
-	fn := pool[rand.IntN(len(pool))]
+	fn := pool[randx.IntN(len(pool))]
 
-	if rand.Float64() >= SurnameProbability {
+	if randx.Float64() >= SurnameProbability {
 		return fn
 	}
 
-	ln := lastNames[rand.IntN(len(lastNames))]
+	ln := lastNames[randx.IntN(len(lastNames))]
 	if isFemale {
 		ln = feminizeSurname(ln)
 	}

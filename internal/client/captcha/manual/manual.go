@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -548,7 +549,7 @@ func startCaptchaServer(srv *http.Server, logPrefix string) error {
 // runCaptchaServerAndWait открывает браузер и ждёт токен решения.
 // При срабатывании ctx возвращает ctx.Err(); в обоих случаях HTTP-сервер останавливается.
 func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaURL string, keyCh <-chan string, logPrefix string) (string, error) {
-	srv := &http.Server{Handler: handler}
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 
 	if err := startCaptchaServer(srv, logPrefix); err != nil {
 		return "", err
@@ -700,7 +701,8 @@ func SolveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer) (
 			Log.Errorf("[Captcha Proxy] %s %s: %v", r.Method, r.URL.String(), err)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadGateway)
-			_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:20px"><h2>Captcha proxy error</h2><p>%s %s</p><p>%v</p></body></html>`, r.Method, r.URL.String(), err)
+			_, _ = fmt.Fprintf(w, `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:20px"><h2>Captcha proxy error</h2><p>%s %s</p><p>%s</p></body></html>`,
+				html.EscapeString(r.Method), html.EscapeString(r.URL.String()), html.EscapeString(err.Error()))
 		},
 		ModifyResponse: func(res *http.Response) error {
 			rewriteProxyCookies(res.Header)
@@ -870,7 +872,9 @@ func SolveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer) (
 
 func openBrowser(url string) {
 	for _, cmd := range browserOpenCommands(runtime.GOOS, url) {
-		if err := exec.Command(cmd.name, cmd.args...).Start(); err == nil { //nolint:noctx
+		// cmd.name/args приходят из жёстко закодированного browserOpenCommands;
+		// внешнего ввода в exec.Command нет (url передан внутри args как обычная строка).
+		if err := exec.Command(cmd.name, cmd.args...).Start(); err == nil { //nolint:noctx,gosec // hardcoded browser binary list, no taint
 			return
 		}
 	}

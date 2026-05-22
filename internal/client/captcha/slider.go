@@ -10,12 +10,13 @@ import (
 	"image/color"
 	_ "image/jpeg" // регистрация JPEG-декодера для image.Decode
 	"math"
-	mathrand "math/rand"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/samosvalishe/btp/internal/randx"
 )
 
 type sliderPuzzle struct {
@@ -509,7 +510,10 @@ func sampleLumaMapped(img image.Image, dstRect image.Rectangle, srcRect image.Re
 	c := sampleColorMapped(img, dstRect, srcRect, dstX, dstY)
 	r, g, b, _ := c.RGBA()
 	y := (299*(r>>8) + 587*(g>>8) + 114*(b>>8)) / 1000
-	return uint8(y)
+	if y > 255 {
+		y = 255
+	}
+	return uint8(y) //nolint:gosec // bounded above by 255
 }
 
 func absFloat(v float64) float64 {
@@ -565,29 +569,29 @@ func buildSliderCursor(candidateIndex int, candidateCount int) string {
 		Y int `json:"y"`
 	}
 
-	startX := 570 + mathrand.Intn(40)
-	startY := 875 + mathrand.Intn(30)
+	startX := 570 + randx.Intn(40)
+	startY := 875 + randx.Intn(30)
 
 	denom := candidateCount - 1
 	if denom < 1 {
 		denom = 1
 	}
 	baseTargetX := 734 + (937-734)*(candidateIndex-1)/denom
-	targetX := baseTargetX + mathrand.Intn(10) - 5
-	targetY := 655 + mathrand.Intn(14)
+	targetX := baseTargetX + randx.Intn(10) - 5
+	targetY := 655 + randx.Intn(14)
 
 	points := make([]cursorPoint, 0, 28)
 
-	for i := 0; i < 1+mathrand.Intn(3); i++ {
+	for i := 0; i < 1+randx.Intn(3); i++ {
 		points = append(points, cursorPoint{
-			X: startX + mathrand.Intn(5) - 2,
-			Y: startY + mathrand.Intn(5) - 2,
+			X: startX + randx.Intn(5) - 2,
+			Y: startY + randx.Intn(5) - 2,
 		})
 	}
 
-	transitSteps := 2 + mathrand.Intn(3)
-	arcOffX := mathrand.Intn(60) - 30
-	arcOffY := -(mathrand.Intn(30) + 10)
+	transitSteps := 2 + randx.Intn(3)
+	arcOffX := randx.Intn(60) - 30
+	arcOffY := -(randx.Intn(30) + 10)
 	for i := 1; i <= transitSteps; i++ {
 		t := float64(i) / float64(transitSteps+1)
 		cx := float64(startX+targetX)/2 + float64(arcOffX)
@@ -596,25 +600,25 @@ func buildSliderCursor(candidateIndex int, candidateCount int) string {
 		by := (1-t)*(1-t)*float64(startY) + 2*t*(1-t)*cy + t*t*float64(targetY)
 		jitter := int((1-t)*8) + 2
 		points = append(points, cursorPoint{
-			X: int(math.Round(bx)) + mathrand.Intn(jitter*2+1) - jitter,
-			Y: int(math.Round(by)) + mathrand.Intn(jitter*2+1) - jitter,
+			X: int(math.Round(bx)) + randx.Intn(jitter*2+1) - jitter,
+			Y: int(math.Round(by)) + randx.Intn(jitter*2+1) - jitter,
 		})
 	}
 
-	approachSteps := 4 + mathrand.Intn(4)
+	approachSteps := 4 + randx.Intn(4)
 	prev := points[len(points)-1]
 	for i := 1; i <= approachSteps; i++ {
 		t := float64(i) / float64(approachSteps)
-		ax := prev.X + int(math.Round(t*float64(targetX-prev.X))) + mathrand.Intn(5) - 2
-		ay := prev.Y + int(math.Round(t*float64(targetY-prev.Y))) + mathrand.Intn(5) - 2
+		ax := prev.X + int(math.Round(t*float64(targetX-prev.X))) + randx.Intn(5) - 2
+		ay := prev.Y + int(math.Round(t*float64(targetY-prev.Y))) + randx.Intn(5) - 2
 		points = append(points, cursorPoint{X: ax, Y: ay})
 	}
 
-	settleCount := 3 + mathrand.Intn(5)
+	settleCount := 3 + randx.Intn(5)
 	for i := 0; i < settleCount; i++ {
 		points = append(points, cursorPoint{
-			X: targetX + mathrand.Intn(7) - 3,
-			Y: targetY + mathrand.Intn(7) - 3,
+			X: targetX + randx.Intn(7) - 3,
+			Y: targetY + randx.Intn(7) - 3,
 		})
 	}
 

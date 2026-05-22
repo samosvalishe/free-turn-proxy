@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	mathrand "math/rand"
 	"regexp"
 	"strconv"
 	"strings"
@@ -23,6 +22,7 @@ import (
 
 	"github.com/samosvalishe/btp/internal/client/browserprofile"
 	"github.com/samosvalishe/btp/internal/logx"
+	"github.com/samosvalishe/btp/internal/randx"
 )
 
 // Log — пакетный логгер. По умолчанию no-op; main устанавливает его через
@@ -449,7 +449,7 @@ func (s *captchaSession) solveCheckboxCaptcha(
 	select {
 	case <-s.ctx.Done():
 		return "", s.ctx.Err()
-	case <-time.After(time.Duration(400+mathrand.Intn(250)) * time.Millisecond):
+	case <-time.After(time.Duration(400+randx.Intn(250)) * time.Millisecond):
 	}
 
 	check, err := s.performCaptchaCheck(sessionToken, browserFP, hash, "{}", "[]", debugInfo)

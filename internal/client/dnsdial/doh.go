@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -334,9 +335,13 @@ func handleDohForwarderTCP(conn net.Conn, r *DohResolver) {
 			Log.Warnf("[DoH] tcp forward failed: %v", err)
 			return
 		}
+		if len(resp) > 0xFFFF {
+			Log.Warnf("[DoH] response too large for TCP framing: %d", len(resp))
+			return
+		}
 		out := make([]byte, 2+len(resp))
-		out[0] = byte(len(resp) >> 8)
-		out[1] = byte(len(resp))
+		respLen := uint16(len(resp)) //nolint:gosec // bounded above
+		binary.BigEndian.PutUint16(out[:2], respLen)
 		copy(out[2:], resp)
 		_ = conn.SetWriteDeadline(time.Now().Add(forwarderTCPWriteDL)) //nolint:errcheck
 		if _, err := conn.Write(out); err != nil {

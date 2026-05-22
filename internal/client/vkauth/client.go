@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/samosvalishe/btp/internal/logx"
+	"github.com/samosvalishe/btp/internal/randx"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
@@ -96,7 +96,7 @@ func New(cfg Config) *Client {
 	}
 	c.tokenChain = c.getTokenChain
 	c.minFetchIntervalFn = func() time.Duration {
-		return 3*time.Second + time.Duration(rand.Intn(3000))*time.Millisecond
+		return 3*time.Second + time.Duration(randx.Intn(3000))*time.Millisecond
 	}
 	return c
 }
@@ -238,7 +238,7 @@ func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, 
 }
 
 func vkDelayRandom(ctx context.Context, minMs, maxMs int) error {
-	ms := minMs + rand.Intn(maxMs-minMs+1)
+	ms := minMs + randx.Intn(maxMs-minMs+1)
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

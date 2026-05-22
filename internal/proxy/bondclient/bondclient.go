@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -76,11 +77,14 @@ func (h *Handler) Handle(ctx context.Context, tcpConn net.Conn, connID uint64, c
 		opened = append(opened, pending{ps: ps, stream: stream})
 	}
 
+	if len(opened) > math.MaxUint16 {
+		opened = opened[:math.MaxUint16]
+	}
 	lanes := make([]*lane, 0, len(opened))
 	laneIDs := make([]string, 0, len(opened))
-	laneCount := uint16(len(opened))
+	laneCount := uint16(len(opened)) //nolint:gosec // bounded above by MaxUint16
 	for i, p := range opened {
-		if err := bondframe.WriteHello(p.stream, connID, uint16(i), laneCount); err != nil {
+		if err := bondframe.WriteHello(p.stream, connID, uint16(i), laneCount); err != nil { //nolint:gosec // i < laneCount <= MaxUint16
 			h.Deps.log().Errorf("[bond %d] session %d hello error: %s", connID, p.ps.ID, err)
 			_ = p.stream.Close()
 			continue

@@ -20,7 +20,12 @@ type TurnCredentials struct {
 	Link        string
 }
 
-// DefaultCredentials — публичные app_id VK SDK; клиент перебирает по порядку.
+// DefaultCredentials — публичные app_id/secret VK SDK, извлечённые из
+// официальных VK-клиентов (web/mobile/video). Это НЕ приватные креды
+// пользователя — VK раздаёт их в JS-бандле страницы калла. Клиент перебирает
+// по порядку при ошибках авторизации.
+//
+//nolint:gosec // public VK SDK app credentials, not user secrets
 var DefaultCredentials = []VKCredentials{
 	{ClientID: "6287487", ClientSecret: "QbYic1K3lEV5kTGiqlq2"},  // VK_WEB_APP_ID
 	{ClientID: "7879029", ClientSecret: "aR5NKGmm03GYrCiNKsaw"},  // VK_MVK_APP_ID

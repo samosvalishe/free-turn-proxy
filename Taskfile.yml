@@ -7,7 +7,7 @@ vars:
   LDFLAGS: -s -w -checklinkname=0 -X main.version={{.VERSION}}
   GOLANGCI_VERSION: v2.12.2
   GOVULN_VERSION: v1.1.4
-  GORELEASER_VERSION: v2.5.0
+  GORELEASER_VERSION: v2.15.4
 
 tasks:
   default:

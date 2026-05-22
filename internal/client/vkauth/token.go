@@ -44,8 +44,8 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 		return "", "", nil, err
 	}
 
-	if err := vkDelayRandom(ctx, 100, 150); err != nil {
-		return "", "", nil, err
+	if delayErr := vkDelayRandom(ctx, 100, 150); delayErr != nil {
+		return "", "", nil, delayErr
 	}
 
 	// Шаг 1a: прогрев getCallPreview (не критично).
@@ -55,8 +55,8 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 		c.log.Warnf("[STREAM %d] [VK Auth] getCallPreview failed: %v", streamID, prevErr)
 	}
 
-	if err := vkDelayRandom(ctx, 200, 400); err != nil {
-		return "", "", nil, err
+	if delayErr := vkDelayRandom(ctx, 200, 400); delayErr != nil {
+		return "", "", nil, delayErr
 	}
 
 	// Шаг 2: анонимный call-токен (здесь может сработать captcha).
@@ -65,8 +65,8 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 		return "", "", nil, err
 	}
 
-	if err := vkDelayRandom(ctx, 100, 150); err != nil {
-		return "", "", nil, err
+	if delayErr := vkDelayRandom(ctx, 100, 150); delayErr != nil {
+		return "", "", nil, delayErr
 	}
 
 	// Шаг 3: ok.ru session_key.
@@ -75,8 +75,8 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 		return "", "", nil, err
 	}
 
-	if err := vkDelayRandom(ctx, 100, 150); err != nil {
-		return "", "", nil, err
+	if delayErr := vkDelayRandom(ctx, 100, 150); delayErr != nil {
+		return "", "", nil, delayErr
 	}
 
 	// Шаг 4: TURN-реквизиты.
