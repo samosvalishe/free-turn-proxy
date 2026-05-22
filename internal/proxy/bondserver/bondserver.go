@@ -266,7 +266,9 @@ func (c *serverConn) run() {
 
 func (c *serverConn) copyBondToBackend(backendConn net.Conn) {
 	chunks := bondframe.Reorder(c.ctx, backendConn, c.recvCh, bondframe.ReorderHooks{
-		OnOverflow:    func(_ int) { c.deps.log().Errorf("[bond %d] pending map overflow (>%d), closing", c.id, bondframe.PendingCap) },
+		OnOverflow: func(_ int) {
+			c.deps.log().Errorf("[bond %d] pending map overflow (>%d), closing", c.id, bondframe.PendingCap)
+		},
 		OnUnknownType: func(typ byte) { c.deps.log().Errorf("[bond %d] unknown frame type %d", c.id, typ) },
 		OnWriteError:  func(err error) { c.deps.log().Errorf("[bond %d] backend write error: %v", c.id, err) },
 		OnCloseWrite:  c.deps.log().Debugf,

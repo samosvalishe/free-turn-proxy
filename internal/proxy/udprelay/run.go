@@ -33,12 +33,12 @@ type AuthHandler interface {
 
 // Params — per-stream конфигурация TURN/wrap, общая для DTLS и TURN циклов.
 type Params struct {
-	Host     string
-	Port     string
-	Link     string
+	Host         string
+	Port         string
+	Link         string
 	TransportUDP bool
-	ObfKey  []byte
-	GetCreds GetCredsFunc
+	ObfKey       []byte
+	GetCreds     GetCredsFunc
 }
 
 // ErrFatal возвращается из Run, когда поток встречает условие, требующее

@@ -122,14 +122,14 @@ func main() {
 			BondHandler: bondH.Handle,
 		}
 		tcpParams := &tcpfwd.Params{
-			Host:       cfg.TURN.Host,
-			Port:       cfg.TURN.Port,
-			Link:       cfg.VK.Link,
+			Host:         cfg.TURN.Host,
+			Port:         cfg.TURN.Port,
+			Link:         cfg.VK.Link,
 			TransportUDP: cfg.TURN.TransportUDP,
-			ObfKey:     cfg.Obf.Key,
-			GetCreds:   tcpfwd.GetCredsFunc(vkAuth.GetCredentials),
-			KCPProfile: cfg.KCP.Profile,
-			KCPFEC:     cfg.KCP.FEC,
+			ObfKey:       cfg.Obf.Key,
+			GetCreds:     tcpfwd.GetCredsFunc(vkAuth.GetCredentials),
+			KCPProfile:   cfg.KCP.Profile,
+			KCPFEC:       cfg.KCP.FEC,
 		}
 		if err := tcpfwd.Run(ctx, tcpDeps, tcpParams, peer, cfg.Proxy.Listen, cfg.TURN.N, cfg.Proxy.Mode == config.ProxyModeTCPFwdBond); err != nil {
 			logger.Errorf("tcpfwd: %v", err)
@@ -143,12 +143,12 @@ func main() {
 		HandshakeSem:     make(chan struct{}, dtlsHandshakeConcurrency),
 	}
 	udpParams := &udprelay.Params{
-		Host:     cfg.TURN.Host,
-		Port:     cfg.TURN.Port,
-		Link:     cfg.VK.Link,
+		Host:         cfg.TURN.Host,
+		Port:         cfg.TURN.Port,
+		Link:         cfg.VK.Link,
 		TransportUDP: cfg.TURN.TransportUDP,
-		ObfKey:   cfg.Obf.Key,
-		GetCreds: udprelay.GetCredsFunc(vkAuth.GetCredentials),
+		ObfKey:       cfg.Obf.Key,
+		GetCreds:     udprelay.GetCredsFunc(vkAuth.GetCredentials),
 	}
 	if err := udprelay.Run(ctx, udpDtlsDialer, vkAuth, logger, &connectedStreams, udpParams, peer, cfg.Proxy.Listen, cfg.TURN.N); err != nil {
 		if errors.Is(err, udprelay.ErrFatal) {

@@ -13,9 +13,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/netconn"
 	"github.com/pion/logging"
 	"github.com/pion/turn/v5"
+	"github.com/samosvalishe/btp/internal/netconn"
 )
 
 // Config конфигурирует один вызов Open.

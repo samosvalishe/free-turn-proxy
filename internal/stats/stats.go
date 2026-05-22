@@ -121,7 +121,6 @@ func (c *CountingConn) Read(p []byte) (int, error) {
 	return n, err
 }
 
-
 func (c *CountingConn) Write(p []byte) (int, error) {
 	n, err := c.Conn.Write(p)
 	c.Stats.AddTx(n)

@@ -23,14 +23,14 @@ type GetCredsFunc = common.GetCredsFunc
 
 // Params — конфигурация TURN/wrap для пула.
 type Params struct {
-	Host       string
-	Port       string
-	Link       string
+	Host         string
+	Port         string
+	Link         string
 	TransportUDP bool
-	ObfKey     []byte
-	GetCreds   GetCredsFunc
-	KCPProfile kcptun.Profile
-	KCPFEC     kcptun.FEC
+	ObfKey       []byte
+	GetCreds     GetCredsFunc
+	KCPProfile   kcptun.Profile
+	KCPFEC       kcptun.FEC
 }
 
 // BondHandler распределяет одно принятое TCP-соединение по всем активным сессиям пула.
@@ -278,4 +278,3 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 
 	return smuxSess, cleanup, nil
 }
-

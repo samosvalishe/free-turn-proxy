@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/pion/dtls/v3"
 	"github.com/samosvalishe/btp/internal/config"
 	"github.com/samosvalishe/btp/internal/logx"
 	"github.com/samosvalishe/btp/internal/proxy/bondserver"
@@ -18,7 +19,6 @@ import (
 	"github.com/samosvalishe/btp/internal/proxy/udpserver"
 	"github.com/samosvalishe/btp/internal/transport/dtlsdial"
 	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
-	"github.com/pion/dtls/v3"
 )
 
 // version is populated at build time via -ldflags "-X main.version=...".

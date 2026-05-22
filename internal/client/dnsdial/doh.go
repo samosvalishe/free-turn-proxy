@@ -364,9 +364,9 @@ func dohForwarderDial(r *DohResolver) dialFunc {
 }
 
 const (
-	DNSModePlain  = "plain"
-	DNSModeDoH  = "doh"
-	DNSModeAuto = "auto"
+	DNSModePlain = "plain"
+	DNSModeDoH   = "doh"
+	DNSModeAuto  = "auto"
 )
 
 var udpDNSServersPtr atomic.Pointer[[]string]

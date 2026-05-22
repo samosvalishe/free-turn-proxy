@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	dnsModePlain             = "plain"
+	dnsModePlain           = "plain"
 	dnsModeDoH             = "doh"
 	dnsModeAuto            = "auto"
 	defaultStreamsPerCache = 10
@@ -39,10 +39,10 @@ const (
 
 // TURNOpts — опции TURN-сервера (куда и как подключаться).
 type TURNOpts struct {
-	Host      string // -turn: переопределить IP/host TURN-сервера
-	Port      string // -port: переопределить порт TURN
+	Host         string // -turn: переопределить IP/host TURN-сервера
+	Port         string // -port: переопределить порт TURN
 	TransportUDP bool   // -transport udp: подключение к TURN по UDP (по умолчанию TCP/TLS)
-	N         int    // -n: число TURN-потоков (только клиент)
+	N            int    // -n: число TURN-потоков (только клиент)
 }
 
 // ObfOpts — опции обфускации TURN-payload (SRTP-mimicry).
@@ -135,10 +135,10 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 
 	c := &Client{
 		TURN: TURNOpts{
-			Host: *host,
-			Port: *port,
+			Host:         *host,
+			Port:         *port,
 			TransportUDP: *transportFlag == "udp",
-			N:    *n,
+			N:            *n,
 		},
 		Obf: ObfOpts{
 			Mode:   *wrapMode,
