@@ -8,6 +8,7 @@ vars:
   GOLANGCI_VERSION: v2.12.2
   GOVULN_VERSION: v1.1.4
   GORELEASER_VERSION: v2.15.4
+  TASK_VERSION: v3.51.1
 
 tasks:
   default:
