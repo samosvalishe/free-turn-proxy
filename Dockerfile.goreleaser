@@ -1,0 +1,20 @@
+# Thin runtime image. Built by GoReleaser using a pre-compiled server binary.
+# See .goreleaser.yaml (dockers section) for the build context.
+FROM alpine:3.23
+
+RUN apk add --no-cache ca-certificates tzdata
+
+WORKDIR /app
+
+# GoReleaser places the server binary at the build root, and any files
+# listed in `extra_files` (entrypoint.sh) are also placed in the context root.
+COPY server /app/server
+COPY docker/entrypoint.sh /app/entrypoint.sh
+
+RUN sed -i 's/\r$//' /app/entrypoint.sh \
+ && chmod +x /app/entrypoint.sh /app/server
+
+EXPOSE 56000/udp
+EXPOSE 56000/tcp
+
+ENTRYPOINT ["/app/entrypoint.sh"]

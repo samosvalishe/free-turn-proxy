@@ -25,6 +25,9 @@ import (
 	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 )
 
+// version is populated at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 const dtlsHandshakeConcurrency = 3
 
 // manualCaptchaSolver связывает контракт vkauth.ManualSolveFunc
@@ -49,6 +52,7 @@ func main() {
 	}
 
 	logger := logx.New(cfg.Log.Debug)
+	logger.Infof("btp client version=%s", version)
 	captcha.SetLogger(logger)
 	manualcaptcha.SetLogger(logger)
 	dnsdial.SetLogger(logger)

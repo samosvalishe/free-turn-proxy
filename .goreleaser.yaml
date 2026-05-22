@@ -1,0 +1,199 @@
+# GoReleaser config: https://goreleaser.com
+version: 2
+
+project_name: btp
+
+before:
+  hooks:
+    - go mod download
+
+builds:
+  # Standard client/server builds — pure Go, no CGO.
+  - id: client
+    main: ./cmd/client
+    binary: client
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -checklinkname=0 -X main.version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+    targets:
+      - linux_amd64
+      - linux_arm64
+      - linux_386
+      - linux_arm_7
+      - linux_mipsle_softfloat
+      - linux_mips_softfloat
+      - linux_mips64le_softfloat
+      - linux_riscv64
+      - darwin_amd64
+      - darwin_arm64
+      - windows_amd64
+      - windows_arm64
+      - windows_386
+      - freebsd_amd64
+
+  - id: server
+    main: ./cmd/server
+    binary: server
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -checklinkname=0 -X main.version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+    targets:
+      - linux_amd64
+      - linux_arm64
+      - linux_386
+      - linux_arm_7
+      - linux_mipsle_softfloat
+      - linux_mips_softfloat
+      - linux_mips64le_softfloat
+      - linux_riscv64
+      - darwin_amd64
+      - darwin_arm64
+      - windows_amd64
+      - windows_arm64
+      - windows_386
+      - freebsd_amd64
+
+  # Android client only. Pure Go (CGO=0), packaged as native .so name
+  # for use as Android native library (JNI / standalone shipment).
+  - id: client-android
+    main: ./cmd/client
+    binary: libvkturn2.so
+    no_unique_dist_dir: false
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -checklinkname=0 -X main.version={{.Version}}
+    env:
+      - CGO_ENABLED=0
+    targets:
+      - android_arm64
+      - android_arm
+
+archives:
+  # Default archives for non-Android platforms: tar.gz / zip with bundled binary.
+  - id: default
+    ids:
+      - client
+      - server
+    name_template: >-
+      {{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}
+      {{- with .Arm }}v{{ . }}{{ end }}
+      {{- with .Mips }}-{{ . }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE*
+      - README*
+
+  # Android: ship the .so binary directly (no archive wrapper), with
+  # arch suffix so arm64 and arm coexist on the release page.
+  - id: android
+    ids:
+      - client-android
+    formats: [binary]
+    name_template: "libvkturn2-{{ .Version }}-android-{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+changelog:
+  use: github
+  sort: asc
+  groups:
+    - title: "Breaking Changes"
+      regexp: '^.*?break(\(.+?\))??!?:.+$'
+      order: 0
+    - title: "Features"
+      regexp: '^.*?feat(\(.+?\))??!?:.+$'
+      order: 10
+    - title: "Bug Fixes"
+      regexp: '^.*?fix(\(.+?\))??!?:.+$'
+      order: 20
+    - title: "Performance"
+      regexp: '^.*?perf(\(.+?\))??!?:.+$'
+      order: 30
+    - title: "Refactoring"
+      regexp: '^.*?refactor(\(.+?\))??!?:.+$'
+      order: 40
+    - title: "Other"
+      order: 999
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - '^style:'
+      - 'Merge pull request'
+      - 'Merge branch'
+
+release:
+  github:
+    owner: samosvalishe
+    name: btp
+  prerelease: auto
+  mode: replace
+  draft: false
+  name_template: "{{ .ProjectName }} {{ .Version }}"
+
+dockers:
+  - id: server-amd64
+    ids:
+      - server
+    image_templates:
+      - "ghcr.io/samosvalishe/btp:{{ .Version }}-amd64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    goos: linux
+    goarch: amd64
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.source=https://github.com/samosvalishe/btp"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+    extra_files:
+      - docker/entrypoint.sh
+
+  - id: server-arm64
+    ids:
+      - server
+    image_templates:
+      - "ghcr.io/samosvalishe/btp:{{ .Version }}-arm64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    goos: linux
+    goarch: arm64
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.source=https://github.com/samosvalishe/btp"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+    extra_files:
+      - docker/entrypoint.sh
+
+docker_manifests:
+  - name_template: "ghcr.io/samosvalishe/btp:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/samosvalishe/btp:{{ .Version }}-amd64"
+      - "ghcr.io/samosvalishe/btp:{{ .Version }}-arm64"
+
+  - name_template: "ghcr.io/samosvalishe/btp:latest"
+    skip_push: "{{ .Prerelease }}"
+    image_templates:
+      - "ghcr.io/samosvalishe/btp:{{ .Version }}-amd64"
+      - "ghcr.io/samosvalishe/btp:{{ .Version }}-arm64"

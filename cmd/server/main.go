@@ -21,6 +21,9 @@ import (
 	"github.com/pion/dtls/v3"
 )
 
+// version is populated at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	cfg, err := config.ParseServer(os.Args[1:], os.Stderr)
 	if err != nil {
@@ -28,6 +31,7 @@ func main() {
 		log.Fatalf("%v", err)
 	}
 	logger := logx.New(cfg.Log.Debug)
+	logger.Infof("btp server version=%s", version)
 
 	if cfg.Obf.GenKey {
 		key, gerr := srtpmimicry.GenKeyHex()

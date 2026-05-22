@@ -1,152 +1,110 @@
 name: CI
 
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
 permissions:
   contents: read
 
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.25.0"
+  GOLANGCI_VERSION: v2.12.2
+  GOVULN_VERSION: v1.1.4
+  GORELEASER_VERSION: v2.5.0
+  TASK_VERSION: v3.40.0
 
 jobs:
-  check:
-    name: Lint, fmt-check, and tests
+  lint:
+    name: Lint & format
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v4.2.2
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - uses: actions/setup-go@v5.1.0
         with:
-          go-version: 'stable'
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
-      - name: Cache Go modules
-        uses: actions/cache@v5
+      - uses: arduino/setup-task@v2.0.0
         with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+          version: ${{ env.TASK_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run gofmt (check)
-        run: |
-          echo "Checking formatting with gofmt..."
-          fmt_output=$(gofmt -l . || true)
-          if [ -n "$fmt_output" ]; then
-            echo "The following files need formatting:"
-            echo "$fmt_output"
-            echo "Run 'gofmt -w .' to fix."
-            exit 1
-          fi
+      - name: Format check
+        run: task fmt:check
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
+      - name: Vet
+        run: task vet
+
+      - uses: golangci/golangci-lint-action@v9.2.1
         with:
-          version: latest
+          version: ${{ env.GOLANGCI_VERSION }}
           args: --timeout=5m ./...
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    name: Test (race)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/setup-go@v5.1.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: arduino/setup-task@v2.0.0
+        with:
+          version: ${{ env.TASK_VERSION }}
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests
-        run: |
-          go test -race ./... -v
-          
-  build:
-    name: Build binaries
+        run: task test
+
+  vuln:
+    name: govulncheck
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            cgo: 0
-          - goos: darwin
-            goarch: arm64
-            cgo: 0
-          - goos: android
-            goarch: arm64
-            cgo: 1
-            api: 21
-          - goos: android
-            goarch: arm
-            cgo: 1
-            api: 21
-          # you can add more (android/arm, windows, etc.) later
-
     steps:
-      - name: Check out code
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/setup-go@v5.1.0
         with:
-          fetch-tags: true
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULN_VERSION }}
+
+      - run: govulncheck ./...
+
+  build-snapshot:
+    name: Snapshot build (all targets)
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4.2.2
         with:
-          go-version: 'stable'
+          fetch-depth: 0
 
-      # Install Android NDK for android rows and expose ndk-path output
-      - name: Setup Android NDK
-        if: matrix.goos == 'android'
-        id: setup-ndk
-        uses: nttld/setup-ndk@v1
+      - uses: actions/setup-go@v5.1.0
         with:
-          ndk-version: r26d
-          add-to-path: false
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
 
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: ${{ matrix.cgo }}
-          ANDROID_API: ${{ matrix.api }}
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: |
-          echo "Building for $GOOS/$GOARCH (CGO_ENABLED=$CGO_ENABLED)"
-
-          # If this is an Android build, point CC at the NDK toolchain clang
-          if [ "$GOOS" = "android" ]; then
-            if [ -z "$ANDROID_NDK_HOME" ]; then
-              echo "ANDROID_NDK_HOME is not set – did setup-ndk run?"
-              exit 1
-            fi
-
-            TOOLCHAIN_BIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-
-            if [ "$GOARCH" = "arm64" ]; then
-              export CC="$TOOLCHAIN_BIN/aarch64-linux-android${ANDROID_API}-clang"
-            elif [ "$GOARCH" = "arm" ]; then
-              export CC="$TOOLCHAIN_BIN/armv7a-linux-androideabi${ANDROID_API}-clang"
-            else
-              echo "Unsupported ANDROID GOARCH=$GOARCH"
-              exit 1
-            fi
-
-            echo "Using Android NDK CC=$CC"
-          fi
-
-          mkdir -p dist
-
-          ext=""
-          if [ "$GOOS" = "windows" ]; then
-            ext=".exe"
-          fi
-
-          GOOS=$GOOS GOARCH=$GOARCH \
-          go build -ldflags "-s -w -checklinkname=0" -trimpath \
-            -o "dist/client-${GOOS}-${GOARCH}${ext}" \
-            ./cmd/client
-
-          GOOS=$GOOS GOARCH=$GOARCH \
-          go build -ldflags "-s -w -checklinkname=0" -trimpath \
-            -o "dist/server-${GOOS}-${GOARCH}${ext}" \
-            ./cmd/server
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v6
+      - uses: goreleaser/goreleaser-action@v6.1.0
         with:
-          name: good-turn-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/**
+          distribution: goreleaser
+          version: ${{ env.GORELEASER_VERSION }}
+          args: release --snapshot --clean --skip=publish,sign,docker,announce
+
+      - uses: actions/upload-artifact@v4.4.3
+        with:
+          name: snapshot-dist
+          path: dist/
+          retention-days: 7
