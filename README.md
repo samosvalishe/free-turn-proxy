@@ -2,13 +2,15 @@
 
 <img src="logo.webp" width="250" height="250">
 
-![License](https://img.shields.io/badge/license-GPL--3.0-0D1117?style=flat-square&logo=gnu&logoColor=A42E2B&labelColor=0D1117)
-![Go](https://img.shields.io/badge/-Go-0D1117?style=flat-square&logo=go&logoColor=00ADD8)
+![License](https://img.shields.io/badge/license-Happy_Bunny-ff69b4?style=flat-square&logoColor=white&labelColor=0D1117)
+![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white&labelColor=0D1117)
+![Docker](https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white&labelColor=0D1117)
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Android-green?style=flat-square&labelColor=0D1117)
 </div>
 
 ## О проекте
 
-**btp** — туннель UDP/TCP через TURN-реле VK Calls. Клиент берёт временные TURN-учётки из ссылки на звонок и гонит ваш трафик (WireGuard, Xray/VLESS) до сервера на VPS поверх DTLS.
+**btp** — универсальный прокси-туннель для инкапсуляции UDP/TCP трафика поверх протокола TURN. Клиент извлекает временные TURN-учётки из ссылок на WebRTC-звонки и прозрачно маршрутизирует ваш VPN-трафик (WireGuard, Xray/VLESS) до сервера на VPS, используя DTLS и мощные механизмы маскировки пакетов.
 
 ## Разработка
 
@@ -43,12 +45,19 @@ task clean          # удалить dist/, cover.out, cover.html
 
 ## Документация
 
-- [Быстрый старт (WireGuard)](./docs/quickstart.md)
-- [Режимы: UDP / TCP / OBF / KCP](./docs/modes.md)
-- [Флаги клиента и сервера](./docs/flags.md)
-- [Развёртывание: systemd, Docker](./docs/deploy.md)
-- [Мобильные: Android (Termux), iOS (iSH)](./docs/mobile.md)
+- [Быстрый старт)](./docs/quickstart.md)
+- [Режимы](./docs/modes.md)
+- [Флаги](./docs/flags.md)
+- [Развёртывание](./docs/deploy.md)
+- [Мобильные Устройства](./docs/mobile.md)
 - [Решение проблем](./docs/troubleshooting.md)
+
+## Благодарности
+
+Огромное спасибо за вклад и идеи:
+- [@cacggghp](https://github.com/cacggghp)
+- [@Moroka8](https://github.com/Moroka8)
+- [@alxmcp](https://github.com/alxmcp)
 
 ---
 
