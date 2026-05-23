@@ -1,6 +1,6 @@
 // Package vk — провайдер TURN-реквизитов через VK Calls API.
 //
-// Фасад над internal/client/vkauth: добавляет фиксированный link (адрес
+// Фасад над internal/provider/vk/internal/vkauth: добавляет фиксированный link (адрес
 // VK callroom) и адаптирует сигнатуру GetCredentials к provider.Provider.
 //
 // vk.Provider удовлетворяет provider.Provider и используется через generic
@@ -12,11 +12,11 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/samosvalishe/btp/internal/client/captcha"
-	manualcaptcha "github.com/samosvalishe/btp/internal/client/captcha/manual"
-	"github.com/samosvalishe/btp/internal/client/vkauth"
 	"github.com/samosvalishe/btp/internal/logx"
 	"github.com/samosvalishe/btp/internal/provider"
+	"github.com/samosvalishe/btp/internal/provider/vk/internal/captcha"
+	manualcaptcha "github.com/samosvalishe/btp/internal/provider/vk/internal/captcha/manual"
+	"github.com/samosvalishe/btp/internal/provider/vk/internal/vkauth"
 )
 
 // Config — параметры VK-провайдера.
@@ -43,6 +43,9 @@ type Config struct {
 
 	// Log — уровневый логгер. nil → no-op.
 	Log logx.Logger
+
+	// Debug включает debug-вывод в manual-captcha (HTTP-сервер).
+	Debug bool
 }
 
 // ManualSolverFunc — кастомный решатель captcha. Если nil, vkauth не пытается
@@ -61,6 +64,11 @@ func New(cfg Config, solver ManualSolverFunc) (*Provider, error) {
 	if cfg.Link == "" {
 		return nil, fmt.Errorf("vk: empty Link")
 	}
+	// captcha-пакеты — internal/ для provider/vk, поэтому подключаем
+	// логгер здесь, а не в cmd/client.
+	captcha.SetLogger(cfg.Log)
+	manualcaptcha.SetLogger(cfg.Log)
+	manualcaptcha.Debug = cfg.Debug
 	auth := vkauth.New(vkauth.Config{
 		Credentials:     cfg.Credentials,
 		Dialer:          cfg.Dialer,
@@ -97,17 +105,8 @@ func (p *Provider) BackoffUntilUnix() int64 { return p.auth.BackoffUntilUnix() }
 // Name реализует provider.Provider.
 func (*Provider) Name() string { return "vk" }
 
-// SetCaptchaLoggers подключает logger в общие captcha-пакеты. Удобный шорткат
-// для cmd/client/main.go, чтобы не импортировать captcha/manualcaptcha напрямую
-// после полного перехода на provider/vk.
-func SetCaptchaLoggers(log logx.Logger, debug bool) {
-	captcha.SetLogger(log)
-	manualcaptcha.SetLogger(log)
-	manualcaptcha.Debug = debug
-}
-
 // DefaultManualSolver — стандартный manual-captcha solver, использует
-// internal/client/captcha/manual (HTTP-сервер 127.0.0.1:8765 + браузер).
+// internal/provider/vk/internal/captcha/manual (HTTP-сервер 127.0.0.1:8765 + браузер).
 func DefaultManualSolver(ctx context.Context, e *captcha.Error, d net.Dialer) (string, string, error) {
 	if e.RedirectURI != "" {
 		t, err := manualcaptcha.SolveViaProxy(ctx, e.RedirectURI, d)

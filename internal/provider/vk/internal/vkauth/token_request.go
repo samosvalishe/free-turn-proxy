@@ -8,7 +8,7 @@ import (
 	"io"
 	neturl "net/url"
 
-	"github.com/samosvalishe/btp/internal/client/browserprofile"
+	"github.com/samosvalishe/btp/internal/provider/vk/internal/browserprofile"
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"

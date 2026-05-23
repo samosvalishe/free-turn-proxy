@@ -5,8 +5,8 @@ import (
 	"fmt"
 	neturl "net/url"
 
-	"github.com/samosvalishe/btp/internal/client/browserprofile"
-	"github.com/samosvalishe/btp/internal/client/namegen"
+	"github.com/samosvalishe/btp/internal/provider/vk/internal/browserprofile"
+	"github.com/samosvalishe/btp/internal/provider/vk/internal/namegen"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"

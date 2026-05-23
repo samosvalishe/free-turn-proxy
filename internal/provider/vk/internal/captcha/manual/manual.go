@@ -1,5 +1,5 @@
 // Package manual реализует ручное решение CAPTCHA — fallback, когда автосолвер
-// (internal/client/captcha) не справился или пользователь дал -manual-captcha.
+// (internal/provider/vk/internal/captcha) не справился или пользователь дал -manual-captcha.
 // Поднимает локальный HTTP-сервер 127.0.0.1:8765, проксирующий страницу VK
 // CAPTCHA (с переписыванием абсолютных URL и gzip), открывает её в браузере и
 // ждёт токен/ключ после решения пользователем.
@@ -24,9 +24,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/client/browserprofile"
 	"github.com/samosvalishe/btp/internal/client/ish"
 	"github.com/samosvalishe/btp/internal/logx"
+	"github.com/samosvalishe/btp/internal/provider/vk/internal/browserprofile"
 )
 
 // Debug включает подробное логирование request/response проксируемого

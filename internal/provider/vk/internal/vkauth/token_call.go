@@ -7,8 +7,8 @@ import (
 	neturl "net/url"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/client/browserprofile"
-	"github.com/samosvalishe/btp/internal/client/captcha"
+	"github.com/samosvalishe/btp/internal/provider/vk/internal/browserprofile"
+	"github.com/samosvalishe/btp/internal/provider/vk/internal/captcha"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
 )

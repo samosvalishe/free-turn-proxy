@@ -39,7 +39,6 @@ func main() {
 
 	logger := logx.New(cfg.Log.Debug)
 	logger.Infof("btp client version=%s", version)
-	vk.SetCaptchaLoggers(logger, cfg.Log.Debug)
 	dnsdial.SetLogger(logger)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -160,6 +159,7 @@ func buildProvider(cfg *config.Client, dialer net.Dialer, connected *atomic.Int3
 			StreamsPerCache: cfg.VK.StreamsPerCred,
 			StreamsAlive:    connected.Load,
 			Log:             logger,
+			Debug:           cfg.Log.Debug,
 		}, vk.DefaultManualSolver)
 	case config.ProviderStatic:
 		return static.New(static.Config{

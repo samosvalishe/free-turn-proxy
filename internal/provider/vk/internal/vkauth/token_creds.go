@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/samosvalishe/btp/internal/client/browserprofile"
+	"github.com/samosvalishe/btp/internal/provider/vk/internal/browserprofile"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
 )

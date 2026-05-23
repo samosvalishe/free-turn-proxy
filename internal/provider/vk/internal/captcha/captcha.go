@@ -20,8 +20,8 @@ import (
 	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
 
-	"github.com/samosvalishe/btp/internal/client/browserprofile"
 	"github.com/samosvalishe/btp/internal/logx"
+	"github.com/samosvalishe/btp/internal/provider/vk/internal/browserprofile"
 	"github.com/samosvalishe/btp/internal/randx"
 )
 

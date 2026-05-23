@@ -93,8 +93,8 @@ Linux user-mode environment для iOS (через usermode x86 emulation). Па
 
 ### captcha (auto / manual)
 Один домен, два пути:
-- **auto** (`internal/client/captcha`): VK slider-puzzle решается программно.
-- **manual** (`internal/client/captcha/manual`): HTTP-сервер на 127.0.0.1:8765, запуск браузера, gzip-rewrite VK-страниц.
+- **auto** (`internal/provider/vk/internal/captcha`): VK slider-puzzle решается программно.
+- **manual** (`internal/provider/vk/internal/captcha/manual`): HTTP-сервер на 127.0.0.1:8765, запуск браузера, gzip-rewrite VK-страниц.
 
 Переключение: `vkauth.Client` пробует auto, при провале → manual fallback. Флаг `-manual-captcha` сразу идёт в manual.
 
