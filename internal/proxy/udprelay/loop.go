@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/cbeuw/connutil"
-	"github.com/samosvalishe/btp/internal/client/vkauth"
+	"github.com/samosvalishe/btp/internal/provider"
 	"github.com/samosvalishe/btp/internal/proxy/common"
 	"github.com/samosvalishe/btp/internal/randx"
 	"github.com/samosvalishe/btp/internal/stats"
@@ -18,7 +18,7 @@ import (
 )
 
 // DTLSLoop поддерживает единственное DTLS-подключение для streamID, перезапуская
-// его при сбое с backoff 10-30s (пропускается при активной captcha-блокировке,
+// его при сбое с backoff 10-30s (пропускается при активном provider-backoff,
 // если предыдущая ошибка — дедлайн). connchan получает свежую половину
 // AsyncPacketPipe на каждой попытке; okchan (non-nil только для потока 1)
 // сигнализирует о первом успешном handshake.
@@ -29,10 +29,10 @@ func DTLSLoop(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net
 			return
 		default:
 			err := oneDTLS(ctx, deps, peer, listenConn, inboundChan, connchan, okchan, streamID)
-			// При captcha-блокировке дедлайн handshake срабатывает раньше,
+			// При активном provider-backoff дедлайн handshake срабатывает раньше,
 			// чем auth-retry успевает отработать; делаем краткий backoff,
 			// чтобы не крутиться в tight spin до снятия блокировки.
-			if err != nil && time.Now().Unix() < deps.Auth.LockoutUntilUnix() && errors.Is(err, context.DeadlineExceeded) {
+			if err != nil && time.Now().Unix() < deps.Auth.BackoffUntilUnix() && errors.Is(err, context.DeadlineExceeded) {
 				select {
 				case <-ctx.Done():
 					return
@@ -53,7 +53,8 @@ func DTLSLoop(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net
 
 // TURNLoop ведёт половину TURN-аллокации. Ждёт свежий conn2 от DTLS-цикла,
 // тормозит через t (глобальный тик 200ms), выполняет одну TURN-сессию
-// и реагирует на FATAL_CAPTCHA / CAPTCHA_WAIT_REQUIRED соответственно.
+// и реагирует на provider.ErrFatalNoStreams / provider.ErrBackoffActive
+// соответственно.
 func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, connchan <-chan net.PacketConn, t <-chan time.Time, streamID int) {
 	for {
 		select {
@@ -75,33 +76,30 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 				return
 			}
 			if err != nil {
-				if errors.Is(err, vkauth.ErrFatalCaptchaNoStreams) {
-					deps.log().Errorf("[STREAM %d] Fatal manual captcha error. Shutting down application.", streamID)
+				if errors.Is(err, provider.ErrFatalNoStreams) {
+					deps.log().Errorf("[STREAM %d] Fatal provider error. Shutting down application.", streamID)
 					select {
 					case deps.fatalCh <- fmt.Errorf("%w: %w", ErrFatal, err):
 					default:
 					}
 					return
 				}
-				if errors.Is(err, vkauth.ErrCaptchaWaitRequired) {
-					if !errors.Is(err, vkauth.ErrLockoutActive) {
-						deps.log().Warnf("[STREAM %d] Backing off for 60 seconds to avoid IP ban", streamID)
-						select {
-						case <-ctx.Done():
-							return
-						case <-time.After(60 * time.Second):
-						}
-					} else {
-						lockoutEnd := deps.Auth.LockoutUntilUnix()
-						sleepDuration := time.Until(time.Unix(lockoutEnd, 0))
+				if errors.Is(err, provider.ErrBackoffActive) {
+					lockoutEnd := deps.Auth.BackoffUntilUnix()
+					var sleepDuration time.Duration
+					if lockoutEnd > 0 {
+						sleepDuration = time.Until(time.Unix(lockoutEnd, 0))
 						if sleepDuration < 0 {
 							sleepDuration = 5 * time.Second
 						}
-						select {
-						case <-ctx.Done():
-							return
-						case <-time.After(sleepDuration):
-						}
+					} else {
+						sleepDuration = 60 * time.Second
+						deps.log().Warnf("[STREAM %d] Backing off for 60 seconds (provider requests wait)", streamID)
+					}
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(sleepDuration):
 					}
 				} else {
 					deps.log().Errorf("[STREAM %d] %s", streamID, err)
@@ -221,7 +219,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		err = ctx.Err()
 		return
 	}
-	stream, err1 := common.DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, params.Link, streamID, params.GetCreds)
+	stream, err1 := common.DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, streamID, params.GetCreds)
 	if err1 != nil {
 		if deps.Auth.IsAuthError(err1) {
 			deps.Auth.HandleAuthError(streamID)

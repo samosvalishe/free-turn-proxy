@@ -25,7 +25,6 @@ type GetCredsFunc = common.GetCredsFunc
 type Params struct {
 	Host         string
 	Port         string
-	Link         string
 	TransportUDP bool
 	ObfKey       []byte
 	GetCreds     GetCredsFunc
@@ -233,7 +232,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 		}
 	}
 
-	stream, err := common.DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, params.Link, id, params.GetCreds)
+	stream, err := common.DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, id, params.GetCreds)
 	if err != nil {
 		return nil, nil, err
 	}

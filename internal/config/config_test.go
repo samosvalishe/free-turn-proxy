@@ -21,6 +21,9 @@ func TestParseClient_Defaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
+	if c.Provider.Name != ProviderVK {
+		t.Errorf("Provider.Name default: %q (expected %q)", c.Provider.Name, ProviderVK)
+	}
 	if c.Proxy.Listen != "127.0.0.1:9000" {
 		t.Errorf("Proxy.Listen default: %q", c.Proxy.Listen)
 	}
@@ -123,6 +126,42 @@ func TestParseClient_NClampedToTen(t *testing.T) {
 	}
 	if c.TURN.N != 10 {
 		t.Errorf("TURN.N: %d (expected 10)", c.TURN.N)
+	}
+}
+
+func TestParseClient_ProviderStaticOK(t *testing.T) {
+	args := []string{
+		"-peer", "1.2.3.4:5000",
+		"-provider", "static",
+		"-static-user", "u",
+		"-static-pass", "p",
+		"-static-addr", "turn.example.com:3478",
+	}
+	c, err := ParseClient(args, io.Discard)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if c.Provider.Name != ProviderStatic {
+		t.Errorf("Provider.Name: %q (expected %q)", c.Provider.Name, ProviderStatic)
+	}
+	if c.Static.User != "u" || c.Static.Pass != "p" || c.Static.Addr != "turn.example.com:3478" {
+		t.Errorf("Static: %+v", c.Static)
+	}
+}
+
+func TestParseClient_ProviderStaticMissingFlags(t *testing.T) {
+	args := []string{"-peer", "1.2.3.4:5000", "-provider", "static"}
+	_, err := ParseClient(args, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "static-user") {
+		t.Errorf("expected static flags error, got %v", err)
+	}
+}
+
+func TestParseClient_ProviderUnknown(t *testing.T) {
+	args := []string{"-peer", "1.2.3.4:5000", "-provider", "bogus"}
+	_, err := ParseClient(args, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "invalid -provider") {
+		t.Errorf("expected invalid provider error, got %v", err)
 	}
 }
 

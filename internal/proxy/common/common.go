@@ -13,15 +13,16 @@ import (
 	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
 )
 
-// GetCredsFunc разрешает VK TURN-реквизиты для пары (link, streamID).
-// Соответствует vkauth.Client.GetCredentials.
-type GetCredsFunc func(ctx context.Context, link string, streamID int) (user, pass, rawURL string, err error)
+// GetCredsFunc разрешает TURN-реквизиты для streamID. Реализуется provider'ом
+// (см. internal/provider): provider держит идентификатор сессии (link/room/key)
+// внутри, pipeline передаёт только streamID.
+type GetCredsFunc func(ctx context.Context, streamID int) (user, pass, rawURL string, err error)
 
 // DialTURN получает реквизиты и открывает TURN-поток. Вызывающий отвечает
 // за закрытие потока и политику retry при auth-ошибке (udprelay)
 // или перезапуска сессии (tcpfwd).
-func DialTURN(ctx context.Context, host, port string, udp bool, peer *net.UDPAddr, link string, streamID int, getCreds GetCredsFunc) (*turndial.Stream, error) {
-	user, pass, rawURL, err := getCreds(ctx, link, streamID)
+func DialTURN(ctx context.Context, host, port string, udp bool, peer *net.UDPAddr, streamID int, getCreds GetCredsFunc) (*turndial.Stream, error) {
+	user, pass, rawURL, err := getCreds(ctx, streamID)
 	if err != nil {
 		return nil, fmt.Errorf("get TURN creds: %w", err)
 	}

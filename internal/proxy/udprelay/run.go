@@ -21,30 +21,30 @@ import (
 // GetCredsFunc реэкспортирован из common, чтобы вызывающие не выходили за пределы импортов пакета.
 type GetCredsFunc = common.GetCredsFunc
 
-// AuthHandler — подмножество vkauth.Client, необходимое пакету. Определено как
-// интерфейс, чтобы тесты могли подменять fake; prod-код всё равно импортирует
-// vkauth ради sentinel-ошибок (ErrFatalCaptchaNoStreams и т.д.).
+// AuthHandler — подмножество provider.Provider, необходимое пакету.
+// Определено как локальный интерфейс, чтобы тесты могли подменять fake без
+// импорта реализации провайдера. Sentinel-ошибки auth-флоу проверяются через
+// provider.ErrXxx.
 type AuthHandler interface {
 	IsAuthError(err error) bool
 	HandleAuthError(streamID int) bool
 	ResetErrors(streamID int)
-	LockoutUntilUnix() int64
+	BackoffUntilUnix() int64
 }
 
 // Params — per-stream конфигурация TURN/wrap, общая для DTLS и TURN циклов.
 type Params struct {
 	Host         string
 	Port         string
-	Link         string
 	TransportUDP bool
 	ObfKey       []byte
 	GetCreds     GetCredsFunc
 }
 
 // ErrFatal возвращается из Run, когда поток встречает условие, требующее
-// завершения всего приложения (напр. ручной решатель captcha провалился без
-// подключённых потоков). Вызывающий должен проверить через errors.Is и вызвать
-// os.Exit сам — udprelay не вмешивается в хост-процесс.
+// завершения всего приложения (см. provider.ErrFatalNoStreams). Вызывающий
+// должен проверить через errors.Is и вызвать os.Exit сам — udprelay не
+// вмешивается в хост-процесс.
 var ErrFatal = errors.New("udprelay: fatal error")
 
 // Deps объединяет всё, что циклы берут из хост-процесса. Атомики принадлежат
@@ -70,11 +70,11 @@ func (d *Deps) log() logx.Logger {
 
 // Run — точка входа UDP-режима. Биндит listenAddr, распределяет входящие пакеты
 // в общую очередь и запускает numStreams пар (DTLSLoop, TURNLoop).
-// connectedStreams принадлежит вызывающему (vkauth читает через StreamsAlive)
-// и инкрементируется/декрементируется в oneTURN.
+// connectedStreams принадлежит вызывающему (provider может читать через свой
+// StreamsAlive-аналог) и инкрементируется/декрементируется в oneTURN.
 // Возвращается после выхода всех потоков (т.е. при отмене ctx).
-// При фатальном captcha-условии возвращает ErrFatal — вызывающий делает os.Exit
-// без вмешательства udprelay в хост-процесс.
+// При фатальной provider-ошибке возвращает ErrFatal — вызывающий делает
+// os.Exit без вмешательства udprelay в хост-процесс.
 func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, params *Params, peer *net.UDPAddr, listenAddr string, numStreams int) error {
 	listenConn, err := (&net.ListenConfig{}).ListenPacket(ctx, "udp", listenAddr)
 	if err != nil {

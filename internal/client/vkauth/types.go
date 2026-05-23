@@ -3,6 +3,8 @@ package vkauth
 import (
 	"errors"
 	"time"
+
+	"github.com/samosvalishe/btp/internal/provider"
 )
 
 // VKCredentials — пара app_id/app_secret для получения анонимных токенов.
@@ -44,8 +46,12 @@ const (
 )
 
 // Sentinel-ошибки auth-потока. Строковые формы стабильны (используются в логах).
+//
+// ErrCaptchaWaitRequired и ErrFatalCaptchaNoStreams также матчатся через
+// provider.ErrBackoffActive / provider.ErrFatalNoStreams — pipeline проверяет
+// generic-sentinels, vkauth-внутренний код может проверять и старые.
 var (
-	ErrCaptchaWaitRequired   = errors.New("CAPTCHA_WAIT_REQUIRED")
-	ErrFatalCaptchaNoStreams = errors.New("FATAL_CAPTCHA_FAILED_NO_STREAMS")
+	ErrCaptchaWaitRequired   = errors.Join(provider.ErrBackoffActive, errors.New("CAPTCHA_WAIT_REQUIRED"))
+	ErrFatalCaptchaNoStreams = errors.Join(provider.ErrFatalNoStreams, errors.New("FATAL_CAPTCHA_FAILED_NO_STREAMS"))
 	ErrLockoutActive         = errors.New("global lockout active")
 )

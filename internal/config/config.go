@@ -60,12 +60,30 @@ type ProxyOpts struct {
 	Peer    string    // -peer: адрес серверного прокси, куда дозванивается клиент (только клиент)
 }
 
-// VKOpts — опции VK-учёток и captcha (только клиент).
+// VKOpts — опции VK-учёток и captcha (только клиент, провайдер "vk").
 type VKOpts struct {
 	Link           string // -link (нормализован до join-кода)
 	StreamsPerCred int    // -streams-per-cred
 	ManualCaptcha  bool   // -manual-captcha
 }
+
+// StaticOpts — фиксированные TURN-реквизиты (только клиент, провайдер "static").
+type StaticOpts struct {
+	User string // -static-user
+	Pass string // -static-pass
+	Addr string // -static-addr
+}
+
+// ProviderOpts выбирает реализацию provider.Provider.
+type ProviderOpts struct {
+	Name string // -provider: vk (default) | static
+}
+
+// Известные имена провайдеров.
+const (
+	ProviderVK     = "vk"
+	ProviderStatic = "static"
+)
 
 // DNSOpts — опции DNS-резолвинга (только клиент).
 type DNSOpts struct {
@@ -86,13 +104,15 @@ type KCPOpts struct {
 
 // Client — разобранные и провалидированные CLI-опции клиента.
 type Client struct {
-	TURN  TURNOpts
-	Obf   ObfOpts
-	Proxy ProxyOpts
-	VK    VKOpts
-	DNS   DNSOpts
-	Log   LogOpts
-	KCP   KCPOpts
+	TURN     TURNOpts
+	Obf      ObfOpts
+	Proxy    ProxyOpts
+	Provider ProviderOpts
+	VK       VKOpts
+	Static   StaticOpts
+	DNS      DNSOpts
+	Log      LogOpts
+	KCP      KCPOpts
 }
 
 // Server — разобранные и провалидированные CLI-опции сервера.
@@ -111,10 +131,14 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 		fs.SetOutput(errOut)
 	}
 
-	host := fs.String("turn", "", "переопределить IP TURN-сервера (по умолчанию берётся из VK Calls ссылки)")
-	port := fs.String("port", "", "переопределить порт TURN-сервера (по умолчанию берётся из VK Calls ссылки)")
+	host := fs.String("turn", "", "переопределить IP TURN-сервера (по умолчанию берётся из credentials провайдера)")
+	port := fs.String("port", "", "переопределить порт TURN-сервера (по умолчанию берётся из credentials провайдера)")
 	listen := fs.String("listen", "127.0.0.1:9000", "локальный адрес ip:port, куда подключается WireGuard или Xray клиент")
-	vklink := fs.String("link", "", "ссылка VK Calls вида https://vk.com/call/join/... (обязательно)")
+	providerFlag := fs.String("provider", ProviderVK, "источник TURN-реквизитов: vk (default, VK Calls API) | static (фиксированные -static-* флаги)")
+	vklink := fs.String("link", "", "ссылка VK Calls вида https://vk.com/call/join/... (обязательно для -provider vk)")
+	staticUser := fs.String("static-user", "", "TURN username (обязательно для -provider static)")
+	staticPass := fs.String("static-pass", "", "TURN password (обязательно для -provider static)")
+	staticAddr := fs.String("static-addr", "", "TURN server host:port (обязательно для -provider static)")
 	peerAddr := fs.String("peer", "", "адрес сервера VK TURN Proxy на VPS, host:port (обязательно)")
 	n := fs.Int("n", 10, "количество параллельных TURN-потоков (соединений к TURN-реле)")
 	transportFlag := fs.String("transport", "tcp", "транспорт до TURN-реле: tcp (TCP/TLS, default) | udp")
@@ -123,9 +147,9 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	wrapMode := fs.Bool("obf", false, "маскировать TURN-payload под SRTP (RTP/opus + ChaCha20-Poly1305 AEAD) для обхода content-filter VK; ключ должен совпадать на клиенте и сервере")
 	wrapKeyHex := fs.String("obf-key", "", "общий ключ для -obf, 32 байта в hex (64 символа)")
 	genWrapKey := fs.Bool("gen-obf-key", false, "напечатать новый ключ для -obf-key и выйти")
-	streamsPerCredFlag := fs.Int("streams-per-cred", defaultStreamsPerCache, "сколько TURN-потоков делят один кеш VK-учёток")
+	streamsPerCredFlag := fs.Int("streams-per-cred", defaultStreamsPerCache, "сколько TURN-потоков делят один кеш VK-учёток (только -provider vk)")
 	debugFlag := fs.Bool("debug", false, "включить подробные debug-логи")
-	manualCaptchaFlag := fs.Bool("manual-captcha", false, "пропустить авто-решение VK captcha и сразу открыть ручной режим в локальном браузере")
+	manualCaptchaFlag := fs.Bool("manual-captcha", false, "пропустить авто-решение VK captcha и сразу открыть ручной режим в локальном браузере (только -provider vk)")
 	dnsFlag := fs.String("dns-mode", dnsModeAuto, "транспорт резолвера клиента: plain (UDP/53) | doh (DNS-over-HTTPS) | auto (UDP/53 → sticky DoH при отказе)")
 	dnsServersFlag := fs.String("dns-servers", "", "список UDP/53 DNS-серверов через запятую вместо встроенных (напр. резолверы оператора из Android LinkProperties). Формат: ip[:port][,ip[:port]...]")
 
@@ -149,9 +173,17 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 			Listen: *listen,
 			Peer:   *peerAddr,
 		},
+		Provider: ProviderOpts{
+			Name: *providerFlag,
+		},
 		VK: VKOpts{
 			StreamsPerCred: *streamsPerCredFlag,
 			ManualCaptcha:  *manualCaptchaFlag,
+		},
+		Static: StaticOpts{
+			User: *staticUser,
+			Pass: *staticPass,
+			Addr: *staticAddr,
 		},
 		DNS: DNSOpts{
 			Mode: *dnsFlag,
@@ -194,27 +226,35 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	if c.Proxy.Peer == "" {
 		return nil, errors.New("need peer address")
 	}
-	if *vklink == "" {
-		return nil, errors.New("need -link")
+	switch c.Provider.Name {
+	case ProviderVK:
+		if *vklink == "" {
+			return nil, errors.New("need -link (required for -provider vk)")
+		}
+		if c.VK.StreamsPerCred <= 0 {
+			return nil, fmt.Errorf("-streams-per-cred must be positive")
+		}
+		parts := strings.Split(*vklink, "join/")
+		link := parts[len(parts)-1]
+		if idx := strings.IndexAny(link, "/?#"); idx != -1 {
+			link = link[:idx]
+		}
+		c.VK.Link = link
+	case ProviderStatic:
+		if c.Static.User == "" || c.Static.Pass == "" || c.Static.Addr == "" {
+			return nil, errors.New("-provider static requires -static-user, -static-pass, -static-addr")
+		}
+	default:
+		return nil, fmt.Errorf("invalid -provider value %q: must be %s | %s", c.Provider.Name, ProviderVK, ProviderStatic)
 	}
 	key, err := srtpmimicry.DecodeKey(c.Obf.Mode, *wrapKeyHex)
 	if err != nil {
 		return nil, err
 	}
 	c.Obf.Key = key
-	if c.VK.StreamsPerCred <= 0 {
-		return nil, fmt.Errorf("-streams-per-cred must be positive")
-	}
 	if c.TURN.N <= 0 {
 		c.TURN.N = 10
 	}
-
-	parts := strings.Split(*vklink, "join/")
-	link := parts[len(parts)-1]
-	if idx := strings.IndexAny(link, "/?#"); idx != -1 {
-		link = link[:idx]
-	}
-	c.VK.Link = link
 
 	return c, nil
 }

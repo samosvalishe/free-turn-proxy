@@ -178,6 +178,14 @@ func (c *Client) LockoutUntilUnix() int64 {
 	return c.lockout.Load()
 }
 
+// BackoffUntilUnix реализует provider.Provider — алиас LockoutUntilUnix.
+// vkauth-lockout глобальный (без per-stream), streamID-параметра в самом
+// методе нет; интерфейс provider.Provider определяет no-arg сигнатуру.
+func (c *Client) BackoffUntilUnix() int64 { return c.LockoutUntilUnix() }
+
+// Name реализует provider.Provider.
+func (*Client) Name() string { return "vk" }
+
 // IsAuthError оборачивает пакетный IsAuthError как метод для работы через интерфейс.
 func (*Client) IsAuthError(err error) bool { return IsAuthError(err) }
 

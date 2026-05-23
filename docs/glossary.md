@@ -27,7 +27,14 @@ client ←→ VK TURN-relay
 ## Термины
 
 ### TURN
-Standard relay protocol (RFC 5766/8656). VK выдаёт креды на свои TURN-реле. Мы используем эти реле как транзит к собственному серверу. Транспорт до TURN выбирается флагом `-udp` (UDP/TCP).
+Standard relay protocol (RFC 5766/8656). Источник реле выбирается флагом `-provider` (см. ниже). Мы используем реле как транзит к собственному серверу. Транспорт до TURN выбирается флагом `-transport` (UDP/TCP).
+
+### Provider
+Источник TURN-реквизитов (user/pass/server-addr). Интерфейс `internal/provider.Provider`. Текущие реализации:
+- **`vk`** (default) — `internal/provider/vk`, обёртка над VK Calls API (требует `-link`).
+- **`static`** — `internal/provider/static`, фиксированные `-static-user/-static-pass/-static-addr` (для coturn, metered, любого совместимого TURN).
+
+Pipeline (proxy/udprelay, proxy/tcpfwd) работает только через интерфейс — без VK-specific импортов. См. `docs/providers.md`.
 
 ### DTLS — это **обфускация, не security**
 VK content-filter дропает payload, который не похож на legit DTLS-handshake. Мы используем `pion/dtls` чтобы пройти фильтр. Шифрование DTLS — побочный эффект, не цель.
