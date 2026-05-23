@@ -1,12 +1,12 @@
-package vkauth
+﻿package vkauth
 
 import (
 	"context"
 	"fmt"
 	neturl "net/url"
 
-	"github.com/samosvalishe/btp/internal/provider/vk/internal/browserprofile"
-	"github.com/samosvalishe/btp/internal/provider/vk/internal/namegen"
+	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/browserprofile"
+	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/namegen"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"

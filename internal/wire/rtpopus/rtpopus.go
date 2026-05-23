@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+﻿// SPDX-License-Identifier: MIT
 
 // Package rtpopus реализует AEAD-фрейминг с мимикрией под RTP/opus (один
 // из планируемых wire-профилей обфускации в internal/wire/). Цель — обход

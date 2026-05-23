@@ -1,4 +1,4 @@
-module github.com/samosvalishe/btp
+module github.com/samosvalishe/free-turn-proxy
 
 go 1.25.0
 

@@ -1,4 +1,4 @@
-// Package bondserver реализует серверную сторону bonded VLESS lane:
+﻿// Package bondserver реализует серверную сторону bonded VLESS lane:
 // одно backend TCP-соединение, мультиплексированное по N smux-потокам с общим
 // ConnID. Wire-формат фреймов — internal/wire/bondframe; пакет соединяет
 // copy-loop backend TCP ↔ lanes и реестр per-ConnID.
@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/logx"
-	"github.com/samosvalishe/btp/internal/wire/bondframe"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/wire/bondframe"
 	"github.com/xtaci/smux"
 )
 

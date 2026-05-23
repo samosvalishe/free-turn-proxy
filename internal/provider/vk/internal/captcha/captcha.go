@@ -1,4 +1,4 @@
-package captcha
+﻿package captcha
 
 import (
 	"bytes"
@@ -20,9 +20,9 @@ import (
 	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
 
-	"github.com/samosvalishe/btp/internal/logx"
-	"github.com/samosvalishe/btp/internal/provider/vk/internal/browserprofile"
-	"github.com/samosvalishe/btp/internal/randx"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/browserprofile"
+	"github.com/samosvalishe/free-turn-proxy/internal/randx"
 )
 
 // Log — пакетный логгер. По умолчанию no-op; main устанавливает его через

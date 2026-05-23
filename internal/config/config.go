@@ -1,4 +1,4 @@
-// Package config парсит CLI-флаги клиента и сервера.
+﻿// Package config парсит CLI-флаги клиента и сервера.
 //
 // Функции Parse* без побочных эффектов: валидируют ввод и декодируют wrap-ключ,
 // но не трогают сеть, DNS и состояние процесса. Подключение этих эффектов —
@@ -15,8 +15,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/samosvalishe/btp/internal/transport/kcptun"
-	"github.com/samosvalishe/btp/internal/wire/rtpopus"
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcptun"
+	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
 )
 
 const (

@@ -1,4 +1,4 @@
-# Быстрый Старт
+﻿# Быстрый Старт
 
 Для стабильной работы мы сразу настроим **обфускацию трафика**.
 
@@ -22,7 +22,7 @@ openssl rand -hex 32
 
 *(Если на сервере нет openssl, используйте: `head -c 32 /dev/urandom | xxd -p -c 32`)*
 
-> Альтернативно, ключ можно сгенерировать через сам бинарник `btp` командой `./server -gen-obf-key`, либо через Docker: `docker run --rm ghcr.io/samosvalishe/btp:latest -gen-obf-key`.
+> Альтернативно, ключ можно сгенерировать через сам бинарник `free-turn-proxy` командой `./server -gen-obf-key`, либо через Docker: `docker run --rm ghcr.io/samosvalishe/free-turn-proxy:latest -gen-obf-key`.
 
 *Скопируйте полученный 64-символьный ключ. Далее в примерах он будет обозначен как `<ВАШ_КЛЮЧ>`.*
 
@@ -35,13 +35,13 @@ openssl rand -hex 32
 ### Вариант А: Запуск через Docker Compose (Рекомендуется)
 
 Если Docker еще не установлен, установите его (команды установки есть в [deploy.md](deploy.md)).
-Создайте файл `docker-compose.yml` в папке `/opt/btp`:
+Создайте файл `docker-compose.yml` в папке `/opt/free-turn-proxy`:
 
 ```yaml
 services:
   vk-turn-proxy:
-    image: ghcr.io/samosvalishe/btp:latest
-    container_name: btp
+    image: ghcr.io/samosvalishe/free-turn-proxy:latest
+    container_name: free-turn-proxy
     network_mode: "host"
     restart: unless-stopped
     environment:
@@ -58,11 +58,11 @@ services:
 Если вы просто хотите протестировать туннель без установки Docker, скачайте бинарник и запустите его напрямую:
 
 ```bash
-sudo mkdir -p /opt/btp
-sudo curl -L -o /opt/btp/server https://github.com/samosvalishe/btp/releases/latest/download/server-linux-amd64
-sudo chmod +x /opt/btp/server
+sudo mkdir -p /opt/free-turn-proxy
+sudo curl -L -o /opt/free-turn-proxy/server https://github.com/samosvalishe/free-turn-proxy/releases/latest/download/server-linux-amd64
+sudo chmod +x /opt/free-turn-proxy/server
 
-/opt/btp/server -listen 0.0.0.0:56000 -connect 127.0.0.1:51820 -obf-profile rtpopus -obf-key <ВАШ_КЛЮЧ>
+/opt/free-turn-proxy/server -listen 0.0.0.0:56000 -connect 127.0.0.1:51820 -obf-profile rtpopus -obf-key <ВАШ_КЛЮЧ>
 ```
 
 > **Внимание:** Команда выше запустит сервер только в текущем окне терминала. Для постоянной работы (если вы выбрали Вариант Б) настройте **systemd-службу** по инструкции из [Развёртывания (deploy.md)](deploy.md).
@@ -75,18 +75,18 @@ sudo chmod +x /opt/btp/server
 
 ## Шаг 3: Запуск Клиента и Маршруты (ПК)
 
-Туннель замыкается сам на себя, если VPN (WireGuard) перехватывает весь трафик. Чтобы прокси `btp` мог общаться с TURN-серверами напрямую, нужен скрипт добавления маршрутов-исключений.
+Туннель замыкается сам на себя, если VPN (WireGuard) перехватывает весь трафик. Чтобы прокси `free-turn-proxy` мог общаться с TURN-серверами напрямую, нужен скрипт добавления маршрутов-исключений.
 
 **Linux:**
 ```bash
-curl -L -o client https://github.com/samosvalishe/btp/releases/latest/download/client-linux-amd64
+curl -L -o client https://github.com/samosvalishe/free-turn-proxy/releases/latest/download/client-linux-amd64
 chmod +x client
 ./client -listen 127.0.0.1:9000 -peer <vps_ip>:56000 -link "<vk-link>" -obf-profile rtpopus -obf-key <ВАШ_КЛЮЧ> -debug 2>&1 | ./scripts/routes.sh
 ```
 
 **Windows (PowerShell от администратора):**
 ```powershell
-Invoke-WebRequest -Uri https://github.com/samosvalishe/btp/releases/latest/download/client-windows-amd64.exe -OutFile client.exe
+Invoke-WebRequest -Uri https://github.com/samosvalishe/free-turn-proxy/releases/latest/download/client-windows-amd64.exe -OutFile client.exe
 .\client.exe -listen 127.0.0.1:9000 -peer <vps_ip>:56000 -link "<vk-link>" -obf-profile rtpopus -obf-key <ВАШ_КЛЮЧ> -debug 2>&1 | .\scripts\routes.ps1
 ```
 
@@ -108,7 +108,7 @@ Invoke-WebRequest -Uri https://github.com/samosvalishe/btp/releases/latest/downl
 
 ```bash
 termux-wake-lock
-# Скачивание: curl -L -o client https://github.com/samosvalishe/btp/releases/latest/download/client-android-arm64 && chmod +x client
+# Скачивание: curl -L -o client https://github.com/samosvalishe/free-turn-proxy/releases/latest/download/client-android-arm64 && chmod +x client
 
 # Обязательно укажите ваш ключ и DNS
 ./client -listen 127.0.0.1:9000 -peer <vps_ip>:56000 -link "<vk-link>" -obf-profile rtpopus -obf-key <ВАШ_КЛЮЧ> -dns-servers <ip_dns_мобильного_оператора>

@@ -1,11 +1,11 @@
-package vkauth
+﻿package vkauth
 
 import (
 	"context"
 	"fmt"
 	"strings"
 
-	"github.com/samosvalishe/btp/internal/provider/vk/internal/browserprofile"
+	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/browserprofile"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
 )

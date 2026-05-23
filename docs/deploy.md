@@ -1,4 +1,4 @@
-# Развёртывание сервера
+﻿# Развёртывание сервера
 
 Для того чтобы сервер работал круглосуточно, не падал при закрытии SSH-сессии и автоматически стартовал после перезагрузки VPS, вам необходимо настроить его работу как службы.
 
@@ -18,7 +18,7 @@ sudo sh get-docker.sh
 Создайте директорию для проекта и файл `docker-compose.yml`:
 
 ```bash
-mkdir -p /opt/btp && cd /opt/btp
+mkdir -p /opt/free-turn-proxy && cd /opt/free-turn-proxy
 nano docker-compose.yml
 ```
 
@@ -27,8 +27,8 @@ nano docker-compose.yml
 ```yaml
 services:
   vk-turn-proxy:
-    image: ghcr.io/samosvalishe/btp:latest
-    container_name: btp
+    image: ghcr.io/samosvalishe/free-turn-proxy:latest
+    container_name: free-turn-proxy
     network_mode: "host" # Позволяет напрямую стучаться к локальному WireGuard (127.0.0.1:51820)
     restart: unless-stopped
     environment:
@@ -53,16 +53,16 @@ docker compose up -d
 
 Если вы не хотите использовать Docker, вы можете зарегистрировать бинарный файл как системную службу.
 
-**1. Скачайте бинарник в /opt/btp (если еще не сделали это):**
+**1. Скачайте бинарник в /opt/free-turn-proxy (если еще не сделали это):**
 ```bash
-sudo mkdir -p /opt/btp
-sudo curl -L -o /opt/btp/server https://github.com/samosvalishe/btp/releases/latest/download/server-linux-amd64
-sudo chmod +x /opt/btp/server
+sudo mkdir -p /opt/free-turn-proxy
+sudo curl -L -o /opt/free-turn-proxy/server https://github.com/samosvalishe/free-turn-proxy/releases/latest/download/server-linux-amd64
+sudo chmod +x /opt/free-turn-proxy/server
 ```
 
 **2. Создайте файл службы:**
 ```bash
-sudo nano /etc/systemd/system/btp.service
+sudo nano /etc/systemd/system/free-turn-proxy.service
 ```
 
 **3. Вставьте конфиг (замените порты и `<ВАШ_КЛЮЧ>` на свои):**
@@ -74,7 +74,7 @@ After=network.target
 [Service]
 Type=simple
 # Укажите ваши порты и вставьте ваш ключ обфускации
-ExecStart=/opt/btp/server -listen 0.0.0.0:56000 -connect 127.0.0.1:51820 -obf-profile rtpopus -obf-key <ВАШ_КЛЮЧ>
+ExecStart=/opt/free-turn-proxy/server -listen 0.0.0.0:56000 -connect 127.0.0.1:51820 -obf-profile rtpopus -obf-key <ВАШ_КЛЮЧ>
 Restart=always
 RestartSec=5
 User=nobody
@@ -87,11 +87,11 @@ WantedBy=multi-user.target
 **4. Запустите службу и добавьте в автозагрузку:**
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now btp.service
+sudo systemctl enable --now free-turn-proxy.service
 ```
 
-Посмотреть статус: `sudo systemctl status btp.service`
-Посмотреть логи: `sudo journalctl -u btp.service -f`
+Посмотреть статус: `sudo systemctl status free-turn-proxy.service`
+Посмотреть логи: `sudo journalctl -u free-turn-proxy.service -f`
 
 ---
 

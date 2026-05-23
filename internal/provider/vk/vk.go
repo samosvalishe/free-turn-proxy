@@ -1,4 +1,4 @@
-// Package vk — провайдер TURN-реквизитов через VK Calls API.
+﻿// Package vk — провайдер TURN-реквизитов через VK Calls API.
 //
 // Фасад над internal/provider/vk/internal/vkauth: добавляет фиксированный link (адрес
 // VK callroom) и адаптирует сигнатуру GetCredentials к provider.Provider.
@@ -12,11 +12,11 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/samosvalishe/btp/internal/logx"
-	"github.com/samosvalishe/btp/internal/provider"
-	"github.com/samosvalishe/btp/internal/provider/vk/internal/captcha"
-	manualcaptcha "github.com/samosvalishe/btp/internal/provider/vk/internal/captcha/manual"
-	"github.com/samosvalishe/btp/internal/provider/vk/internal/vkauth"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/provider"
+	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/captcha"
+	manualcaptcha "github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/captcha/manual"
+	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/vkauth"
 )
 
 // Config — параметры VK-провайдера.

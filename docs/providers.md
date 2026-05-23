@@ -1,4 +1,4 @@
-# Providers
+﻿# Providers
 
 Источник TURN-реквизитов выбирается флагом `-provider` (default `vk`). Реализации удовлетворяют интерфейс `internal/provider.Provider` и подключаются в `cmd/client/main.go` через `buildProvider`.
 

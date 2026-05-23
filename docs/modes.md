@@ -1,4 +1,4 @@
-# Режимы
+﻿# Режимы
 
 ## UDP-Релей (WireGuard / AmneziaWG / Hysteria)
 

@@ -3,7 +3,7 @@
   "packages": {
     ".": {
       "release-type": "go",
-      "package-name": "btp",
+      "package-name": "free-turn-proxy",
       "include-component-in-tag": false,
       "include-v-in-tag": true,
       "bump-minor-pre-major": true,

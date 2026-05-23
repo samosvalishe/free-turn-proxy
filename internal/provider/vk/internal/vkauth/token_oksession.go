@@ -1,4 +1,4 @@
-package vkauth
+﻿package vkauth
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	neturl "net/url"
 
 	"github.com/google/uuid"
-	"github.com/samosvalishe/btp/internal/provider/vk/internal/browserprofile"
+	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/browserprofile"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
 )

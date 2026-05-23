@@ -1,4 +1,4 @@
-// Package udpserver реализует серверную UDP-ретрансляцию: DTLS-терминированный
+﻿// Package udpserver реализует серверную UDP-ретрансляцию: DTLS-терминированный
 // поток форвардится к UDP-backend (WireGuard) и обратно.
 package udpserver
 
@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/logx"
-	"github.com/samosvalishe/btp/internal/stats"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 )
 
 const (

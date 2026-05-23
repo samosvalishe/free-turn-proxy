@@ -1,4 +1,4 @@
-package tcpfwd
+﻿package tcpfwd
 
 import (
 	"context"
@@ -7,14 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/client/ish"
-	"github.com/samosvalishe/btp/internal/logx"
-	"github.com/samosvalishe/btp/internal/netconn"
-	"github.com/samosvalishe/btp/internal/proxy/common"
-	"github.com/samosvalishe/btp/internal/stats"
-	"github.com/samosvalishe/btp/internal/transport/dtlsdial"
-	"github.com/samosvalishe/btp/internal/transport/kcptun"
-	"github.com/samosvalishe/btp/internal/wire/rtpopus"
+	"github.com/samosvalishe/free-turn-proxy/internal/client/ish"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/netconn"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/common"
+	"github.com/samosvalishe/free-turn-proxy/internal/stats"
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcptun"
+	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
 	"github.com/xtaci/smux"
 )
 

@@ -14,13 +14,13 @@ import (
 	"time"
 
 	"github.com/pion/dtls/v3"
-	"github.com/samosvalishe/btp/internal/config"
-	"github.com/samosvalishe/btp/internal/logx"
-	"github.com/samosvalishe/btp/internal/proxy/bondserver"
-	"github.com/samosvalishe/btp/internal/proxy/tcpfwdserver"
-	"github.com/samosvalishe/btp/internal/proxy/udpserver"
-	"github.com/samosvalishe/btp/internal/transport/dtlsdial"
-	"github.com/samosvalishe/btp/internal/wire/rtpopus"
+	"github.com/samosvalishe/free-turn-proxy/internal/config"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/bondserver"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/tcpfwdserver"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udpserver"
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
+	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
 )
 
 // version is populated at build time via -ldflags "-X main.version=...".
@@ -37,7 +37,7 @@ func main() {
 		log.Fatalf("%v", err)
 	}
 	logger := logx.New(cfg.Log.Debug)
-	logger.Infof("btp server version=%s", version)
+	logger.Infof("Free Turn Proxy server version=%s", version)
 
 	if cfg.Obf.GenKey {
 		key, gerr := rtpopus.GenKeyHex()

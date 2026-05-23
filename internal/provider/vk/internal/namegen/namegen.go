@@ -1,4 +1,4 @@
-// Package namegen генерирует случайные русскоязычные display name'ы для
+﻿// Package namegen генерирует случайные русскоязычные display name'ы для
 // идентичностей клиента. Пулы имён встроены из data/*.txt.
 package namegen
 
@@ -6,7 +6,7 @@ import (
 	_ "embed"
 	"strings"
 
-	"github.com/samosvalishe/btp/internal/randx"
+	"github.com/samosvalishe/free-turn-proxy/internal/randx"
 )
 
 //go:embed data/first_names_male.txt

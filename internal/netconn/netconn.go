@@ -1,4 +1,4 @@
-// Package netconn — мелкие net.Conn / transport.Net адаптеры для клиента
+﻿// Package netconn — мелкие net.Conn / transport.Net адаптеры для клиента
 // и сервера: passthrough transport.Net (для pion turn), ConnectedUDPConn
 // (WriteTo поверх dialed UDPConn) и SplitFirstWriteConn (обход DPI через
 // разбиение первого сегмента).

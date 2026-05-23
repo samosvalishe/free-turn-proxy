@@ -1,10 +1,10 @@
-package vkauth
+﻿package vkauth
 
 import (
 	"errors"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/provider"
+	"github.com/samosvalishe/free-turn-proxy/internal/provider"
 )
 
 // VKCredentials — пара app_id/app_secret для получения анонимных токенов.

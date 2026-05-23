@@ -1,4 +1,4 @@
-// Package bondclient реализует клиентскую сторону bonded VLESS lane:
+﻿// Package bondclient реализует клиентскую сторону bonded VLESS lane:
 // одно принятое TCP-соединение, распределённое (round-robin) по всем активным
 // smux-сессиям в tcpfwd.SessionPool. Wire-формат фреймов — internal/wire/bondframe;
 // пакет соединяет copy-loop локального TCP ↔ lanes.
@@ -17,10 +17,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/logx"
-	"github.com/samosvalishe/btp/internal/proxy/tcpfwd"
-	"github.com/samosvalishe/btp/internal/stats"
-	"github.com/samosvalishe/btp/internal/wire/bondframe"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/tcpfwd"
+	"github.com/samosvalishe/free-turn-proxy/internal/stats"
+	"github.com/samosvalishe/free-turn-proxy/internal/wire/bondframe"
 	"github.com/xtaci/smux"
 )
 

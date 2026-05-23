@@ -1,4 +1,4 @@
-// Package common содержит хелперы, общие для udprelay и tcpfwd
+﻿// Package common содержит хелперы, общие для udprelay и tcpfwd
 // (TURN-dial + создание obf-кодека). Два режима прокси по-разному компонуют DTLS
 // и rtpopus, поэтому полная абстракция Engine/Handler намеренно не вводится —
 // пакет собирает только действительно идентичный код.
@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/samosvalishe/btp/internal/transport/turndial"
-	"github.com/samosvalishe/btp/internal/wire/rtpopus"
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/turndial"
+	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
 )
 
 // GetCredsFunc разрешает TURN-реквизиты для streamID. Реализуется provider'ом

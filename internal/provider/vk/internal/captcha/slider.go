@@ -1,4 +1,4 @@
-package captcha
+﻿package captcha
 
 import (
 	"bytes"
@@ -16,7 +16,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/samosvalishe/btp/internal/randx"
+	"github.com/samosvalishe/free-turn-proxy/internal/randx"
 )
 
 type sliderPuzzle struct {

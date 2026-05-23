@@ -1,7 +1,7 @@
 # GoReleaser config: https://goreleaser.com
 version: 2
 
-project_name: btp
+project_name: free-turn-proxy
 
 before:
   hooks:
@@ -143,7 +143,7 @@ changelog:
 release:
   github:
     owner: samosvalishe
-    name: btp
+    name: free-turn-proxy
   prerelease: auto
   mode: replace
   draft: false
@@ -155,7 +155,7 @@ dockers_v2:
       - server
     dockerfile: Dockerfile.goreleaser
     images:
-      - ghcr.io/samosvalishe/btp
+      - ghcr.io/samosvalishe/free-turn-proxy
     tags:
       - "{{ .Version }}"
       - '{{ if not .Prerelease }}latest{{ end }}'
@@ -163,7 +163,7 @@ dockers_v2:
       - linux/amd64
       - linux/arm64
     labels:
-      org.opencontainers.image.source: https://github.com/samosvalishe/btp
+      org.opencontainers.image.source: https://github.com/samosvalishe/free-turn-proxy
       org.opencontainers.image.version: "{{ .Version }}"
       org.opencontainers.image.revision: "{{ .FullCommit }}"
       org.opencontainers.image.created: "{{ .Date }}"

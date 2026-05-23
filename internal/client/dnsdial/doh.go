@@ -1,4 +1,4 @@
-// Package dnsdial владеет DNS-резолвингом и net.Dialer'ом, прокинутым во все
+﻿// Package dnsdial владеет DNS-резолвингом и net.Dialer'ом, прокинутым во все
 // outbound HTTP/TLS клиенты. По Mode выбирает UDP/53, DNS-over-HTTPS или auto
 // (UDP-probe → sticky DoH fallback).
 package dnsdial
@@ -20,7 +20,7 @@ import (
 
 	"github.com/miekg/dns"
 
-	"github.com/samosvalishe/btp/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 
 	// встроенные Mozilla CA roots для CGO_ENABLED=0 сборок (Android).
 	_ "golang.org/x/crypto/x509roots/fallback"

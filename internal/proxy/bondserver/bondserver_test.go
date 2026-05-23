@@ -1,4 +1,4 @@
-package bondserver
+﻿package bondserver
 
 import (
 	"bytes"
@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/wire/bondframe"
+	"github.com/samosvalishe/free-turn-proxy/internal/wire/bondframe"
 )
 
 // fakeStream implements laneStream over an in-memory ring; reads block when

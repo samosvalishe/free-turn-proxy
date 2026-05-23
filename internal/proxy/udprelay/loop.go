@@ -1,4 +1,4 @@
-package udprelay
+﻿package udprelay
 
 import (
 	"context"
@@ -10,11 +10,11 @@ import (
 	"time"
 
 	"github.com/cbeuw/connutil"
-	"github.com/samosvalishe/btp/internal/provider"
-	"github.com/samosvalishe/btp/internal/proxy/common"
-	"github.com/samosvalishe/btp/internal/randx"
-	"github.com/samosvalishe/btp/internal/stats"
-	"github.com/samosvalishe/btp/internal/wire/rtpopus"
+	"github.com/samosvalishe/free-turn-proxy/internal/provider"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/common"
+	"github.com/samosvalishe/free-turn-proxy/internal/randx"
+	"github.com/samosvalishe/free-turn-proxy/internal/stats"
+	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
 )
 
 // DTLSLoop поддерживает единственное DTLS-подключение для streamID, перезапуская

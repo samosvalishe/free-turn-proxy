@@ -1,4 +1,4 @@
-package vkauth
+﻿package vkauth
 
 import (
 	"context"
@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/logx"
-	"github.com/samosvalishe/btp/internal/randx"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/randx"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
 )

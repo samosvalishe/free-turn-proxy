@@ -1,4 +1,4 @@
-// Package udprelay реализует UDP-режим прокси: терминирует DTLS от локального
+﻿// Package udprelay реализует UDP-режим прокси: терминирует DTLS от локального
 // пира (WireGuard) и ретранслирует пакеты через per-stream TURN-аллокацию
 // обратно к удалённому пиру. Run — точка входа; владеет локальным listener,
 // fan-in входящего dispatch и per-stream DTLS/TURN циклами.
@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/logx"
-	"github.com/samosvalishe/btp/internal/proxy/common"
-	"github.com/samosvalishe/btp/internal/transport/dtlsdial"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/common"
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
 )
 
 // GetCredsFunc реэкспортирован из common, чтобы вызывающие не выходили за пределы импортов пакета.

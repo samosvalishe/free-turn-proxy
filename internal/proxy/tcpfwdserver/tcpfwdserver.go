@@ -1,4 +1,4 @@
-// Package tcpfwdserver реализует серверную VLESS lane: KCP+smux поверх
+﻿// Package tcpfwdserver реализует серверную VLESS lane: KCP+smux поверх
 // DTLS-соединения, каждый smux-поток форвардится как TCP-соединение к backend
 // (Xray/VLESS). Bond-потоки автоопределяются по magic-префиксу и диспетчеризуются
 // в bondserver.Registry.
@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samosvalishe/btp/internal/logx"
-	"github.com/samosvalishe/btp/internal/netconn"
-	"github.com/samosvalishe/btp/internal/proxy/bondserver"
-	"github.com/samosvalishe/btp/internal/stats"
-	"github.com/samosvalishe/btp/internal/transport/kcptun"
-	"github.com/samosvalishe/btp/internal/wire/bondframe"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/netconn"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/bondserver"
+	"github.com/samosvalishe/free-turn-proxy/internal/stats"
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcptun"
+	"github.com/samosvalishe/free-turn-proxy/internal/wire/bondframe"
 	"github.com/xtaci/smux"
 )
 
