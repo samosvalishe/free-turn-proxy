@@ -16,7 +16,7 @@ import (
 	"strings"
 
 	"github.com/samosvalishe/btp/internal/transport/kcptun"
-	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
+	"github.com/samosvalishe/btp/internal/wire/rtpopus"
 )
 
 const (
@@ -45,12 +45,25 @@ type TURNOpts struct {
 	N            int    // -n: число TURN-потоков (только клиент)
 }
 
-// ObfOpts — опции обфускации TURN-payload (SRTP-mimicry).
+// ObfProfile выбирает wire-профиль обфускации TURN-payload.
+// Профили живут в internal/wire/<profile>/ — сейчас только rtpopus,
+// под добавление новых (rtph264, vp8 и т.д.).
+type ObfProfile string
+
+const (
+	ObfProfileNone    ObfProfile = "none"    // обфускация отключена
+	ObfProfileRTPOpus ObfProfile = "rtpopus" // RTP/opus + ChaCha20-Poly1305 AEAD
+)
+
+// ObfOpts — опции обфускации TURN-payload.
 type ObfOpts struct {
-	Mode   bool   // -obf: включить SRTP-mimicry AEAD-обёртку
-	Key    []byte // -obf-key (декодированный): 32-байтовый общий ключ; nil если Mode=false
-	GenKey bool   // -gen-obf-key: напечатать новый ключ и выйти
+	Profile ObfProfile // -obf-profile: none (default) | rtpopus
+	Key     []byte     // -obf-key (декодированный): 32-байтовый общий ключ; nil если Profile=none
+	GenKey  bool       // -gen-obf-key: напечатать новый ключ и выйти
 }
+
+// Enabled возвращает true когда выбран реальный профиль обфускации.
+func (o ObfOpts) Enabled() bool { return o.Profile != ObfProfileNone }
 
 // ProxyOpts — опции прокси прикладного уровня.
 type ProxyOpts struct {
@@ -132,9 +145,9 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	transportFlag := fs.String("transport", "tcp", "транспорт до TURN-реле: tcp (TCP/TLS, default) | udp")
 	modeFlag := fs.String("mode", "udp", "режим туннеля: udp (UDP-релей для WireGuard, default) | tcp (TCP-форвардер для Xray/sing-box)")
 	bondFlag := fs.Bool("bond", false, "распределять одно TCP-соединение по всем активным smux-сессиям (только с -mode tcp)")
-	wrapMode := fs.Bool("obf", false, "маскировать TURN-payload под SRTP (RTP/opus + ChaCha20-Poly1305 AEAD) для обхода content-filter VK; ключ должен совпадать на клиенте и сервере")
-	wrapKeyHex := fs.String("obf-key", "", "общий ключ для -obf, 32 байта в hex (64 символа)")
-	genWrapKey := fs.Bool("gen-obf-key", false, "напечатать новый ключ для -obf-key и выйти")
+	obfProfileRaw := fs.String("obf-profile", string(ObfProfileNone), "wire-профиль обфускации TURN-payload: none (default) | rtpopus (RTP/opus + ChaCha20-Poly1305 AEAD для обхода content-filter VK); должен совпадать с сервером")
+	obfKeyHex := fs.String("obf-key", "", "общий ключ для -obf-profile != none, 32 байта в hex (64 символа)")
+	genObfKey := fs.Bool("gen-obf-key", false, "напечатать новый ключ для -obf-key и выйти")
 	streamsPerCredFlag := fs.Int("streams-per-cred", defaultStreamsPerCache, "сколько TURN-потоков делят один кеш VK-учёток (только -provider vk)")
 	debugFlag := fs.Bool("debug", false, "включить подробные debug-логи")
 	manualCaptchaFlag := fs.Bool("manual-captcha", false, "пропустить авто-решение VK captcha и сразу открыть ручной режим в локальном браузере (только -provider vk)")
@@ -153,8 +166,8 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 			N:            *n,
 		},
 		Obf: ObfOpts{
-			Mode:   *wrapMode,
-			GenKey: *genWrapKey,
+			Profile: ObfProfile(*obfProfileRaw),
+			GenKey:  *genObfKey,
 		},
 		Proxy: ProxyOpts{
 			Mode:   clientProxyMode(*modeFlag, *bondFlag),
@@ -226,7 +239,10 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	default:
 		return nil, fmt.Errorf("invalid -provider value %q: must be %s", c.Provider.Name, ProviderVK)
 	}
-	key, err := srtpmimicry.DecodeKey(c.Obf.Mode, *wrapKeyHex)
+	if err := validateObfProfile(c.Obf.Profile); err != nil {
+		return nil, err
+	}
+	key, err := rtpopus.DecodeKey(c.Obf.Enabled(), *obfKeyHex)
 	if err != nil {
 		return nil, err
 	}
@@ -248,9 +264,9 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 	listen := fs.String("listen", "0.0.0.0:56000", "локальный адрес прослушивания ip:port")
 	connect := fs.String("connect", "", "адрес локального бэкенда, host:port (обязательно: WireGuard 127.0.0.1:51820 или Xray 127.0.0.1:443)")
 	modeFlag := fs.String("mode", "udp", "режим туннеля: udp (UDP-релей для WireGuard, default) | tcp (TCP-форвардер для Xray/sing-box; bond определяется автоматически)")
-	wrapMode := fs.Bool("obf", false, "маскировать TURN-payload под SRTP (RTP/opus + ChaCha20-Poly1305 AEAD) для обхода content-filter VK; ключ должен совпадать с клиентом")
-	wrapKeyHex := fs.String("obf-key", "", "общий ключ для -obf, 32 байта в hex (64 символа)")
-	genWrapKey := fs.Bool("gen-obf-key", false, "напечатать новый ключ для -obf-key и выйти")
+	obfProfileRaw := fs.String("obf-profile", string(ObfProfileNone), "wire-профиль обфускации TURN-payload: none (default) | rtpopus (RTP/opus + ChaCha20-Poly1305 AEAD для обхода content-filter VK); должен совпадать с клиентом")
+	obfKeyHex := fs.String("obf-key", "", "общий ключ для -obf-profile != none, 32 байта в hex (64 символа)")
+	genObfKey := fs.Bool("gen-obf-key", false, "напечатать новый ключ для -obf-key и выйти")
 	debugFlag := fs.Bool("debug", false, "включить подробные debug-логи")
 
 	if err := fs.Parse(args); err != nil {
@@ -259,8 +275,8 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 
 	s := &Server{
 		Obf: ObfOpts{
-			Mode:   *wrapMode,
-			GenKey: *genWrapKey,
+			Profile: ObfProfile(*obfProfileRaw),
+			GenKey:  *genObfKey,
 		},
 		Proxy: ProxyOpts{
 			Mode:    serverProxyMode(*modeFlag),
@@ -289,13 +305,26 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 	if s.Proxy.Connect == "" {
 		return nil, fmt.Errorf("server address is required")
 	}
-	key, err := srtpmimicry.DecodeKey(s.Obf.Mode, *wrapKeyHex)
+	if err := validateObfProfile(s.Obf.Profile); err != nil {
+		return nil, err
+	}
+	key, err := rtpopus.DecodeKey(s.Obf.Enabled(), *obfKeyHex)
 	if err != nil {
 		return nil, err
 	}
 	s.Obf.Key = key
 
 	return s, nil
+}
+
+// validateObfProfile проверяет что -obf-profile содержит известное значение.
+func validateObfProfile(p ObfProfile) error {
+	switch p {
+	case ObfProfileNone, ObfProfileRTPOpus:
+		return nil
+	default:
+		return fmt.Errorf("invalid -obf-profile value %q: must be %s | %s", p, ObfProfileNone, ObfProfileRTPOpus)
+	}
 }
 
 func clientProxyMode(mode string, bond bool) ProxyMode {

@@ -15,9 +15,9 @@ if [ "${MODE}" = "tcp" ]; then
     set -- "$@" -mode tcp
 fi
 
-if [ "${OBF_MODE}" = "true" ]; then
-    OBF="${OBF_KEY:?OBF_KEY is required when OBF_MODE=true}"
-    set -- "$@" -obf -obf-key "$OBF"
+if [ -n "${OBF_PROFILE}" ] && [ "${OBF_PROFILE}" != "none" ]; then
+    OBF="${OBF_KEY:?OBF_KEY is required when OBF_PROFILE != none}"
+    set -- "$@" -obf-profile "$OBF_PROFILE" -obf-key "$OBF"
 fi
 
 if [ "${DEBUG}" = "true" ]; then

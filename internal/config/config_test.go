@@ -40,7 +40,13 @@ func TestParseClient_Defaults(t *testing.T) {
 		t.Errorf("VK.Link: %q (expected abcdef)", c.VK.Link)
 	}
 	if c.Obf.Key != nil {
-		t.Errorf("Obf.Key should be nil when -obf absent")
+		t.Errorf("Obf.Key should be nil when -obf-profile absent")
+	}
+	if c.Obf.Profile != ObfProfileNone {
+		t.Errorf("Obf.Profile default: %q (expected %q)", c.Obf.Profile, ObfProfileNone)
+	}
+	if c.Obf.Enabled() {
+		t.Errorf("Obf.Enabled() should be false when profile=none")
 	}
 	if c.Proxy.Mode != ProxyModeUDP {
 		t.Errorf("Proxy.Mode default: %q (expected udp)", c.Proxy.Mode)
@@ -92,21 +98,35 @@ func TestParseClient_BondWithoutTCPMode(t *testing.T) {
 }
 
 func TestParseClient_ObfMissingKey(t *testing.T) {
-	args := append(validClientArgs(), "-obf")
+	args := append(validClientArgs(), "-obf-profile", "rtpopus")
 	_, err := ParseClient(args, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "-obf requires -obf-key") {
+	if err == nil || !strings.Contains(err.Error(), "-obf-key") {
 		t.Errorf("expected obf-key error, got %v", err)
 	}
 }
 
 func TestParseClient_ObfKeyOK(t *testing.T) {
-	args := append(validClientArgs(), "-obf", "-obf-key", strings.Repeat("ab", 32))
+	args := append(validClientArgs(), "-obf-profile", "rtpopus", "-obf-key", strings.Repeat("ab", 32))
 	c, err := ParseClient(args, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(c.Obf.Key) != 32 {
 		t.Errorf("Obf.Key len: %d", len(c.Obf.Key))
+	}
+	if c.Obf.Profile != ObfProfileRTPOpus {
+		t.Errorf("Obf.Profile: %q (expected %q)", c.Obf.Profile, ObfProfileRTPOpus)
+	}
+	if !c.Obf.Enabled() {
+		t.Errorf("Obf.Enabled() should be true when profile=rtpopus")
+	}
+}
+
+func TestParseClient_ObfProfileInvalid(t *testing.T) {
+	args := append(validClientArgs(), "-obf-profile", "bogus")
+	_, err := ParseClient(args, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "invalid -obf-profile") {
+		t.Errorf("expected invalid obf-profile error, got %v", err)
 	}
 }
 
@@ -215,26 +235,36 @@ func TestParseServer_MissingConnect(t *testing.T) {
 }
 
 func TestParseServer_ObfMissingKey(t *testing.T) {
-	_, err := ParseServer([]string{"-connect", "x:1", "-obf"}, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "-obf requires -obf-key") {
+	_, err := ParseServer([]string{"-connect", "x:1", "-obf-profile", "rtpopus"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "-obf-key") {
 		t.Errorf("expected obf-key error, got %v", err)
 	}
 }
 
 func TestParseServer_ObfKeyBadHex(t *testing.T) {
-	_, err := ParseServer([]string{"-connect", "x:1", "-obf", "-obf-key", "zz"}, io.Discard)
+	_, err := ParseServer([]string{"-connect", "x:1", "-obf-profile", "rtpopus", "-obf-key", "zz"}, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "invalid hex") {
 		t.Errorf("expected hex error, got %v", err)
 	}
 }
 
 func TestParseServer_ObfKeyOK(t *testing.T) {
-	s, err := ParseServer([]string{"-connect", "x:1", "-obf", "-obf-key", strings.Repeat("cd", 32)}, io.Discard)
+	s, err := ParseServer([]string{"-connect", "x:1", "-obf-profile", "rtpopus", "-obf-key", strings.Repeat("cd", 32)}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(s.Obf.Key) != 32 {
 		t.Errorf("Obf.Key len: %d", len(s.Obf.Key))
+	}
+	if s.Obf.Profile != ObfProfileRTPOpus {
+		t.Errorf("Obf.Profile: %q (expected %q)", s.Obf.Profile, ObfProfileRTPOpus)
+	}
+}
+
+func TestParseServer_ObfProfileInvalid(t *testing.T) {
+	_, err := ParseServer([]string{"-connect", "x:1", "-obf-profile", "bogus"}, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "invalid -obf-profile") {
+		t.Errorf("expected invalid obf-profile error, got %v", err)
 	}
 }
 

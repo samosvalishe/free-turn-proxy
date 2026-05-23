@@ -1,4 +1,4 @@
-package srtpmimicry
+package rtpopus
 
 import (
 	"bytes"

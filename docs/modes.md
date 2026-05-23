@@ -23,9 +23,15 @@
 
 Серверного `-bond` нет — сервер автоопределяет bond по magic-префиксу в стриме.
 
-## OBF (SRTP-Мимикрия)
+## OBF (wire-профили обфускации)
 
-`-obf` маскирует TURN-payload под SRTP: RTP/opus-заголовок + ChaCha20-Poly1305 AEAD на теле. Не защита (DTLS уже шифрует), а обфускация под голос — иначе VK content-filter дропает. Ключ должен совпадать.
+`-obf-profile` выбирает wire-профиль маскировки TURN-payload. Не защита (DTLS уже шифрует), а обфускация — иначе VK content-filter дропает payload, не похожий на голосовой трафик. Профиль и ключ должны совпадать на клиенте и сервере.
+
+Доступные профили:
+- **`none`** (default) — обфускация выключена.
+- **`rtpopus`** — RTP/opus-заголовок + ChaCha20-Poly1305 AEAD на теле.
+
+Будущие профили (rtph264, vp8 и т.д.) добавятся по мере необходимости.
 
 Сгенерировать ключ:
 
@@ -36,8 +42,8 @@
 Запуск:
 
 ```bash
-./server ... -obf -obf-key <64-hex>
-./client ... -obf -obf-key <64-hex>
+./server ... -obf-profile rtpopus -obf-key <64-hex>
+./client ... -obf-profile rtpopus -obf-key <64-hex>
 ```
 
 ## TURN Транспорт

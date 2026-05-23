@@ -14,7 +14,7 @@ import (
 	"github.com/samosvalishe/btp/internal/proxy/common"
 	"github.com/samosvalishe/btp/internal/randx"
 	"github.com/samosvalishe/btp/internal/stats"
-	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
+	"github.com/samosvalishe/btp/internal/wire/rtpopus"
 )
 
 // DTLSLoop поддерживает единственное DTLS-подключение для streamID, перезапуская
@@ -255,9 +255,9 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		}
 	})
 	var internalPipeAddr atomic.Value
-	wc, wcErr := common.NewClientWrap(params.ObfKey)
-	if wcErr != nil {
-		deps.log().Errorf("[STREAM %d] WRAP init failed: %v", streamID, wcErr)
+	obfConn, obfErr := common.NewClientObf(params.ObfKey)
+	if obfErr != nil {
+		deps.log().Errorf("[STREAM %d] OBF init failed: %v", streamID, obfErr)
 		turncancel()
 		return
 	}
@@ -266,8 +266,8 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		defer turncancel()
 		buf := make([]byte, 1600)
 		var wireBuf []byte
-		if wc != nil {
-			wireBuf = make([]byte, srtpmimicry.MaxWire(len(buf)))
+		if obfConn != nil {
+			wireBuf = make([]byte, rtpopus.MaxWire(len(buf)))
 		}
 		for {
 			if turnctx.Err() != nil {
@@ -284,10 +284,10 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 			internalPipeAddr.Store(addr1)
 
 			out := buf[:n]
-			if wc != nil {
-				written, wrapErr := wc.WrapInto(wireBuf, out)
-				if wrapErr != nil {
-					deps.log().Errorf("[STREAM %d] WRAP failed: %v", streamID, wrapErr)
+			if obfConn != nil {
+				written, wErr := obfConn.WrapInto(wireBuf, out)
+				if wErr != nil {
+					deps.log().Errorf("[STREAM %d] OBF wrap failed: %v", streamID, wErr)
 					return
 				}
 				out = wireBuf[:written]
@@ -304,8 +304,8 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	wg.Go(func() {
 		defer turncancel()
 		readBufLen := 1600
-		if wc != nil {
-			readBufLen = srtpmimicry.MaxWire(1600)
+		if obfConn != nil {
+			readBufLen = rtpopus.MaxWire(1600)
 		}
 		buf := make([]byte, readBufLen)
 		plain := make([]byte, 1600)
@@ -321,10 +321,10 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 
 			if addr, ok := addr1.(net.Addr); ok {
 				payload := buf[:n]
-				if wc != nil {
-					m, wrapErr := wc.Unwrap(payload, plain)
-					if wrapErr != nil {
-						deps.log().Errorf("[STREAM %d] UNWRAP failed: %v (n=%d)", streamID, wrapErr, n)
+				if obfConn != nil {
+					m, uErr := obfConn.Unwrap(payload, plain)
+					if uErr != nil {
+						deps.log().Errorf("[STREAM %d] OBF unwrap failed: %v (n=%d)", streamID, uErr, n)
 						continue
 					}
 					payload = plain[:m]

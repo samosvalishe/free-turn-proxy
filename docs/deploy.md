@@ -10,7 +10,7 @@ docker compose logs -f
 
 По умолчанию: WireGuard backend `127.0.0.1:51820`, host network, порт `56000/udp`.
 
-Для Xray/sing-box: `MODE=tcp` и смените `CONNECT_ADDR` на `127.0.0.1:443`. Для SRTP-мимикрии: `OBF_MODE=true` и `OBF_KEY=<64-hex>`.
+Для Xray/sing-box: `MODE=tcp` и смените `CONNECT_ADDR` на `127.0.0.1:443`. Для обфускации payload: `OBF_PROFILE=rtpopus` и `OBF_KEY=<64-hex>`.
 
 ## Docker Run
 
@@ -39,8 +39,8 @@ docker run -d --name btp -p 56000:56000/udp --restart unless-stopped \
 | `CONNECT_ADDR` | **обязательна** | backend сервера |
 | `LISTEN_ADDR` | `0.0.0.0:56000` | адрес прослушивания |
 | `MODE` | `udp` | режим туннеля: `udp` \| `tcp` |
-| `OBF_MODE` | `false` | включает `-obf` |
-| `OBF_KEY` | пусто | значение `-obf-key` |
+| `OBF_PROFILE` | `none` | значение `-obf-profile`: `none` \| `rtpopus` |
+| `OBF_KEY` | пусто | значение `-obf-key` (обязателен при `OBF_PROFILE != none`) |
 | `DEBUG` | `false` | включает `-debug` |
 
 Сборка образа:

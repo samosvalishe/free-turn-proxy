@@ -11,7 +11,7 @@ backend (WireGuard UDP | TCP service)
   ↑
 [app proxy mode]                  ← UDP-relay (-mode udp)  |  TCP-forward (-mode tcp)  |  TCP-forward+bond (-mode tcp -bond)
   ↑
-[srtpmimicry]           (optional, AEAD обфускация поверх payload)
+[obf wire profile]      (optional, AEAD обфускация поверх payload; сейчас только rtpopus)
   ↑
 [DTLS]                  ← обфускация (не security): VK content-filter ожидает DTLS handshake
   ↑
@@ -38,8 +38,11 @@ Pipeline (proxy/udprelay, proxy/tcpfwd) работает только через
 ### DTLS — это **обфускация, не security**
 VK content-filter дропает payload, который не похож на legit DTLS-handshake. Мы используем `pion/dtls` чтобы пройти фильтр. Шифрование DTLS — побочный эффект, не цель.
 
-### srtpmimicry
-Пакет `internal/wire/srtpmimicry`. CLI флаг `-obf`. Это **ChaCha20-Poly1305 AEAD** с RTP-like wire-header (mimicry). Включается опционально поверх DTLS — даёт дополнительный слой обфускации с RTP-видимостью на проводе. Не путать с Go-термином wrap (`errors.Wrap`).
+### obf wire profile
+Зонтик `internal/wire/` объединяет wire-форматы. Профили обфускации выбираются флагом `-obf-profile` (default `none`):
+- **`rtpopus`** (`internal/wire/rtpopus`): **ChaCha20-Poly1305 AEAD** с RTP/opus wire-header (mimicry). RTP-видимость на проводе обходит VK TURN content-filter.
+
+Профили задуманы расширяемыми (rtph264, vp8 и т.д.) — общий интерфейс введём при появлении второго профиля. Wire-формат `rtpopus` заморожен (требуется побитовая совместимость с задеплоенными пирами). Не путать с Go-термином wrap (`errors.Wrap`) — методы `WrapInto`/`Unwrap` означают энкод/декод wire-фрейма.
 
 ### app proxy mode (3 значения)
 Что копируется поверх DTLS:
@@ -87,7 +90,7 @@ Linux user-mode environment для iOS (через usermode x86 emulation). Па
 - `-transport tcp|udp` — транспорт до TURN (TCP/TLS или UDP).
 - `-mode udp|tcp` — app proxy mode (UDP-relay|TCP-forward).
 - `-bond` — bonding внутри TCP-forward (только client).
-- `-obf` — srtpmimicry-обфускация.
+- `-obf-profile` — wire-профиль обфускации (`none` | `rtpopus`).
 - `-dns-mode` — транспорт резолвера клиента (plain|doh|auto).
 
 ### captcha (auto / manual)

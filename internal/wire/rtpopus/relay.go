@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-package srtpmimicry
+package rtpopus
 
 import (
 	"net"
@@ -9,7 +9,7 @@ import (
 
 // RelayPacketConn оборачивает TURN relay PacketConn, направляя все записи
 // фиксированному пиру. Если Conn non-nil, пакеты оборачиваются/разворачиваются
-// SRTP-mimicry AEAD.
+// rtpopus AEAD (мимикрия под RTP/opus).
 type RelayPacketConn struct {
 	Relay net.PacketConn
 	Peer  net.Addr

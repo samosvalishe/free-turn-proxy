@@ -1,6 +1,6 @@
 // Package common содержит хелперы, общие для udprelay и tcpfwd
-// (TURN-dial + создание wrap-кодека). Два режима прокси по-разному компонуют DTLS и
-// srtpmimicry, поэтому полная абстракция Engine/Handler намеренно не вводится —
+// (TURN-dial + создание obf-кодека). Два режима прокси по-разному компонуют DTLS
+// и rtpopus, поэтому полная абстракция Engine/Handler намеренно не вводится —
 // пакет собирает только действительно идентичный код.
 package common
 
@@ -10,7 +10,7 @@ import (
 	"net"
 
 	"github.com/samosvalishe/btp/internal/transport/turndial"
-	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
+	"github.com/samosvalishe/btp/internal/wire/rtpopus"
 )
 
 // GetCredsFunc разрешает TURN-реквизиты для streamID. Реализуется provider'ом
@@ -33,11 +33,11 @@ func DialTURN(ctx context.Context, host, port string, udp bool, peer *net.UDPAdd
 	}, peer, user, pass, rawURL)
 }
 
-// NewClientWrap возвращает клиентский srtpmimicry.Conn если key нужной длины,
-// иначе (nil, nil) — wrap отключён. Ошибки NewConn пробрасываются вызывающему.
-func NewClientWrap(key []byte) (*srtpmimicry.Conn, error) {
-	if len(key) != srtpmimicry.KeyLen {
+// NewClientObf возвращает клиентский rtpopus.Conn если key нужной длины,
+// иначе (nil, nil) — обфускация отключена. Ошибки NewConn пробрасываются вызывающему.
+func NewClientObf(key []byte) (*rtpopus.Conn, error) {
+	if len(key) != rtpopus.KeyLen {
 		return nil, nil
 	}
-	return srtpmimicry.NewConn(key, false)
+	return rtpopus.NewConn(key, false)
 }

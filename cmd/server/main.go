@@ -18,7 +18,7 @@ import (
 	"github.com/samosvalishe/btp/internal/proxy/tcpfwdserver"
 	"github.com/samosvalishe/btp/internal/proxy/udpserver"
 	"github.com/samosvalishe/btp/internal/transport/dtlsdial"
-	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
+	"github.com/samosvalishe/btp/internal/wire/rtpopus"
 )
 
 // version is populated at build time via -ldflags "-X main.version=...".
@@ -34,7 +34,7 @@ func main() {
 	logger.Infof("btp server version=%s", version)
 
 	if cfg.Obf.GenKey {
-		key, gerr := srtpmimicry.GenKeyHex()
+		key, gerr := rtpopus.GenKeyHex()
 		if gerr != nil {
 			logger.Errorf("gen-obf-key: %v", gerr)
 			os.Exit(1)
@@ -65,10 +65,10 @@ func main() {
 		logger.Errorf("resolve listen addr: %v", err)
 		os.Exit(1)
 	}
-	logger.Infof("Starting server listen=%s connect=%s mode=%s obf=%t bond-autodetect=true",
-		cfg.Proxy.Listen, cfg.Proxy.Connect, cfg.Proxy.Mode, cfg.Obf.Mode)
-	if !cfg.Obf.Mode {
-		logger.Warnf("running without -obf: any client reaching %s can relay to %s (no shared-key auth)", cfg.Proxy.Listen, cfg.Proxy.Connect)
+	logger.Infof("Starting server listen=%s connect=%s mode=%s obf-profile=%s bond-autodetect=true",
+		cfg.Proxy.Listen, cfg.Proxy.Connect, cfg.Proxy.Mode, cfg.Obf.Profile)
+	if !cfg.Obf.Enabled() {
+		logger.Warnf("running with -obf-profile=none: any client reaching %s can relay to %s (no shared-key auth)", cfg.Proxy.Listen, cfg.Proxy.Connect)
 	}
 
 	certificate, genErr := dtlsdial.GenerateSelfSignedCert()
@@ -84,14 +84,14 @@ func main() {
 		dtls.WithConnectionIDGenerator(dtls.RandomCIDGenerator(8)),
 	}
 	var listener net.Listener
-	if cfg.Obf.Mode {
-		logger.Infof("OBF mode enabled: listener only accepts clients with matching -obf-key")
-		wrapListener, werr := srtpmimicry.Listen(addr, cfg.Obf.Key)
-		if werr != nil {
-			logger.Errorf("wrap listen: %v", werr)
+	if cfg.Obf.Enabled() {
+		logger.Infof("OBF profile=%s: listener only accepts clients with matching -obf-profile and -obf-key", cfg.Obf.Profile)
+		obfListener, oerr := rtpopus.Listen(addr, cfg.Obf.Key)
+		if oerr != nil {
+			logger.Errorf("obf listen: %v", oerr)
 			os.Exit(1)
 		}
-		listener, err = dtls.NewListenerWithOptions(wrapListener, dtlsOpts...)
+		listener, err = dtls.NewListenerWithOptions(obfListener, dtlsOpts...)
 	} else {
 		listener, err = dtls.ListenWithOptions("udp", addr, dtlsOpts...)
 	}

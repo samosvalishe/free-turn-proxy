@@ -14,6 +14,6 @@ services:
       CONNECT_ADDR: "127.0.0.1:51820"
       # LISTEN_ADDR: "0.0.0.0:56000"
       # MODE: "tcp"           # tcp = TCP-форвардер для Xray/sing-box; default udp = WireGuard
-      # OBF_MODE: "true"
+      # OBF_PROFILE: "rtpopus"   # none (default) | rtpopus
       # OBF_KEY задаётся в .env (не коммитьте ключ в git)
       # DEBUG: "false"

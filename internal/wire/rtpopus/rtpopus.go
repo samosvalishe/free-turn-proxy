@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
-// Package srtpmimicry реализует AEAD-фрейминг с мимикрией SRTP для обхода
+// Package rtpopus реализует AEAD-фрейминг с мимикрией под RTP/opus (один
+// из планируемых wire-профилей обфускации в internal/wire/). Цель — обход
 // VK TURN content-filter.
 //
 // Назначение: обфускация, а не безопасность. DTLS уже обеспечивает
@@ -25,7 +26,7 @@
 // AAD = первые 24 байта (RTP header || nonce).
 //
 // Wire-формат заморожен — требуется побитовая совместимость с задеплоенными пирами.
-package srtpmimicry
+package rtpopus
 
 import (
 	"crypto/cipher"
@@ -61,11 +62,11 @@ type State struct {
 
 func NewState(key []byte) (*State, error) {
 	if len(key) != KeyLen {
-		return nil, fmt.Errorf("wrap: key must be %d bytes (got %d)", KeyLen, len(key))
+		return nil, fmt.Errorf("rtpopus:key must be %d bytes (got %d)", KeyLen, len(key))
 	}
 	aead, err := chacha20poly1305.New(key)
 	if err != nil {
-		return nil, fmt.Errorf("wrap: aead init: %w", err)
+		return nil, fmt.Errorf("rtpopus:aead init: %w", err)
 	}
 	return &State{aead: aead}, nil
 }
@@ -93,13 +94,13 @@ func NewConn(key []byte, isServer bool) (*Conn, error) {
 // переиспользуя переданный State.
 func NewConnFromState(state *State, isServer bool) (*Conn, error) {
 	if state == nil {
-		return nil, errors.New("wrap: nil state")
+		return nil, errors.New("rtpopus:nil state")
 	}
 	c := &Conn{state: state}
 
 	var rnd [16]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
-		return nil, fmt.Errorf("wrap: rand init: %w", err)
+		return nil, fmt.Errorf("rtpopus:rand init: %w", err)
 	}
 	copy(c.sessionID[:], rnd[0:4])
 	copy(c.ssrc[:], rnd[4:8])
@@ -115,7 +116,7 @@ func NewConnFromState(state *State, isServer bool) (*Conn, error) {
 
 	var cb [8]byte
 	if _, err := rand.Read(cb[:]); err != nil {
-		return nil, fmt.Errorf("wrap: counter rand: %w", err)
+		return nil, fmt.Errorf("rtpopus:counter rand: %w", err)
 	}
 	c.counter.Store(binary.BigEndian.Uint64(cb[:]))
 	return c, nil
@@ -126,7 +127,7 @@ func NewConnFromState(state *State, isServer bool) (*Conn, error) {
 func (c *Conn) WrapInto(dst, payload []byte) (int, error) {
 	wireLen := Overhead + len(payload)
 	if len(dst) < wireLen {
-		return 0, errors.New("wrap: dst buffer too small")
+		return 0, errors.New("rtpopus:dst buffer too small")
 	}
 
 	// RTP-заголовок.
@@ -158,7 +159,7 @@ func (c *Conn) WrapInto(dst, payload []byte) (int, error) {
 // потреблённым после вызова (содержимое нельзя переиспользовать).
 func (c *Conn) Unwrap(wire, dst []byte) (int, error) {
 	if len(wire) < Overhead {
-		return 0, errors.New("wrap: packet too short")
+		return 0, errors.New("rtpopus:packet too short")
 	}
 	nonce := wire[rtpHdrLen : rtpHdrLen+nonceLen]
 	aad := wire[:headerLen]
@@ -166,10 +167,10 @@ func (c *Conn) Unwrap(wire, dst []byte) (int, error) {
 
 	plain, err := c.state.aead.Open(ct[:0], nonce, ct, aad)
 	if err != nil {
-		return 0, fmt.Errorf("wrap: AEAD open: %w", err)
+		return 0, fmt.Errorf("rtpopus:AEAD open: %w", err)
 	}
 	if len(plain) > len(dst) {
-		return 0, errors.New("wrap: dst buffer too small")
+		return 0, errors.New("rtpopus:dst buffer too small")
 	}
 	copy(dst[:len(plain)], plain)
 	return len(plain), nil
@@ -178,7 +179,7 @@ func (c *Conn) Unwrap(wire, dst []byte) (int, error) {
 func GenKeyHex() (string, error) {
 	key := make([]byte, KeyLen)
 	if _, err := rand.Read(key); err != nil {
-		return "", fmt.Errorf("wrap: key gen: %w", err)
+		return "", fmt.Errorf("rtpopus:key gen: %w", err)
 	}
 	return hex.EncodeToString(key), nil
 }
@@ -190,7 +191,7 @@ func DecodeKey(enabled bool, raw string) ([]byte, error) {
 		return nil, nil
 	}
 	if raw == "" {
-		return nil, errors.New("-obf requires -obf-key")
+		return nil, errors.New("-obf-profile != none requires -obf-key")
 	}
 	key, err := hex.DecodeString(raw)
 	if err != nil {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-package srtpmimicry
+package rtpopus
 
 import (
 	"errors"
@@ -30,7 +30,7 @@ func Listen(addr *net.UDPAddr, key []byte) (dtlsnet.PacketListener, error) {
 	}
 	inner, err := pionudp.Listen("udp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("wrap: udp listen: %w", err)
+		return nil, fmt.Errorf("rtpopus:udp listen: %w", err)
 	}
 	return &packetListener{
 		inner: dtlsnet.PacketListenerFromListener(inner),
@@ -81,7 +81,7 @@ func (c *packetConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	}
 	wire := buf[:n]
 	if len(wire) < Overhead {
-		return 0, addr, errors.New("wrap: packet too short")
+		return 0, addr, errors.New("rtpopus:packet too short")
 	}
 	m, err := c.conn.Unwrap(wire, p)
 	if err != nil {

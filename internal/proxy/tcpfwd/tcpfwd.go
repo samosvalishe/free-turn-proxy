@@ -14,14 +14,14 @@ import (
 	"github.com/samosvalishe/btp/internal/stats"
 	"github.com/samosvalishe/btp/internal/transport/dtlsdial"
 	"github.com/samosvalishe/btp/internal/transport/kcptun"
-	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
+	"github.com/samosvalishe/btp/internal/wire/rtpopus"
 	"github.com/xtaci/smux"
 )
 
 // GetCredsFunc реэкспортирован из common, чтобы вызывающие не выходили за пределы импортов пакета.
 type GetCredsFunc = common.GetCredsFunc
 
-// Params — конфигурация TURN/wrap для пула.
+// Params — конфигурация TURN/obf для пула.
 type Params struct {
 	Host         string
 	Port         string
@@ -241,12 +241,12 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	deps.log().Debugf("[session %d] TURN server IP: %s", id, stream.ServerUDPAddr.IP)
 	deps.log().Debugf("relayed-address=%s", relayConn.LocalAddr().String())
 
-	relayWC, err := common.NewClientWrap(params.ObfKey)
+	obfConn, err := common.NewClientObf(params.ObfKey)
 	if err != nil {
 		cleanup()
-		return nil, nil, fmt.Errorf("wrap init: %w", err)
+		return nil, nil, fmt.Errorf("obf init: %w", err)
 	}
-	dtlsPC := &srtpmimicry.RelayPacketConn{Relay: relayConn, Peer: peer, Conn: relayWC}
+	dtlsPC := &rtpopus.RelayPacketConn{Relay: relayConn, Peer: peer, Conn: obfConn}
 	dtlsConn, err := deps.DTLSDialer.Dial(ctx, dtlsPC, peer)
 	if err != nil {
 		cleanup()

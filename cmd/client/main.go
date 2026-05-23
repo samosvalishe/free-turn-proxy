@@ -21,7 +21,7 @@ import (
 	"github.com/samosvalishe/btp/internal/proxy/tcpfwd"
 	"github.com/samosvalishe/btp/internal/proxy/udprelay"
 	"github.com/samosvalishe/btp/internal/transport/dtlsdial"
-	"github.com/samosvalishe/btp/internal/wire/srtpmimicry"
+	"github.com/samosvalishe/btp/internal/wire/rtpopus"
 )
 
 // version is populated at build time via -ldflags "-X main.version=...".
@@ -64,7 +64,7 @@ func main() {
 	appDialer := dnsdial.AppDialer(cfg.DNS.Mode)
 	dnsdial.InstallGlobalResolver(cfg.DNS.Mode)
 	if cfg.Obf.GenKey {
-		key, gerr := srtpmimicry.GenKeyHex()
+		key, gerr := rtpopus.GenKeyHex()
 		if gerr != nil {
 			logger.Errorf("gen-obf-key: %v", gerr)
 			os.Exit(1)
@@ -77,8 +77,8 @@ func main() {
 		logger.Errorf("resolve peer addr: %v", err)
 		os.Exit(1)
 	}
-	if cfg.Obf.Mode {
-		logger.Infof("OBF mode enabled: peer server must use matching -obf-key")
+	if cfg.Obf.Enabled() {
+		logger.Infof("OBF profile=%s: peer server must use matching -obf-profile and -obf-key", cfg.Obf.Profile)
 	}
 
 	var connectedStreams atomic.Int32
