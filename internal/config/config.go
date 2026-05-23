@@ -135,24 +135,24 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 		fs.SetOutput(errOut)
 	}
 
-	host := fs.String("turn", "", "переопределить IP TURN-сервера (по умолчанию берётся из credentials провайдера)")
-	port := fs.String("port", "", "переопределить порт TURN-сервера (по умолчанию берётся из credentials провайдера)")
-	listen := fs.String("listen", "127.0.0.1:9000", "локальный адрес ip:port, куда подключается WireGuard или Xray клиент")
-	providerFlag := fs.String("provider", ProviderVK, "источник TURN-реквизитов: vk (default, VK Calls API)")
-	vklink := fs.String("link", "", "ссылка VK Calls вида https://vk.com/call/join/... (обязательно для -provider vk)")
-	peerAddr := fs.String("peer", "", "адрес сервера VK TURN Proxy на VPS, host:port (обязательно)")
-	n := fs.Int("n", 10, "количество параллельных TURN-потоков (соединений к TURN-реле)")
-	transportFlag := fs.String("transport", "tcp", "транспорт до TURN-реле: tcp (TCP/TLS, default) | udp")
-	modeFlag := fs.String("mode", "udp", "режим туннеля: udp (UDP-релей для WireGuard, default) | tcp (TCP-форвардер для Xray/sing-box)")
-	bondFlag := fs.Bool("bond", false, "распределять одно TCP-соединение по всем активным smux-сессиям (только с -mode tcp)")
-	obfProfileRaw := fs.String("obf-profile", string(ObfProfileNone), "wire-профиль обфускации TURN-payload: none (default) | rtpopus (RTP/opus + ChaCha20-Poly1305 AEAD для обхода content-filter VK); должен совпадать с сервером")
-	obfKeyHex := fs.String("obf-key", "", "общий ключ для -obf-profile != none, 32 байта в hex (64 символа)")
-	genObfKey := fs.Bool("gen-obf-key", false, "напечатать новый ключ для -obf-key и выйти")
-	streamsPerCredFlag := fs.Int("streams-per-cred", defaultStreamsPerCache, "сколько TURN-потоков делят один кеш VK-учёток (только -provider vk)")
-	debugFlag := fs.Bool("debug", false, "включить подробные debug-логи")
-	manualCaptchaFlag := fs.Bool("manual-captcha", false, "пропустить авто-решение VK captcha и сразу открыть ручной режим в локальном браузере (только -provider vk)")
-	dnsFlag := fs.String("dns-mode", dnsModeAuto, "транспорт резолвера клиента: plain (UDP/53) | doh (DNS-over-HTTPS) | auto (UDP/53 → sticky DoH при отказе)")
-	dnsServersFlag := fs.String("dns-servers", "", "список UDP/53 DNS-серверов через запятую вместо встроенных (напр. резолверы оператора из Android LinkProperties). Формат: ip[:port][,ip[:port]...]")
+	turn := fs.String("turn", "", "IP TURN-сервера; override creds провайдера")
+	port := fs.String("port", "", "порт TURN-сервера; override creds провайдера")
+	listen := fs.String("listen", "127.0.0.1:9000", "локальный ip:port для WireGuard/Xray клиента")
+	provider := fs.String("provider", ProviderVK, "источник TURN-creds: vk")
+	link := fs.String("link", "", "ссылка VK Calls https://vk.com/call/join/...; обязательно для -provider vk")
+	peer := fs.String("peer", "", "адрес сервера на VPS, host:port; обязательно")
+	n := fs.Int("n", 10, "число параллельных TURN-потоков")
+	transport := fs.String("transport", "tcp", "транспорт до TURN-реле: tcp | udp")
+	mode := fs.String("mode", "udp", "режим туннеля: udp (WireGuard) | tcp (Xray/sing-box)")
+	bond := fs.Bool("bond", false, "страйпинг TCP по smux-сессиям; только с -mode tcp")
+	obfProfile := fs.String("obf-profile", string(ObfProfileNone), "wire-профиль обфускации: none | rtpopus; должен совпадать с сервером")
+	obfKey := fs.String("obf-key", "", "ключ для -obf-profile != none: 32 байта hex (64 символа)")
+	genObfKey := fs.Bool("gen-obf-key", false, "напечатать новый -obf-key и выйти")
+	streamsPerCred := fs.Int("streams-per-cred", defaultStreamsPerCache, "TURN-потоков на один кеш VK-creds; только -provider vk")
+	debug := fs.Bool("debug", false, "подробные debug-логи")
+	manualCaptcha := fs.Bool("manual-captcha", false, "ручная VK captcha в браузере вместо авто; только -provider vk")
+	dnsMode := fs.String("dns-mode", dnsModeAuto, "резолвер клиента: plain | doh | auto")
+	dnsServers := fs.String("dns-servers", "", "свои UDP/53 DNS через запятую: ip[:port][,ip[:port]...]")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -160,32 +160,32 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 
 	c := &Client{
 		TURN: TURNOpts{
-			Host:         *host,
+			Host:         *turn,
 			Port:         *port,
-			TransportUDP: *transportFlag == "udp",
+			TransportUDP: *transport == "udp",
 			N:            *n,
 		},
 		Obf: ObfOpts{
-			Profile: ObfProfile(*obfProfileRaw),
+			Profile: ObfProfile(*obfProfile),
 			GenKey:  *genObfKey,
 		},
 		Proxy: ProxyOpts{
-			Mode:   clientProxyMode(*modeFlag, *bondFlag),
+			Mode:   clientProxyMode(*mode, *bond),
 			Listen: *listen,
-			Peer:   *peerAddr,
+			Peer:   *peer,
 		},
 		Provider: ProviderOpts{
-			Name: *providerFlag,
+			Name: *provider,
 		},
 		VK: VKOpts{
-			StreamsPerCred: *streamsPerCredFlag,
-			ManualCaptcha:  *manualCaptchaFlag,
+			StreamsPerCred: *streamsPerCred,
+			ManualCaptcha:  *manualCaptcha,
 		},
 		DNS: DNSOpts{
-			Mode: *dnsFlag,
+			Mode: *dnsMode,
 		},
 		Log: LogOpts{
-			Debug: *debugFlag,
+			Debug: *debug,
 		},
 		KCP: KCPOpts{
 			Profile: kcptun.DefaultProfile(),
@@ -193,17 +193,17 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 		},
 	}
 
-	switch *transportFlag {
+	switch *transport {
 	case "tcp", "udp":
 	default:
-		return nil, fmt.Errorf("invalid -transport value %q: must be tcp | udp", *transportFlag)
+		return nil, fmt.Errorf("invalid -transport value %q: must be tcp | udp", *transport)
 	}
-	switch *modeFlag {
+	switch *mode {
 	case "udp", "tcp":
 	default:
-		return nil, fmt.Errorf("invalid -mode value %q: must be udp | tcp", *modeFlag)
+		return nil, fmt.Errorf("invalid -mode value %q: must be udp | tcp", *mode)
 	}
-	if *bondFlag && *modeFlag != "tcp" {
+	if *bond && *mode != "tcp" {
 		return nil, fmt.Errorf("-bond requires -mode tcp")
 	}
 	switch c.DNS.Mode {
@@ -211,8 +211,8 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	default:
 		return nil, fmt.Errorf("invalid -dns-mode value %q: must be plain | doh | auto", c.DNS.Mode)
 	}
-	if *dnsServersFlag != "" {
-		c.DNS.Servers = strings.Split(*dnsServersFlag, ",")
+	if *dnsServers != "" {
+		c.DNS.Servers = strings.Split(*dnsServers, ",")
 	}
 
 	if c.Obf.GenKey {
@@ -224,13 +224,13 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	}
 	switch c.Provider.Name {
 	case ProviderVK:
-		if *vklink == "" {
+		if *link == "" {
 			return nil, errors.New("need -link (required for -provider vk)")
 		}
 		if c.VK.StreamsPerCred <= 0 {
 			return nil, fmt.Errorf("-streams-per-cred must be positive")
 		}
-		parts := strings.Split(*vklink, "join/")
+		parts := strings.Split(*link, "join/")
 		link := parts[len(parts)-1]
 		if idx := strings.IndexAny(link, "/?#"); idx != -1 {
 			link = link[:idx]
@@ -242,7 +242,7 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	if err := validateObfProfile(c.Obf.Profile); err != nil {
 		return nil, err
 	}
-	key, err := rtpopus.DecodeKey(c.Obf.Enabled(), *obfKeyHex)
+	key, err := rtpopus.DecodeKey(c.Obf.Enabled(), *obfKey)
 	if err != nil {
 		return nil, err
 	}
@@ -262,12 +262,12 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 	}
 
 	listen := fs.String("listen", "0.0.0.0:56000", "локальный адрес прослушивания ip:port")
-	connect := fs.String("connect", "", "адрес локального бэкенда, host:port (обязательно: WireGuard 127.0.0.1:51820 или Xray 127.0.0.1:443)")
-	modeFlag := fs.String("mode", "udp", "режим туннеля: udp (UDP-релей для WireGuard, default) | tcp (TCP-форвардер для Xray/sing-box; bond определяется автоматически)")
-	obfProfileRaw := fs.String("obf-profile", string(ObfProfileNone), "wire-профиль обфускации TURN-payload: none (default) | rtpopus (RTP/opus + ChaCha20-Poly1305 AEAD для обхода content-filter VK); должен совпадать с клиентом")
-	obfKeyHex := fs.String("obf-key", "", "общий ключ для -obf-profile != none, 32 байта в hex (64 символа)")
-	genObfKey := fs.Bool("gen-obf-key", false, "напечатать новый ключ для -obf-key и выйти")
-	debugFlag := fs.Bool("debug", false, "включить подробные debug-логи")
+	connect := fs.String("connect", "", "локальный бэкенд host:port; обязательно: WG 127.0.0.1:51820 | Xray 127.0.0.1:443")
+	mode := fs.String("mode", "udp", "режим туннеля: udp (WireGuard) | tcp (Xray/sing-box; bond авто)")
+	obfProfile := fs.String("obf-profile", string(ObfProfileNone), "wire-профиль обфускации: none | rtpopus; должен совпадать с клиентом")
+	obfKey := fs.String("obf-key", "", "ключ для -obf-profile != none: 32 байта hex (64 символа)")
+	genObfKey := fs.Bool("gen-obf-key", false, "напечатать новый -obf-key и выйти")
+	debug := fs.Bool("debug", false, "подробные debug-логи")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -275,16 +275,16 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 
 	s := &Server{
 		Obf: ObfOpts{
-			Profile: ObfProfile(*obfProfileRaw),
+			Profile: ObfProfile(*obfProfile),
 			GenKey:  *genObfKey,
 		},
 		Proxy: ProxyOpts{
-			Mode:    serverProxyMode(*modeFlag),
+			Mode:    serverProxyMode(*mode),
 			Listen:  *listen,
 			Connect: *connect,
 		},
 		Log: LogOpts{
-			Debug: *debugFlag,
+			Debug: *debug,
 		},
 		KCP: KCPOpts{
 			Profile: kcptun.DefaultProfile(),
@@ -292,10 +292,10 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 		},
 	}
 
-	switch *modeFlag {
+	switch *mode {
 	case "udp", "tcp":
 	default:
-		return nil, fmt.Errorf("invalid -mode value %q: must be udp | tcp", *modeFlag)
+		return nil, fmt.Errorf("invalid -mode value %q: must be udp | tcp", *mode)
 	}
 
 	if s.Obf.GenKey {
@@ -308,7 +308,7 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 	if err := validateObfProfile(s.Obf.Profile); err != nil {
 		return nil, err
 	}
-	key, err := rtpopus.DecodeKey(s.Obf.Enabled(), *obfKeyHex)
+	key, err := rtpopus.DecodeKey(s.Obf.Enabled(), *obfKey)
 	if err != nil {
 		return nil, err
 	}
