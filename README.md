@@ -10,10 +10,6 @@
 
 **btp** — туннель UDP/TCP через TURN-реле VK Calls. Клиент берёт временные TURN-учётки из ссылки на звонок и гонит ваш трафик (WireGuard, Xray/VLESS) до сервера на VPS поверх DTLS.
 
-## Быстрый старт
-
-См. [docs/quickstart.md](docs/quickstart.md). Полная документация — в [docs/](docs/README.md).
-
 ## Разработка
 
 ### Зависимости
@@ -45,20 +41,14 @@ task tidy           # go mod tidy
 task clean          # удалить dist/, cover.out, cover.html
 ```
 
-### Релизы
+## Документация
 
-Авто-релизы через [Release Please](https://github.com/googleapis/release-please) + [GoReleaser](https://goreleaser.com).
-
-[Conventional Commits](https://www.conventionalcommits.org/):
-
-- `feat: ...` — minor bump
-- `fix: ...` / `perf: ...` — patch bump
-- `break: ...` (или `feat!:`) — major bump
-- `refactor:`, `docs:`, `test:`, `chore:`, `ci:`, `style:` — в CHANGELOG не попадают (либо группа Refactoring)
-
-Поток: push в `main` → Release Please откроет PR `chore(main): release X.Y.Z` с обновлённым `CHANGELOG.md` → merge PR → тег `vX.Y.Z` → GoReleaser выпускает релиз (бинари + Docker image на GHCR).
-
-Pre-release: создать тег вручную `git tag v0.X.Y-rc.1 && git push --tags`. GoReleaser детектит автоматически (`latest` Docker тег не обновляется).
+- [Быстрый старт (WireGuard)](./docs/quickstart.md)
+- [Режимы: UDP / TCP / OBF / KCP](./docs/modes.md)
+- [Флаги клиента и сервера](./docs/flags.md)
+- [Развёртывание: systemd, Docker](./docs/deploy.md)
+- [Мобильные: Android (Termux), iOS (iSH)](./docs/mobile.md)
+- [Решение проблем](./docs/troubleshooting.md)
 
 ---
 
