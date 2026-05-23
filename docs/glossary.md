@@ -30,9 +30,8 @@ client ←→ VK TURN-relay
 Standard relay protocol (RFC 5766/8656). Источник реле выбирается флагом `-provider` (см. ниже). Мы используем реле как транзит к собственному серверу. Транспорт до TURN выбирается флагом `-transport` (UDP/TCP).
 
 ### Provider
-Источник TURN-реквизитов (user/pass/server-addr). Интерфейс `internal/provider.Provider`. Текущие реализации:
+Источник TURN-реквизитов (user/pass/server-addr). Интерфейс `internal/provider.Provider`. Реализации:
 - **`vk`** (default) — `internal/provider/vk`, обёртка над VK Calls API (требует `-link`).
-- **`static`** — `internal/provider/static`, фиксированные `-static-user/-static-pass/-static-addr` (для coturn, metered, любого совместимого TURN).
 
 Pipeline (proxy/udprelay, proxy/tcpfwd) работает только через интерфейс — без VK-specific импортов. См. `docs/providers.md`.
 

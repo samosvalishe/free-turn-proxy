@@ -1,6 +1,6 @@
 // Package provider определяет абстракцию источника TURN-реквизитов.
 //
-// Реализации (internal/provider/vk, internal/provider/static, ...) поставляют
+// Реализации (internal/provider/vk, ...) поставляют
 // короткоживущие user/pass/addr для TURN-allocate. Pipeline (proxy/udprelay,
 // proxy/tcpfwd) работает только через этот интерфейс — никаких VK-specific
 // типов в общем коде.
@@ -51,7 +51,7 @@ type Provider interface {
 	// Используется только при возврате ошибки, обёрнутой ErrBackoffActive.
 	BackoffUntilUnix() int64
 
-	// Name — короткое имя провайдера для логов ("vk", "static", "metered").
+	// Name — короткое имя провайдера для логов ("vk", ...).
 	Name() string
 }
 

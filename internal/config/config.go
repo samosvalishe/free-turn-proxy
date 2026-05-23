@@ -67,22 +67,14 @@ type VKOpts struct {
 	ManualCaptcha  bool   // -manual-captcha
 }
 
-// StaticOpts — фиксированные TURN-реквизиты (только клиент, провайдер "static").
-type StaticOpts struct {
-	User string // -static-user
-	Pass string // -static-pass
-	Addr string // -static-addr
-}
-
 // ProviderOpts выбирает реализацию provider.Provider.
 type ProviderOpts struct {
-	Name string // -provider: vk (default) | static
+	Name string // -provider: vk (default)
 }
 
 // Известные имена провайдеров.
 const (
-	ProviderVK     = "vk"
-	ProviderStatic = "static"
+	ProviderVK = "vk"
 )
 
 // DNSOpts — опции DNS-резолвинга (только клиент).
@@ -109,7 +101,6 @@ type Client struct {
 	Proxy    ProxyOpts
 	Provider ProviderOpts
 	VK       VKOpts
-	Static   StaticOpts
 	DNS      DNSOpts
 	Log      LogOpts
 	KCP      KCPOpts
@@ -134,11 +125,8 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	host := fs.String("turn", "", "переопределить IP TURN-сервера (по умолчанию берётся из credentials провайдера)")
 	port := fs.String("port", "", "переопределить порт TURN-сервера (по умолчанию берётся из credentials провайдера)")
 	listen := fs.String("listen", "127.0.0.1:9000", "локальный адрес ip:port, куда подключается WireGuard или Xray клиент")
-	providerFlag := fs.String("provider", ProviderVK, "источник TURN-реквизитов: vk (default, VK Calls API) | static (фиксированные -static-* флаги)")
+	providerFlag := fs.String("provider", ProviderVK, "источник TURN-реквизитов: vk (default, VK Calls API)")
 	vklink := fs.String("link", "", "ссылка VK Calls вида https://vk.com/call/join/... (обязательно для -provider vk)")
-	staticUser := fs.String("static-user", "", "TURN username (обязательно для -provider static)")
-	staticPass := fs.String("static-pass", "", "TURN password (обязательно для -provider static)")
-	staticAddr := fs.String("static-addr", "", "TURN server host:port (обязательно для -provider static)")
 	peerAddr := fs.String("peer", "", "адрес сервера VK TURN Proxy на VPS, host:port (обязательно)")
 	n := fs.Int("n", 10, "количество параллельных TURN-потоков (соединений к TURN-реле)")
 	transportFlag := fs.String("transport", "tcp", "транспорт до TURN-реле: tcp (TCP/TLS, default) | udp")
@@ -179,11 +167,6 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 		VK: VKOpts{
 			StreamsPerCred: *streamsPerCredFlag,
 			ManualCaptcha:  *manualCaptchaFlag,
-		},
-		Static: StaticOpts{
-			User: *staticUser,
-			Pass: *staticPass,
-			Addr: *staticAddr,
 		},
 		DNS: DNSOpts{
 			Mode: *dnsFlag,
@@ -240,12 +223,8 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 			link = link[:idx]
 		}
 		c.VK.Link = link
-	case ProviderStatic:
-		if c.Static.User == "" || c.Static.Pass == "" || c.Static.Addr == "" {
-			return nil, errors.New("-provider static requires -static-user, -static-pass, -static-addr")
-		}
 	default:
-		return nil, fmt.Errorf("invalid -provider value %q: must be %s | %s", c.Provider.Name, ProviderVK, ProviderStatic)
+		return nil, fmt.Errorf("invalid -provider value %q: must be %s", c.Provider.Name, ProviderVK)
 	}
 	key, err := srtpmimicry.DecodeKey(c.Obf.Mode, *wrapKeyHex)
 	if err != nil {

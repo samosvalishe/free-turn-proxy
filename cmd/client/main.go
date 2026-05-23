@@ -16,7 +16,6 @@ import (
 	"github.com/samosvalishe/btp/internal/config"
 	"github.com/samosvalishe/btp/internal/logx"
 	"github.com/samosvalishe/btp/internal/provider"
-	"github.com/samosvalishe/btp/internal/provider/static"
 	"github.com/samosvalishe/btp/internal/provider/vk"
 	"github.com/samosvalishe/btp/internal/proxy/bondclient"
 	"github.com/samosvalishe/btp/internal/proxy/tcpfwd"
@@ -161,12 +160,6 @@ func buildProvider(cfg *config.Client, dialer net.Dialer, connected *atomic.Int3
 			Log:             logger,
 			Debug:           cfg.Log.Debug,
 		}, vk.DefaultManualSolver)
-	case config.ProviderStatic:
-		return static.New(static.Config{
-			User: cfg.Static.User,
-			Pass: cfg.Static.Pass,
-			Addr: cfg.Static.Addr,
-		})
 	default:
 		return nil, fmt.Errorf("unknown provider %q", cfg.Provider.Name)
 	}
