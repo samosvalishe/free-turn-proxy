@@ -10,3 +10,5 @@ CLAUDE.md
 *.test
 coverage.out
 .env
+clients.json
+client_config.json

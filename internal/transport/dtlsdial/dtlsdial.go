@@ -1,4 +1,4 @@
-﻿// Package dtlsdial оборачивает настройку pion-dtls клиента (self-signed cert, EMS,
+// Package dtlsdial оборачивает настройку pion-dtls клиента (self-signed cert, EMS,
 // AES-128-GCM, send-only CID) плюс опциональный конкурентный gate на handshake.
 // Используется UDP и VLESS pipeline'ами клиента.
 package dtlsdial

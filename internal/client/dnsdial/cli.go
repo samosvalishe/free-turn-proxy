@@ -1,4 +1,4 @@
-﻿package dnsdial
+package dnsdial
 
 import (
 	"net"

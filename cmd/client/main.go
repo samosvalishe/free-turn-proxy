@@ -13,6 +13,11 @@ import (
 	"syscall"
 	"time"
 
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"path/filepath"
+
 	"github.com/samosvalishe/free-turn-proxy/internal/client/dnsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
@@ -21,6 +26,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/bondclient"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/tcpfwd"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udprelay"
+	"github.com/samosvalishe/free-turn-proxy/internal/sub"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
 )
@@ -41,12 +47,54 @@ func main() {
 		log.Fatalf("%v", err)
 	}
 
-	logger := logx.New(cfg.Log.Debug)
-	logger.Infof("Free Turn Proxy client version=%s", version)
-	dnsdial.SetLogger(logger)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	if cfg.SubURL != "" {
+		s, err := sub.Fetch(ctx, cfg.SubURL)
+		if err != nil {
+			log.Fatalf("failed to fetch subscription: %v", err)
+		}
+		if len(s.Nodes) == 0 {
+			log.Fatalf("no nodes found in subscription")
+		}
+
+		// Берем первый сервер из подписки
+		node := s.Nodes[0]
+		ucfg := node.URI
+		if ucfg.Provider != "" {
+			cfg.Provider.Name = ucfg.Provider
+		}
+		if ucfg.Transport != "" {
+			cfg.TURN.TransportUDP = ucfg.Transport == "udp"
+		}
+		if ucfg.Mode != "" {
+			cfg.Proxy.Mode = config.ClientProxyMode(ucfg.Mode, ucfg.Bond)
+		}
+		if ucfg.Auth {
+			cfg.Auth = true
+		}
+		if ucfg.ObfProfile != "" {
+			cfg.Obf.Profile = config.ObfProfile(ucfg.ObfProfile)
+		}
+		if ucfg.ObfKey != "" {
+			if k, err := hex.DecodeString(ucfg.ObfKey); err == nil {
+				cfg.Obf.Key = k
+			} else {
+				log.Fatalf("invalid hex in obf-key: %v", err)
+			}
+		}
+		if ucfg.Peer != "" {
+			cfg.Proxy.Peer = ucfg.Peer
+		}
+	}
+
+	cfg.ClientID = resolveClientID(cfg.ClientID)
+
+	logger := logx.New(cfg.Log.Debug)
+	logger.Infof("Free Turn Proxy client version=%s", version)
+	logger.Infof("Client ID: %s", cfg.ClientID)
+	dnsdial.SetLogger(logger)
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
@@ -122,6 +170,8 @@ func main() {
 			GetCreds:     tcpfwd.GetCredsFunc(getCreds),
 			KCPProfile:   cfg.KCP.Profile,
 			KCPFEC:       cfg.KCP.FEC,
+			ClientID:     cfg.ClientID,
+			Auth:         cfg.Auth,
 		}
 		if err := tcpfwd.Run(ctx, tcpDeps, tcpParams, peer, cfg.Proxy.Listen, cfg.TURN.N, cfg.Proxy.Mode == config.ProxyModeTCPFwdBond); err != nil {
 			logger.Errorf("tcpfwd: %v", err)
@@ -140,6 +190,8 @@ func main() {
 		TransportUDP: cfg.TURN.TransportUDP,
 		ObfKey:       cfg.Obf.Key,
 		GetCreds:     udprelay.GetCredsFunc(getCreds),
+		ClientID:     cfg.ClientID,
+		Auth:         cfg.Auth,
 	}
 	if err := udprelay.Run(ctx, udpDtlsDialer, prov, logger, &connectedStreams, udpParams, peer, cfg.Proxy.Listen, cfg.TURN.N); err != nil {
 		if errors.Is(err, udprelay.ErrFatal) {
@@ -168,4 +220,38 @@ func buildProvider(cfg *config.Client, dialer net.Dialer, connected *atomic.Int3
 	default:
 		return nil, fmt.Errorf("unknown provider %q", cfg.Provider.Name)
 	}
+}
+
+func resolveClientID(cliID string) string {
+	if cliID != "" {
+		return cliID
+	}
+
+	type localCfg struct {
+		ClientID string `json:"client_id"`
+	}
+
+	path := filepath.Join(filepath.Dir(os.Args[0]), "client_config.json")
+	b, err := os.ReadFile(path)
+	if err == nil {
+		var lc localCfg
+		if err := json.Unmarshal(b, &lc); err == nil && lc.ClientID != "" {
+			return lc.ClientID
+		}
+	}
+
+	// Generate 16 bytes hex ID
+	idBytes := make([]byte, 16)
+	if _, err := rand.Read(idBytes); err != nil {
+		log.Fatalf("failed to generate random client ID: %v", err)
+	}
+	newID := hex.EncodeToString(idBytes)
+
+	lc := localCfg{ClientID: newID}
+	b, _ = json.MarshalIndent(lc, "", "  ")
+	if err := os.WriteFile(path, b, 0644); err != nil {
+		log.Printf("warning: failed to save client ID to %s: %v", path, err)
+	}
+
+	return newID
 }

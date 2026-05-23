@@ -1,4 +1,4 @@
-﻿package browserprofile
+package browserprofile
 
 import (
 	"encoding/json"

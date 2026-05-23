@@ -1,4 +1,4 @@
-﻿// Package udprelay реализует UDP-режим прокси: терминирует DTLS от локального
+// Package udprelay реализует UDP-режим прокси: терминирует DTLS от локального
 // пира (WireGuard) и ретранслирует пакеты через per-stream TURN-аллокацию
 // обратно к удалённому пиру. Run — точка входа; владеет локальным listener,
 // fan-in входящего dispatch и per-stream DTLS/TURN циклами.
@@ -39,6 +39,8 @@ type Params struct {
 	TransportUDP bool
 	ObfKey       []byte
 	GetCreds     GetCredsFunc
+	ClientID     string
+	Auth         bool
 }
 
 // ErrFatal возвращается из Run, когда поток встречает условие, требующее
@@ -126,7 +128,7 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		}
 		streamID := i + 1
 		wg.Go(func() {
-			DTLSLoop(runCtx, deps, peer, listenConn, inboundChan, cchan, ok, streamID)
+			DTLSLoop(runCtx, deps, params, peer, listenConn, inboundChan, cchan, ok, streamID)
 		})
 		wg.Go(func() {
 			TURNLoop(runCtx, deps, params, peer, cchan, t, streamID)

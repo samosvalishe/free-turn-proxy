@@ -1,4 +1,4 @@
-﻿//go:build !(linux && 386)
+//go:build !(linux && 386)
 
 // Package ish — TCP listener shim для iSH (https://ish.app), Linux user-mode
 // эмулятор на iOS. iSH таргетит linux/386 и не имеет современного accept4 /

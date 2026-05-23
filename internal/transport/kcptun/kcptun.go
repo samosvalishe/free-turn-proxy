@@ -1,4 +1,4 @@
-﻿package kcptun
+package kcptun
 
 import (
 	"net"

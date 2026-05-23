@@ -1,4 +1,4 @@
-﻿package udprelay
+package udprelay
 
 import (
 	"context"

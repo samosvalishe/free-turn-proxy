@@ -1,4 +1,4 @@
-﻿// Package vk — провайдер TURN-реквизитов через VK Calls API.
+// Package vk — провайдер TURN-реквизитов через VK Calls API.
 //
 // Фасад над internal/provider/vk/internal/vkauth: добавляет фиксированный link (адрес
 // VK callroom) и адаптирует сигнатуру GetCredentials к provider.Provider.

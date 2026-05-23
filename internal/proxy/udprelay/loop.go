@@ -1,4 +1,4 @@
-﻿package udprelay
+package udprelay
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/cbeuw/connutil"
+	"github.com/samosvalishe/free-turn-proxy/internal/clientsdb"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/common"
 	"github.com/samosvalishe/free-turn-proxy/internal/randx"
@@ -22,13 +23,13 @@ import (
 // если предыдущая ошибка — дедлайн). connchan получает свежую половину
 // AsyncPacketPipe на каждой попытке; okchan (non-nil только для потока 1)
 // сигнализирует о первом успешном handshake.
-func DTLSLoop(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) {
+func DTLSLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			err := oneDTLS(ctx, deps, peer, listenConn, inboundChan, connchan, okchan, streamID)
+			err := oneDTLS(ctx, deps, params, peer, listenConn, inboundChan, connchan, okchan, streamID)
 			// При активном provider-backoff дедлайн handshake срабатывает раньше,
 			// чем auth-retry успевает отработать; делаем краткий backoff,
 			// чтобы не крутиться в tight spin до снятия блокировки.
@@ -114,7 +115,7 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 	}
 }
 
-func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) error {
+func oneDTLS(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) error {
 	select {
 	case <-time.After(time.Duration(randx.Intn(400)+100) * time.Millisecond):
 	case <-ctx.Done():
@@ -150,6 +151,12 @@ func oneDTLS(ctx context.Context, deps *Deps, peer *net.UDPAddr, listenConn net.
 		deps.log().Infof("[STREAM %d] Closed DTLS connection", streamID)
 	}()
 	deps.log().Infof("[STREAM %d] Established DTLS connection", streamID)
+
+	if params.Auth {
+		if err := clientsdb.WriteClientID(dtlsConn, params.ClientID); err != nil {
+			return fmt.Errorf("failed to write client ID: %w", err)
+		}
+	}
 
 	if okchan != nil {
 		go func() {

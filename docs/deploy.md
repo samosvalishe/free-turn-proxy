@@ -1,4 +1,4 @@
-﻿# Развёртывание сервера
+# Развёртывание сервера
 
 Для того чтобы сервер работал круглосуточно, не падал при закрытии SSH-сессии и автоматически стартовал после перезагрузки VPS, вам необходимо настроить его работу как службы.
 
@@ -37,6 +37,10 @@ services:
       - MODE=udp                      # udp для WG/Amnezia, tcp для Xray/VLESS
       - OBF_PROFILE=rtpopus           # Обязательная маскировка
       - OBF_KEY=<ВАШ_КЛЮЧ>            # Ваш сгенерированный 64-hex ключ
+      # Раскомментируйте ниже, чтобы включить авторизацию по Client ID
+      # - CLIENTS_FILE=/opt/free-turn-proxy/clients.json
+    # volumes:
+    #   - ./clients.json:/opt/free-turn-proxy/clients.json
 ```
 
 Запустите контейнер в фоне:
@@ -73,7 +77,8 @@ After=network.target
 
 [Service]
 Type=simple
-# Укажите ваши порты и вставьте ваш ключ обфускации
+# Укажите ваши порты и вставьте ваш ключ обфускации. 
+# Для авторизации по Client ID добавьте: -clients-file /opt/free-turn-proxy/clients.json
 ExecStart=/opt/free-turn-proxy/server -listen 0.0.0.0:56000 -connect 127.0.0.1:51820 -obf-profile rtpopus -obf-key <ВАШ_КЛЮЧ>
 Restart=always
 RestartSec=5
@@ -106,6 +111,7 @@ sudo systemctl enable --now free-turn-proxy.service
 | `MODE` | `udp` | режим туннеля: `udp` (для WG) \| `tcp` (для Xray) |
 | `OBF_PROFILE` | `none` | значение `-obf-profile`: `none` \| `rtpopus` |
 | `OBF_KEY` | пусто | значение `-obf-key` (обязателен при `OBF_PROFILE != none`) |
+| `CLIENTS_FILE`| пусто | значение `-clients-file` для авторизации по Client ID |
 | `DEBUG` | `false` | включает `-debug` |
 
 > **Внимание при Bridge Mode:** Если вы не используете `network_mode: "host"` и пробрасываете порты через `-p 56000:56000/udp`, то `CONNECT_ADDR=127.0.0.1:51820` будет указывать **внутрь** контейнера Docker. В таком случае прокси не найдет ваш WireGuard. Используйте IP хоста в `CONNECT_ADDR` или оставляйте `network_mode: "host"`.

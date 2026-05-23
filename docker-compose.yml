@@ -16,4 +16,7 @@ services:
       # MODE: "tcp"           # tcp = TCP-форвардер для Xray/sing-box; default udp = WireGuard
       # OBF_PROFILE: "rtpopus"   # none (default) | rtpopus
       # OBF_KEY задаётся в .env (не коммитьте ключ в git)
+      # CLIENTS_FILE: "/app/clients.json" # раскомментируйте для авторизации по Client ID
       # DEBUG: "false"
+    # volumes:
+    #   - ./clients.json:/app/clients.json

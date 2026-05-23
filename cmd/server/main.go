@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/pion/dtls/v3"
+	"github.com/samosvalishe/free-turn-proxy/internal/clientsdb"
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/bondserver"
@@ -27,6 +28,11 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "clients" {
+		handleClientsCommand(os.Args[2:])
+		return
+	}
+
 	cfg, err := config.ParseServer(os.Args[1:], os.Stderr)
 	if err != nil {
 		// -help/-h: usage уже напечатан в ParseServer, выходим штатно.
@@ -115,6 +121,18 @@ func main() {
 
 	registry := bondserver.NewRegistry(bondserver.Deps{Log: logger})
 
+	var db *clientsdb.DB
+	if cfg.ClientsFile != "" {
+		d, err := clientsdb.New(cfg.ClientsFile)
+		if err != nil {
+			logger.Errorf("Failed to open clients-file: %v", err)
+			os.Exit(1)
+		}
+		d.StartHotReload(10 * time.Second)
+		db = d
+		logger.Infof("Client ID authorization enabled via %s", cfg.ClientsFile)
+	}
+
 	var wg sync.WaitGroup
 	for {
 		select {
@@ -133,12 +151,12 @@ func main() {
 			continue
 		}
 		wg.Go(func() {
-			handleAccepted(ctx, logger, registry, conn, cfg)
+			handleAccepted(ctx, logger, registry, db, conn, cfg)
 		})
 	}
 }
 
-func handleAccepted(ctx context.Context, logger logx.Logger, registry *bondserver.Registry, conn net.Conn, cfg *config.Server) {
+func handleAccepted(ctx context.Context, logger logx.Logger, registry *bondserver.Registry, db *clientsdb.DB, conn net.Conn, cfg *config.Server) {
 	defer func() {
 		if closeErr := conn.Close(); closeErr != nil {
 			logger.Warnf("failed to close incoming connection: %s", closeErr)
@@ -161,6 +179,21 @@ func handleAccepted(ctx context.Context, logger logx.Logger, registry *bondserve
 	}
 	logger.Debugf("Handshake done")
 
+	if db != nil {
+		clientID, err := clientsdb.ReadClientID(dtlsConn)
+		if err != nil {
+			logger.Warnf("Read Client ID failed: %v", err)
+			return
+		}
+		logger.Debugf("Client ID received: %s", clientID)
+
+		if !db.IsAuthorized(clientID) {
+			logger.Warnf("Unauthorized Client ID: %s. Dropping connection.", clientID)
+			return
+		}
+		logger.Debugf("Client %s authorized", clientID)
+	}
+
 	if cfg.Proxy.Mode == config.ProxyModeTCPFwd {
 		tcpfwdserver.Handle(ctx, logger, registry, dtlsConn, cfg.Proxy.Connect, cfg.KCP.Profile, cfg.KCP.FEC)
 	} else {
@@ -168,4 +201,62 @@ func handleAccepted(ctx context.Context, logger logx.Logger, registry *bondserve
 	}
 
 	logger.Debugf("Connection closed: %s", conn.RemoteAddr())
+}
+
+func handleClientsCommand(args []string) {
+	if len(args) == 0 {
+		fmt.Println("Usage: server clients <add|remove|list> [args...]")
+		os.Exit(1)
+	}
+
+	// Файл по умолчанию или из переменной окружения
+	dbPath := "clients.json"
+	if envPath := os.Getenv("CLIENTS_FILE"); envPath != "" {
+		dbPath = envPath
+	}
+
+	db, err := clientsdb.New(dbPath)
+	if err != nil {
+		fmt.Printf("Failed to open %s: %v\n", dbPath, err)
+		os.Exit(1)
+	}
+
+	cmd := args[0]
+	switch cmd {
+	case "add":
+		if len(args) < 2 {
+			fmt.Println("Usage: server clients add <client_id> [comment]")
+			os.Exit(1)
+		}
+		clientID := args[1]
+		comment := ""
+		if len(args) > 2 {
+			comment = args[2]
+		}
+		if err := db.Add(clientID, comment); err != nil {
+			fmt.Printf("Failed to add client: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Client %s added successfully to %s\n", clientID, dbPath)
+	case "remove":
+		if len(args) < 2 {
+			fmt.Println("Usage: server clients remove <client_id>")
+			os.Exit(1)
+		}
+		clientID := args[1]
+		if err := db.Remove(clientID); err != nil {
+			fmt.Printf("Failed to remove client: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Client %s removed successfully from %s\n", clientID, dbPath)
+	case "list":
+		clients := db.List()
+		fmt.Printf("Found %d clients in %s:\n", len(clients), dbPath)
+		for id, info := range clients {
+			fmt.Printf(" - %s (Comment: %s)\n", id, info.Comment)
+		}
+	default:
+		fmt.Printf("Unknown command: %s\n", cmd)
+		os.Exit(1)
+	}
 }

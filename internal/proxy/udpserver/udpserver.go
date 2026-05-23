@@ -1,4 +1,4 @@
-﻿// Package udpserver реализует серверную UDP-ретрансляцию: DTLS-терминированный
+// Package udpserver реализует серверную UDP-ретрансляцию: DTLS-терминированный
 // поток форвардится к UDP-backend (WireGuard) и обратно.
 package udpserver
 

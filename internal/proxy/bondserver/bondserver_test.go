@@ -1,4 +1,4 @@
-﻿package bondserver
+package bondserver
 
 import (
 	"bytes"

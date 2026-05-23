@@ -1,4 +1,4 @@
-﻿// Package manual реализует ручное решение CAPTCHA — fallback, когда автосолвер
+// Package manual реализует ручное решение CAPTCHA — fallback, когда автосолвер
 // (internal/provider/vk/internal/captcha) не справился или пользователь дал -manual-captcha.
 // Поднимает локальный HTTP-сервер 127.0.0.1:8765, проксирующий страницу VK
 // CAPTCHA (с переписыванием абсолютных URL и gzip), открывает её в браузере и

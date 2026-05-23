@@ -1,4 +1,4 @@
-﻿// Package dnsdial владеет DNS-резолвингом и net.Dialer'ом, прокинутым во все
+// Package dnsdial владеет DNS-резолвингом и net.Dialer'ом, прокинутым во все
 // outbound HTTP/TLS клиенты. По Mode выбирает UDP/53, DNS-over-HTTPS или auto
 // (UDP-probe → sticky DoH fallback).
 package dnsdial

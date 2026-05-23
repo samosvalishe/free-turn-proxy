@@ -1,4 +1,4 @@
-﻿// Package logx — минимальный уровневый логгер поверх stdlib log.
+// Package logx — минимальный уровневый логгер поверх stdlib log.
 // Вызывающий получает Logger и зовёт Debugf/Infof/Warnf/Errorf;
 // Debugf управляется debug-флагом, остальные уровни всегда пишут.
 package logx

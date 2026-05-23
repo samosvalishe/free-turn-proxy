@@ -1,4 +1,4 @@
-﻿package netconn
+package netconn
 
 import (
 	"context"

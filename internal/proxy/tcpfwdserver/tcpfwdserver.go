@@ -1,4 +1,4 @@
-﻿// Package tcpfwdserver реализует серверную VLESS lane: KCP+smux поверх
+// Package tcpfwdserver реализует серверную VLESS lane: KCP+smux поверх
 // DTLS-соединения, каждый smux-поток форвардится как TCP-соединение к backend
 // (Xray/VLESS). Bond-потоки автоопределяются по magic-префиксу и диспетчеризуются
 // в bondserver.Registry.

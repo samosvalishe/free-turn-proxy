@@ -1,4 +1,4 @@
-﻿// Package namegen генерирует случайные русскоязычные display name'ы для
+// Package namegen генерирует случайные русскоязычные display name'ы для
 // идентичностей клиента. Пулы имён встроены из data/*.txt.
 package namegen
 

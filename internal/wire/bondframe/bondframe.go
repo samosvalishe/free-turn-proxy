@@ -1,4 +1,4 @@
-﻿// Package bondframe содержит wire-формат VLESS bond multi-lane transport
+// Package bondframe содержит wire-формат VLESS bond multi-lane transport
 // (hello + framed data/FIN). Клиент (инициатор) и сервер (акцептор) используют
 // одинаковую кодировку.
 package bondframe

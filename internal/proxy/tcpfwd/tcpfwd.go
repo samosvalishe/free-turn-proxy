@@ -1,4 +1,4 @@
-﻿package tcpfwd
+package tcpfwd
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/client/ish"
+	"github.com/samosvalishe/free-turn-proxy/internal/clientsdb"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/netconn"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/common"
@@ -30,6 +31,8 @@ type Params struct {
 	GetCreds     GetCredsFunc
 	KCPProfile   kcptun.Profile
 	KCPFEC       kcptun.FEC
+	ClientID     string
+	Auth         bool
 }
 
 // BondHandler распределяет одно принятое TCP-соединение по всем активным сессиям пула.
@@ -254,6 +257,13 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	}
 	cleanupFns = append(cleanupFns, func() { _ = dtlsConn.Close() })
 	deps.log().Debugf("DTLS connection established")
+
+	if params.Auth {
+		if err := clientsdb.WriteClientID(dtlsConn, params.ClientID); err != nil {
+			cleanup()
+			return nil, nil, fmt.Errorf("send client ID: %w", err)
+		}
+	}
 
 	statsCtx, statsCancel := context.WithCancel(ctx) //nolint:gosec // cancel is held in cleanupFns and invoked via cleanup() LIFO
 	cleanupFns = append(cleanupFns, statsCancel)

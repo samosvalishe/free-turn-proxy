@@ -1,4 +1,4 @@
-﻿package rtpopus
+package rtpopus
 
 import (
 	"bytes"

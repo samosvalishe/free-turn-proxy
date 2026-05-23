@@ -1,4 +1,4 @@
-﻿// Package config парсит CLI-флаги клиента и сервера.
+// Package config парсит CLI-флаги клиента и сервера.
 //
 // Функции Parse* без побочных эффектов: валидируют ввод и декодируют wrap-ключ,
 // но не трогают сеть, DNS и состояние процесса. Подключение этих эффектов —
@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcptun"
+	"github.com/samosvalishe/free-turn-proxy/internal/uri"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
 )
 
@@ -117,14 +118,18 @@ type Client struct {
 	DNS      DNSOpts
 	Log      LogOpts
 	KCP      KCPOpts
+	ClientID string
+	SubURL   string
+	Auth     bool
 }
 
 // Server — разобранные и провалидированные CLI-опции сервера.
 type Server struct {
-	Obf   ObfOpts
-	Proxy ProxyOpts
-	Log   LogOpts
-	KCP   KCPOpts
+	Obf         ObfOpts
+	Proxy       ProxyOpts
+	Log         LogOpts
+	KCP         KCPOpts
+	ClientsFile string // -clients-file
 }
 
 // ParseClient разбирает args (без имени программы) в Client.
@@ -153,6 +158,9 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	manualCaptcha := fs.Bool("manual-captcha", false, "ручная VK captcha в браузере вместо авто; только -provider vk")
 	dnsMode := fs.String("dns-mode", dnsModeAuto, "резолвер клиента: plain | doh | auto")
 	dnsServers := fs.String("dns-servers", "", "свои UDP/53 DNS через запятую: ip[:port][,ip[:port]...]")
+	clientID := fs.String("client-id", "", "уникальный ID клиента (автогенерация если не задан)")
+	subURL := fs.String("sub", "", "URL подписки (sub.md) для получения списка серверов")
+	auth := fs.Bool("auth", false, "отправлять Client ID для авторизации на сервере")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -170,7 +178,7 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 			GenKey:  *genObfKey,
 		},
 		Proxy: ProxyOpts{
-			Mode:   clientProxyMode(*mode, *bond),
+			Mode:   ClientProxyMode(*mode, *bond),
 			Listen: *listen,
 			Peer:   *peer,
 		},
@@ -191,7 +199,48 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 			Profile: kcptun.DefaultProfile(),
 			FEC:     kcptun.FEC{},
 		},
+		ClientID: *clientID,
+		SubURL:   *subURL,
+		Auth:     *auth,
 	}
+
+	// Обработка позиционного аргумента URI
+	if fs.NArg() > 0 {
+		arg := fs.Arg(0)
+		if strings.HasPrefix(arg, "freeturn://") {
+			ucfg, err := uri.Parse(arg)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse freeturn:// URI: %w", err)
+			}
+			if ucfg.Provider != "" {
+				c.Provider.Name = ucfg.Provider
+			}
+			if ucfg.Transport != "" {
+				*transport = ucfg.Transport
+			}
+			if ucfg.Mode != "" {
+				*mode = ucfg.Mode
+			}
+			if ucfg.Bond {
+				*bond = true
+			}
+			if ucfg.ObfProfile != "" {
+				c.Obf.Profile = ObfProfile(ucfg.ObfProfile)
+			}
+			if ucfg.ObfKey != "" {
+				*obfKey = ucfg.ObfKey
+			}
+			if ucfg.Peer != "" {
+				c.Proxy.Peer = ucfg.Peer
+			}
+			if ucfg.Auth {
+				c.Auth = true
+			}
+		}
+	}
+
+	// Пересчитываем Proxy Mode после возможного изменения из URI
+	c.Proxy.Mode = ClientProxyMode(*mode, *bond)
 
 	switch *transport {
 	case "tcp", "udp":
@@ -268,6 +317,7 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 	obfKey := fs.String("obf-key", "", "ключ для -obf-profile != none: 32 байта hex (64 символа)")
 	genObfKey := fs.Bool("gen-obf-key", false, "напечатать новый -obf-key и выйти")
 	debug := fs.Bool("debug", false, "подробные debug-логи")
+	clientsFile := fs.String("clients-file", "", "путь к файлу clients.json для авторизации по Client ID")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -290,6 +340,7 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 			Profile: kcptun.DefaultProfile(),
 			FEC:     kcptun.FEC{},
 		},
+		ClientsFile: *clientsFile,
 	}
 
 	switch *mode {
@@ -327,7 +378,7 @@ func validateObfProfile(p ObfProfile) error {
 	}
 }
 
-func clientProxyMode(mode string, bond bool) ProxyMode {
+func ClientProxyMode(mode string, bond bool) ProxyMode {
 	switch {
 	case mode == "tcp" && bond:
 		return ProxyModeTCPFwdBond

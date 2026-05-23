@@ -1,4 +1,4 @@
-﻿// Package provider определяет абстракцию источника TURN-реквизитов.
+// Package provider определяет абстракцию источника TURN-реквизитов.
 //
 // Реализации (internal/provider/vk, ...) поставляют
 // короткоживущие user/pass/addr для TURN-allocate. Pipeline (proxy/udprelay,

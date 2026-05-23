@@ -1,4 +1,4 @@
-﻿// Package bondserver реализует серверную сторону bonded VLESS lane:
+// Package bondserver реализует серверную сторону bonded VLESS lane:
 // одно backend TCP-соединение, мультиплексированное по N smux-потокам с общим
 // ConnID. Wire-формат фреймов — internal/wire/bondframe; пакет соединяет
 // copy-loop backend TCP ↔ lanes и реестр per-ConnID.

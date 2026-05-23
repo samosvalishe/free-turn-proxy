@@ -24,4 +24,8 @@ if [ "${DEBUG}" = "true" ]; then
     set -- "$@" -debug
 fi
 
+if [ -n "${CLIENTS_FILE}" ]; then
+    set -- "$@" -clients-file "${CLIENTS_FILE}"
+fi
+
 exec ./server "$@"

@@ -1,4 +1,4 @@
-﻿package manual
+package manual
 
 import (
 	"net/url"

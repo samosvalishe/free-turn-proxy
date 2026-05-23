@@ -1,4 +1,4 @@
-﻿package vkauth
+package vkauth
 
 import (
 	"errors"

@@ -1,4 +1,4 @@
-﻿package bondframe
+package bondframe
 
 import (
 	"bytes"

@@ -1,4 +1,4 @@
-﻿package namegen
+package namegen
 
 import (
 	"strings"
