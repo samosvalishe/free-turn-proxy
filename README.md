@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="logo.webp" width="250" height="250">
+<img src="logo.webp" height="250">
 
 ![License](https://img.shields.io/badge/license-Happy_Bunny-ff69b4?style=flat-square&logoColor=white&labelColor=0D1117)
 ![Go](https://img.shields.io/badge/Go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white&labelColor=0D1117)
@@ -45,7 +45,7 @@ task clean          # удалить dist/, cover.out, cover.html
 
 ## Документация
 
-- [Быстрый старт)](./docs/quickstart.md)
+- [Быстрый старт](./docs/quickstart.md)
 - [Режимы](./docs/modes.md)
 - [Флаги](./docs/flags.md)
 - [Развёртывание](./docs/deploy.md)
