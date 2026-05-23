@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -32,6 +33,10 @@ const dtlsHandshakeConcurrency = 3
 func main() {
 	cfg, err := config.ParseClient(os.Args[1:], os.Stderr)
 	if err != nil {
+		// -help/-h: usage уже напечатан в ParseClient, выходим штатно.
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		// логгер ещё не создан — единственный fatal до его инициализации.
 		log.Fatalf("%v", err)
 	}
