@@ -62,3 +62,20 @@
 CLIENTS_FILE=/etc/free-turn-proxy/clients.json ./server clients list
 ```
 
+### Управление через Docker
+
+Если сервер запущен в Docker-контейнере (например, с именем `free-turn-proxy`), вы можете использовать команду `docker exec` для управления клиентами без необходимости заходить внутрь контейнера или редактировать файл вручную:
+
+```bash
+# Добавить клиента
+docker exec -it free-turn-proxy /app/server clients add "my-client" "Комментарий"
+
+# Удалить клиента
+docker exec -it free-turn-proxy /app/server clients remove "my-client"
+
+# Посмотреть список
+docker exec -it free-turn-proxy /app/server clients list
+```
+
+> **Важно:** команды `docker exec` берут путь к файлу из переменной окружения `CLIENTS_FILE` контейнера. Это работает, только если контейнер запущен с включённой авторизацией (т.е. `CLIENTS_FILE` задан в `docker-compose.yml` и файл проброшен через `volumes`). Если авторизация выключена, `clients` пишет в эфемерный `clients.json` внутри контейнера, который сервер не читает. Путь должен совпадать с тем, что смонтирован и передан в `-clients-file`.
+

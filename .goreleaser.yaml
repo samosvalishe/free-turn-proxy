@@ -63,7 +63,7 @@ builds:
   # for use as Android native library (JNI / standalone shipment).
   - id: client-android
     main: ./cmd/client
-    binary: libvkturn2.so
+    binary: libfreeturn.so
     no_unique_dist_dir: false
     flags:
       - -trimpath
@@ -76,35 +76,40 @@ builds:
       - android_arm
 
 archives:
-  # Default archives for non-Android platforms: tar.gz / zip with bundled binary.
-  - id: default
-    ids:
-      - client
-      - server
-    name_template: >-
-      {{ .ProjectName }}-{{ .Version }}-{{ .Os }}-{{ .Arch }}
-      {{- with .Arm }}v{{ . }}{{ end }}
-      {{- with .Mips }}-{{ . }}{{ end }}
-    format_overrides:
-      - goos: windows
-        formats: [zip]
-    files:
-      - LICENSE*
-      - README*
-
   # Android: ship the .so binary directly (no archive wrapper), with
   # arch suffix so arm64 and arm coexist on the release page.
   - id: android
     ids:
       - client-android
     formats: [binary]
-    name_template: "libvkturn2-{{ .Version }}-android-{{ .Arch }}"
+    name_template: "libfreeturn-{{ .Version }}-android-{{ .Arch }}"
+
+  # Raw, stable-named binaries (no version in filename) so docs and scripts
+  # can fetch /releases/latest/download/<binary>-<os>-<arch> directly without
+  # unpacking a tarball. Shipped uncompressed — no tar.gz/zip archives.
+  - id: raw
+    ids:
+      - client
+      - server
+    formats: [binary]
+    name_template: >-
+      {{ .Binary }}-{{ .Os }}-{{ .Arch }}
+      {{- with .Arm }}v{{ . }}{{ end }}
+      {{- with .Mips }}-{{ . }}{{ end }}
+
+  # Android client as a raw, stable-named binary for Termux standalone use
+  # (the libfreeturn-* archive above targets Android-app native-lib shipment).
+  - id: raw-android
+    ids:
+      - client-android
+    formats: [binary]
+    name_template: "client-{{ .Os }}-{{ .Arch }}"
 
 checksum:
   name_template: checksums.txt
 
 sboms:
-  - artifacts: archive
+  - artifacts: binary
 
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
