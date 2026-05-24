@@ -179,19 +179,21 @@ func handleAccepted(ctx context.Context, logger logx.Logger, registry *bondserve
 	}
 	logger.Debugf("Handshake done")
 
+	// Client ID читается всегда (клиент всегда шлёт его первой app-record) —
+	// wire-контракт симметричен. -clients-file включает только enforce по allowlist.
+	clientID, err := clientsdb.ReadClientID(dtlsConn)
+	if err != nil {
+		logger.Warnf("Read Client ID failed: %v", err)
+		return
+	}
 	if db != nil {
-		clientID, err := clientsdb.ReadClientID(dtlsConn)
-		if err != nil {
-			logger.Warnf("Read Client ID failed: %v", err)
-			return
-		}
-		logger.Debugf("Client ID received: %s", clientID)
-
 		if !db.IsAuthorized(clientID) {
 			logger.Warnf("Unauthorized Client ID: %s. Dropping connection.", clientID)
 			return
 		}
 		logger.Debugf("Client %s authorized", clientID)
+	} else {
+		logger.Debugf("Client ID received (no allowlist): %s", clientID)
 	}
 
 	if cfg.Proxy.Mode == config.ProxyModeTCPFwd {

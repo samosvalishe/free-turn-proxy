@@ -51,9 +51,9 @@ func main() {
 	defer cancel()
 
 	if cfg.SubURL != "" {
-		s, err := sub.Fetch(ctx, cfg.SubURL)
-		if err != nil {
-			log.Fatalf("failed to fetch subscription: %v", err)
+		s, ferr := sub.Fetch(ctx, cfg.SubURL)
+		if ferr != nil {
+			log.Fatalf("failed to fetch subscription: %v", ferr)
 		}
 		if len(s.Nodes) == 0 {
 			log.Fatalf("no nodes found in subscription")
@@ -71,17 +71,14 @@ func main() {
 		if ucfg.Mode != "" {
 			cfg.Proxy.Mode = config.ClientProxyMode(ucfg.Mode, ucfg.Bond)
 		}
-		if ucfg.Auth {
-			cfg.Auth = true
-		}
 		if ucfg.ObfProfile != "" {
 			cfg.Obf.Profile = config.ObfProfile(ucfg.ObfProfile)
 		}
 		if ucfg.ObfKey != "" {
-			if k, err := hex.DecodeString(ucfg.ObfKey); err == nil {
+			if k, derr := hex.DecodeString(ucfg.ObfKey); derr == nil {
 				cfg.Obf.Key = k
 			} else {
-				log.Fatalf("invalid hex in obf-key: %v", err)
+				log.Fatalf("invalid hex in obf-key: %v", derr)
 			}
 		}
 		if ucfg.Peer != "" {
@@ -171,7 +168,6 @@ func main() {
 			KCPProfile:   cfg.KCP.Profile,
 			KCPFEC:       cfg.KCP.FEC,
 			ClientID:     cfg.ClientID,
-			Auth:         cfg.Auth,
 		}
 		if err := tcpfwd.Run(ctx, tcpDeps, tcpParams, peer, cfg.Proxy.Listen, cfg.TURN.N, cfg.Proxy.Mode == config.ProxyModeTCPFwdBond); err != nil {
 			logger.Errorf("tcpfwd: %v", err)
@@ -191,7 +187,6 @@ func main() {
 		ObfKey:       cfg.Obf.Key,
 		GetCreds:     udprelay.GetCredsFunc(getCreds),
 		ClientID:     cfg.ClientID,
-		Auth:         cfg.Auth,
 	}
 	if err := udprelay.Run(ctx, udpDtlsDialer, prov, logger, &connectedStreams, udpParams, peer, cfg.Proxy.Listen, cfg.TURN.N); err != nil {
 		if errors.Is(err, udprelay.ErrFatal) {
@@ -232,7 +227,7 @@ func resolveClientID(cliID string) string {
 	}
 
 	path := filepath.Join(filepath.Dir(os.Args[0]), "client_config.json")
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // фиксированное имя рядом с бинарём, не пользовательский ввод
 	if err == nil {
 		var lc localCfg
 		if err := json.Unmarshal(b, &lc); err == nil && lc.ClientID != "" {
@@ -249,8 +244,8 @@ func resolveClientID(cliID string) string {
 
 	lc := localCfg{ClientID: newID}
 	b, _ = json.MarshalIndent(lc, "", "  ")
-	if err := os.WriteFile(path, b, 0644); err != nil {
-		log.Printf("warning: failed to save client ID to %s: %v", path, err)
+	if err := os.WriteFile(path, b, 0o600); err != nil { //nolint:gosec // path фиксирован рядом с бинарём; 0o600 для auth-токена
+		log.Printf("warning: failed to save client ID to %s: %v", path, err) //nolint:gosec // path не пользовательский ввод
 	}
 
 	return newID

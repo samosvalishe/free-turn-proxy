@@ -139,7 +139,7 @@ sudo netfilter-persistent save  # если установлен
    - **В Docker:** раскомментируйте переменные `CLIENTS_FILE` и `volumes` в `docker-compose.yml`, затем выполните `docker compose up -d`.
    - **В systemd:** добавьте флаг `-clients-file /opt/free-turn-proxy/clients.json` в `ExecStart`, затем `systemctl daemon-reload && systemctl restart free-turn-proxy`.
 3. Управляйте клиентами (см. раздел [Управление Client ID в flags.md](flags.md#управление-client-id-команды-сервера)).
-4. **Не забудьте** передать флаг `-auth` и `-client-id <id>` при запуске клиента.
+4. На клиенте задайте `-client-id <id>` (либо используйте автогенерируемый) и добавьте этот ID в `clients.json` на сервере. Клиент отправляет ID автоматически.
 
 ---
 

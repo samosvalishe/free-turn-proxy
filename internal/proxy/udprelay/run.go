@@ -40,7 +40,6 @@ type Params struct {
 	ObfKey       []byte
 	GetCreds     GetCredsFunc
 	ClientID     string
-	Auth         bool
 }
 
 // ErrFatal возвращается из Run, когда поток встречает условие, требующее

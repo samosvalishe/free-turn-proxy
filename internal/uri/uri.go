@@ -12,7 +12,6 @@ type Config struct {
 	Transport  string
 	Mode       string
 	Bond       bool
-	Auth       bool
 	ObfProfile string
 	ObfKey     string
 	Peer       string
@@ -71,7 +70,6 @@ func Parse(s string) (*Config, error) {
 				cfg.Mode = vals.Get("mode")
 				cfg.ObfProfile = vals.Get("obf-profile")
 				cfg.Bond = vals.Get("bond") == "true" || vals.Get("bond") == "1"
-				cfg.Auth = vals.Get("auth") == "true" || vals.Get("auth") == "1"
 			} else {
 				cfg.Transport = transportPart
 			}
@@ -94,9 +92,6 @@ func (c *Config) String() string {
 	}
 	if c.Bond {
 		payload = append(payload, "bond=1")
-	}
-	if c.Auth {
-		payload = append(payload, "auth=1")
 	}
 
 	transportStr := c.Transport

@@ -120,7 +120,6 @@ type Client struct {
 	KCP      KCPOpts
 	ClientID string
 	SubURL   string
-	Auth     bool
 }
 
 // Server — разобранные и провалидированные CLI-опции сервера.
@@ -160,7 +159,6 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	dnsServers := fs.String("dns-servers", "", "свои UDP/53 DNS через запятую: ip[:port][,ip[:port]...]")
 	clientID := fs.String("client-id", "", "уникальный ID клиента (автогенерация если не задан)")
 	subURL := fs.String("sub", "", "URL подписки (sub.md) для получения списка серверов")
-	auth := fs.Bool("auth", false, "отправлять Client ID для авторизации на сервере")
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -201,7 +199,6 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 		},
 		ClientID: *clientID,
 		SubURL:   *subURL,
-		Auth:     *auth,
 	}
 
 	// Обработка позиционного аргумента URI
@@ -232,9 +229,6 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 			}
 			if ucfg.Peer != "" {
 				c.Proxy.Peer = ucfg.Peer
-			}
-			if ucfg.Auth {
-				c.Auth = true
 			}
 		}
 	}
