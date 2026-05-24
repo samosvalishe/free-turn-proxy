@@ -152,10 +152,10 @@ func oneDTLS(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	}()
 	deps.log().Infof("[STREAM %d] Established DTLS connection", streamID)
 
-	if params.Auth {
-		if err := clientsdb.WriteClientID(dtlsConn, params.ClientID); err != nil {
-			return fmt.Errorf("failed to write client ID: %w", err)
-		}
+	// Client ID шлётся всегда (первой DTLS app-record); сервер всегда читает.
+	// -clients-file на сервере решает только, проверять ли ID по allowlist.
+	if err := clientsdb.WriteClientID(dtlsConn, params.ClientID); err != nil {
+		return fmt.Errorf("failed to write client ID: %w", err)
 	}
 
 	if okchan != nil {

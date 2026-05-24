@@ -9,7 +9,7 @@
 ## Формат
 
 ```text
-freeturn://<Provider>?<Transport><mode=...&obf-profile=...&bond=1&auth=1>@<Peer>#<ObfKey>$<Comment>
+freeturn://<Provider>?<Transport><mode=...&obf-profile=...&bond=1>@<Peer>#<ObfKey>$<Comment>
 ```
 
 ### Поля
@@ -21,7 +21,6 @@ freeturn://<Provider>?<Transport><mode=...&obf-profile=...&bond=1&auth=1>@<Peer>
 | `<mode=...>` | Параметры туннеля (`mode=udp` или `mode=tcp`). |
 | `<obf-profile=...>` | Профиль обфускации (например, `rtpopus`). |
 | `<bond=1>` | Включить ли bonding для TCP (`1` или `true`). |
-| `<auth=1>` | Включить отправку Client ID для авторизации (`1` или `true`). |
 | `<Peer>` | Адрес сервера на VPS (`ip:port`). |
 | `<ObfKey>` | Ключ обфускации (hex, 64 символа). |
 | `<Comment>` | Свободный комментарий (например, название сервера). |
@@ -29,7 +28,7 @@ freeturn://<Provider>?<Transport><mode=...&obf-profile=...&bond=1&auth=1>@<Peer>
 ## Пример использования
 
 ```bash
-./client "freeturn://vk?tcp<mode=udp&obf-profile=rtpopus&auth=1>@1.2.3.4:56000#d823fa...$MyServer" -link "https://vk.com/call/join/..."
+./client "freeturn://vk?tcp<mode=udp&obf-profile=rtpopus>@1.2.3.4:56000#d823fa...$MyServer" -link "https://vk.com/call/join/..."
 ```
 
 Параметры из URI автоматически переопределят базовые флаги (такие как `-peer`, `-mode`, `-obf-key`).

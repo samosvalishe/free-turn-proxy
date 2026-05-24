@@ -16,7 +16,7 @@ func TestClientsDB(t *testing.T) {
 		t.Fatalf("Failed to create db: %v", err)
 	}
 
-	if err := db.Add("client-123", "Test 1"); err != nil {
+	if err = db.Add("client-123", "Test 1"); err != nil {
 		t.Fatalf("Failed to add client: %v", err)
 	}
 
@@ -28,7 +28,7 @@ func TestClientsDB(t *testing.T) {
 		t.Errorf("Expected client-456 not to be authorized")
 	}
 
-	if err := db.Remove("client-123"); err != nil {
+	if err = db.Remove("client-123"); err != nil {
 		t.Fatalf("Failed to remove client: %v", err)
 	}
 
@@ -67,20 +67,24 @@ func TestClientIDRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListenUDP: %v", err)
 	}
-	defer serverConn.Close()
+	defer func() { _ = serverConn.Close() }()
 
-	clientConn, err := net.DialUDP("udp", nil, serverConn.LocalAddr().(*net.UDPAddr))
+	udpAddr, ok := serverConn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		t.Fatalf("LocalAddr is not *net.UDPAddr")
+	}
+	clientConn, err := net.DialUDP("udp", nil, udpAddr)
 	if err != nil {
 		t.Fatalf("DialUDP: %v", err)
 	}
-	defer clientConn.Close()
+	defer func() { _ = clientConn.Close() }()
 
 	expectedID := "client-test-uuid-123"
 
 	// Client writes
 	go func() {
-		if err := WriteClientID(clientConn, expectedID); err != nil {
-			t.Errorf("WriteClientID failed: %v", err)
+		if werr := WriteClientID(clientConn, expectedID); werr != nil {
+			t.Errorf("WriteClientID failed: %v", werr)
 		}
 	}()
 

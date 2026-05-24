@@ -143,7 +143,7 @@ func (db *DB) save() error {
 	}
 
 	tmpFile := db.path + ".tmp"
-	err = os.WriteFile(tmpFile, b, 0644)
+	err = os.WriteFile(tmpFile, b, 0o600) // содержит Client ID (auth-токены) — не world-readable
 	if err == nil {
 		err = os.Rename(tmpFile, db.path)
 	}
@@ -163,7 +163,7 @@ func WriteClientID(conn net.Conn, clientID string) error {
 		b = b[:255] // Усекаем до 255 байт
 	}
 	buf := make([]byte, 1+len(b))
-	buf[0] = byte(len(b))
+	buf[0] = byte(len(b)) //nolint:gosec // len(b) усечён до ≤255 выше
 	copy(buf[1:], b)
 	_, err := conn.Write(buf)
 	return err
@@ -171,8 +171,8 @@ func WriteClientID(conn net.Conn, clientID string) error {
 
 // ReadClientID читает Client ID из соединения. Учитывает DTLS record-orientated поведение.
 func ReadClientID(conn net.Conn) (string, error) {
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	defer conn.SetReadDeadline(time.Time{})
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
 
 	buf := make([]byte, 256)
 	n, err := conn.Read(buf)

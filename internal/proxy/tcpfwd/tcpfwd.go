@@ -32,7 +32,6 @@ type Params struct {
 	KCPProfile   kcptun.Profile
 	KCPFEC       kcptun.FEC
 	ClientID     string
-	Auth         bool
 }
 
 // BondHandler распределяет одно принятое TCP-соединение по всем активным сессиям пула.
@@ -258,11 +257,11 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	cleanupFns = append(cleanupFns, func() { _ = dtlsConn.Close() })
 	deps.log().Debugf("DTLS connection established")
 
-	if params.Auth {
-		if err := clientsdb.WriteClientID(dtlsConn, params.ClientID); err != nil {
-			cleanup()
-			return nil, nil, fmt.Errorf("send client ID: %w", err)
-		}
+	// Client ID шлётся всегда первой DTLS app-record; сервер всегда читает.
+	// -clients-file на сервере решает только, проверять ли ID по allowlist.
+	if werr := clientsdb.WriteClientID(dtlsConn, params.ClientID); werr != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("send client ID: %w", werr)
 	}
 
 	statsCtx, statsCancel := context.WithCancel(ctx) //nolint:gosec // cancel is held in cleanupFns and invoked via cleanup() LIFO
