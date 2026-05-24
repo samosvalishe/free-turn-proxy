@@ -50,6 +50,9 @@ task clean          # удалить dist/, cover.out, cover.html
 - [Флаги](./docs/flags.md)
 - [Развёртывание](./docs/deploy.md)
 - [Мобильные Устройства](./docs/mobile.md)
+- [URI и форматы ссылок](./docs/uri.md)
+- [Подписки (Subscriptions)](./docs/sub.md)
+- [Провайдеры](./docs/providers.md)
 - [Решение проблем](./docs/troubleshooting.md)
 
 ## Благодарности
