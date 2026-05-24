@@ -6,7 +6,7 @@
 > **Автоматическая установка**
 > Проще всего развернуть сервер с помощью интерактивного скрипта (выполнит установку Docker/systemd, настройку файрвола и обфускации):
 > ```bash
-> curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/main/scripts/install-server.sh -o install-server.sh
+> curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master/scripts/install-server.sh -o install-server.sh
 > sudo bash install-server.sh
 > ```
 > Если вы хотите всё настроить руками — следуйте инструкциям ниже.

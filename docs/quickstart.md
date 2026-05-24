@@ -15,7 +15,7 @@
 Интерактивный скрипт сам поставит Docker (или настроит systemd), сгенерирует ключ обфускации, откроет порт в файрволе и запустит сервер. Запускать от root:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/main/scripts/install-server.sh -o install-server.sh
+curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master/scripts/install-server.sh -o install-server.sh
 sudo bash install-server.sh
 ```
 
