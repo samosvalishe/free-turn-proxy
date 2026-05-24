@@ -2,8 +2,6 @@ module github.com/samosvalishe/free-turn-proxy
 
 go 1.26.3
 
-toolchain go1.26.3
-
 require (
 	github.com/bogdanfinn/fhttp v0.6.8
 	github.com/bogdanfinn/tls-client v1.14.0
