@@ -40,6 +40,19 @@ var Log logx.Logger = logx.Nop()
 // SetLogger ставит логгер пакета.
 func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
 
+// urlOpener открывает локальный URL captcha. По умолчанию — системный браузер
+// (openBrowser). GUI заменяет на свой обработчик (показ iframe) через SetURLOpener.
+var urlOpener = openBrowser
+
+// SetURLOpener подменяет способ показа captcha-страницы пользователю.
+// nil игнорируется. Используется GUI, чтобы вместо запуска браузера отрисовать
+// 127.0.0.1:8765 во встроенном iframe.
+func SetURLOpener(f func(string)) {
+	if f != nil {
+		urlOpener = f
+	}
+}
+
 const captchaListenPort = "8765"
 
 type browserCommand struct {
@@ -572,8 +585,8 @@ func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaU
 	fmt.Println("==============================================")
 	fmt.Println()
 
-	Log.Infof("[%s] Opening browser...", logPrefix)
-	openBrowser(captchaURL)
+	Log.Infof("[%s] Opening captcha page...", logPrefix)
+	urlOpener(captchaURL)
 
 	select {
 	case key := <-keyCh:

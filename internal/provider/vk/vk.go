@@ -46,6 +46,11 @@ type Config struct {
 
 	// Debug включает debug-вывод в manual-captcha (HTTP-сервер).
 	Debug bool
+
+	// OnCaptchaURL, если задан, вызывается с локальным URL manual-captcha
+	// (127.0.0.1:8765) вместо запуска системного браузера. GUI использует
+	// для показа iframe; nil → дефолт (открыть браузер).
+	OnCaptchaURL func(localURL string)
 }
 
 // ManualSolverFunc — кастомный решатель captcha. Если nil, vkauth не пытается
@@ -69,6 +74,9 @@ func New(cfg Config, solver ManualSolverFunc) (*Provider, error) {
 	captcha.SetLogger(cfg.Log)
 	manualcaptcha.SetLogger(cfg.Log)
 	manualcaptcha.Debug = cfg.Debug
+	if cfg.OnCaptchaURL != nil {
+		manualcaptcha.SetURLOpener(cfg.OnCaptchaURL)
+	}
 	auth := vkauth.New(vkauth.Config{
 		Credentials:     cfg.Credentials,
 		Dialer:          cfg.Dialer,
