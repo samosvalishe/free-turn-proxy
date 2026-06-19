@@ -14,9 +14,9 @@ require (
 	github.com/pion/turn/v5 v5.0.4
 	github.com/xtaci/kcp-go/v5 v5.6.72
 	github.com/xtaci/smux v1.5.57
-	golang.org/x/crypto v0.52.0
+	golang.org/x/crypto v0.53.0
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20260522023950-e5306b2f3e96
-	golang.org/x/net v0.55.0
+	golang.org/x/net v0.56.0
 )
 
 require (
@@ -37,10 +37,13 @@ require (
 	github.com/tam7t/hpkp v0.0.0-20160821193359-2b70b4024ed5 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
-	golang.org/x/mod v0.36.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.45.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/mobile v0.0.0-20260611195102-4dd8f1dbf5d2 // indirect
+	golang.org/x/mod v0.37.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	golang.org/x/tools v0.45.0 // indirect
+	golang.org/x/tools v0.46.0 // indirect
 )
+
+tool golang.org/x/mobile/cmd/gobind
