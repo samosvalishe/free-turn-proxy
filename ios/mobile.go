@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -68,6 +69,16 @@ var (
 
 func setStatus(s *statusInfo) { statusVal.Store(s) }
 
+// clampToInt64 насыщает uint64 до int64: gomobile экспортирует только int64,
+// а счётчики байт — uint64. Реальный трафик до math.MaxInt64 не доходит, но
+// насыщение делает конверсию безопасной от переполнения.
+func clampToInt64(u uint64) int64 {
+	if u > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(u)
+}
+
 // GetState возвращает текущий снимок состояния сессии: стадию подключения
 // плюс статистику трафика, собранные на чтении из внутренних атомиков.
 func GetState() *Snapshot {
@@ -81,8 +92,8 @@ func GetState() *Snapshot {
 		Streams: st.streams,
 		Total:   st.total,
 		ErrMsg:  st.errMsg,
-		TxTotal: int64(tx),
-		RxTotal: int64(rx),
+		TxTotal: clampToInt64(tx),
+		RxTotal: clampToInt64(rx),
 		TxRate:  globalTxRate.Load(),
 		RxRate:  globalRxRate.Load(),
 	}

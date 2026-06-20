@@ -47,7 +47,7 @@ func ClearLogs() { sharedLogBuf.clear() }
 // bufLogger реализует logx.Logger, пишет в stderr и в sharedLogBuf.
 type bufLogger struct{ debug bool }
 
-func (l *bufLogger) write(level, format string, v ...any) {
+func (*bufLogger) write(level, format string, v ...any) {
 	msg := fmt.Sprintf(format, v...)
 	line := time.Now().Format("15:04:05") + " [" + level + "] " + msg
 	log.Print("[" + level + "] " + msg)

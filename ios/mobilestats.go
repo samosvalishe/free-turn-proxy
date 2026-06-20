@@ -37,8 +37,8 @@ func startRateMeter(ctx context.Context) {
 				prevTx, prevRx = tx, rx
 				continue
 			}
-			globalTxRate.Store(int64(tx - prevTx))
-			globalRxRate.Store(int64(rx - prevRx))
+			globalTxRate.Store(clampToInt64(tx - prevTx))
+			globalRxRate.Store(clampToInt64(rx - prevRx))
 			prevTx, prevRx = tx, rx
 		}
 	}
