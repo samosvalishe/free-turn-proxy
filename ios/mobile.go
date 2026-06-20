@@ -214,7 +214,9 @@ func Start(link, peer, dns, listen, transport, obfKey string) error {
 			Host:         cfg.TURN.Host,
 			Port:         cfg.TURN.Port,
 			TransportUDP: cfg.TURN.TransportUDP,
+			Profile:      string(cfg.Obf.Profile),
 			ObfKey:       cfg.Obf.Key,
+			ObfTiming:    cfg.Obf.Timing,
 			GetCreds: udprelay.GetCredsFunc(func(ctx context.Context, streamID int) (string, string, []string, error) {
 				c, err := prov.GetCredentials(ctx, streamID)
 				if err != nil {
