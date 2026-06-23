@@ -28,6 +28,9 @@ const (
 	StateConnecting = "connecting"
 	StateConnected  = "connected"
 	StateError      = "error"
+	// StateCaptcha — пользователь решает captcha вручную. Отдельный статус, чтобы
+	// UI не показывал ошибку, а watchdog не считал это зависшим подключением.
+	StateCaptcha = "captcha"
 )
 
 // Snapshot — единый консистентный снимок состояния сессии для UI: и стадия
@@ -196,9 +199,16 @@ func Start(link, peer, dns, listen, transport, obfKey string) error {
 		// Если приложение зарегистрировало презентер — включаем ручной fallback
 		// captcha (авто-решатель пробуется первым, при провале показываем WebView).
 		// Без презентера solver == nil: при captcha-блоке поток упадёт, как раньше.
+		//
+		// captchaActive (сессионный) поднимается на время ручного решения: пока он
+		// true, watchdog не считает подключение зависшим и UI показывает StateCaptcha.
+		var captchaActive atomic.Bool
 		var solver vk.ManualSolverFunc
 		if p := currentCaptchaPresenter(); p != nil {
-			solver = vk.IOSManualSolver(p.Show, p.Hide)
+			solver = vk.IOSManualSolver(
+				func(url string) { captchaActive.Store(true); p.Show(url) },
+				func() { captchaActive.Store(false); p.Hide() },
+			)
 		}
 
 		prov, err := vk.New(vk.Config{
@@ -261,6 +271,16 @@ func Start(link, peer, dns, listen, transport, obfKey string) error {
 					if n > 0 {
 						everConnected = true
 					}
+
+					// Пока пользователь решает captcha — таймаут на паузу (двигаем
+					// дедлайн вперёд, чтобы после решения дать свежее окно) и
+					// показываем отдельный статус вместо «зависшего» connecting.
+					if captchaActive.Load() {
+						deadline = time.Now().Add(connectTimeout)
+						setStatus(&statusInfo{state: StateCaptcha, streams: int(n), total: cfg.TURN.N})
+						continue
+					}
+
 					state := StateConnecting
 					if n > 0 {
 						state = StateConnected
