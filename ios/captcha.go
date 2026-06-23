@@ -1,6 +1,9 @@
 package ios
 
-import "sync"
+import (
+	"sync"
+	"sync/atomic"
+)
 
 // CaptchaPresenter — мост в UI приложения для ручного решения captcha. gomobile
 // генерирует из этого интерфейса ObjC-протокол IosCaptchaPresenter, который
@@ -34,3 +37,12 @@ func currentCaptchaPresenter() CaptchaPresenter {
 	defer captchaMu.RUnlock()
 	return captchaPresenter
 }
+
+// manualCaptchaOnly форсит ручное решение captcha с первой попытки (минуя
+// авто-решатель). Читается при старте сессии.
+var manualCaptchaOnly atomic.Bool
+
+// SetManualCaptcha включает/выключает режим «всегда решать captcha вручную».
+// Применяется при следующем Start (или переподключении). Требует
+// зарегистрированного презентера, иначе ручной путь недоступен.
+func SetManualCaptcha(on bool) { manualCaptchaOnly.Store(on) }

@@ -206,6 +206,7 @@ func Start(link, peer, dns, listen, transport, obfKey string) error {
 			// Мобайл передаёт одну ссылку, провайдер берёт один join-код.
 			Link:            cfg.VK.Links[0],
 			Dialer:          appDialer,
+			ManualOnly:      manualCaptchaOnly.Load(),
 			StreamsPerCache: cfg.VK.StreamsPerCred,
 			StreamsAlive:    connectedStreams.Load,
 			Log:             logger,
