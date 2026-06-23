@@ -193,9 +193,14 @@ func Start(link, peer, dns, listen, transport, obfKey string) error {
 
 		var connectedStreams atomic.Int32
 
-		// nil solver — manual captcha через браузер на мобильном недоступна.
-		// При captcha-блоке поток упадёт с ErrFatalNoStreams; пользователь
-		// должен переподключиться позже.
+		// Если приложение зарегистрировало презентер — включаем ручной fallback
+		// captcha (авто-решатель пробуется первым, при провале показываем WebView).
+		// Без презентера solver == nil: при captcha-блоке поток упадёт, как раньше.
+		var solver vk.ManualSolverFunc
+		if p := currentCaptchaPresenter(); p != nil {
+			solver = vk.IOSManualSolver(p.Show, p.Hide)
+		}
+
 		prov, err := vk.New(vk.Config{
 			// ParseClient гарантирует непустой Links (иначе вернул бы ошибку выше).
 			// Мобайл передаёт одну ссылку, провайдер берёт один join-код.
@@ -204,7 +209,7 @@ func Start(link, peer, dns, listen, transport, obfKey string) error {
 			StreamsPerCache: cfg.VK.StreamsPerCred,
 			StreamsAlive:    connectedStreams.Load,
 			Log:             logger,
-		}, nil)
+		}, solver)
 		if err != nil {
 			finalErr = fmt.Errorf("provider: %v", err)
 			return
