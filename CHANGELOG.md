@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.3](https://github.com/samosvalishe/free-turn-proxy/compare/v1.4.2...v1.4.3) (2026-06-22)
+
+
+### Bug Fixes
+
+* bump captcha ([b0c3e65](https://github.com/samosvalishe/free-turn-proxy/commit/b0c3e65c40bed7e09610d5a4a49d322fa6d55fea))
+* OBF_TIMING -&gt; docker ([d8f0e7e](https://github.com/samosvalishe/free-turn-proxy/commit/d8f0e7e99554372a4b6dd057e760509e8a65bece))
+
+## [1.4.2](https://github.com/samosvalishe/free-turn-proxy/compare/v1.4.1...v1.4.2) (2026-06-22)
+
+
+### Bug Fixes
+
+* captcha ([d73f426](https://github.com/samosvalishe/free-turn-proxy/commit/d73f42603aacefa3ec08d43771a073393ae0500b))
+
 ## [1.4.1](https://github.com/samosvalishe/free-turn-proxy/compare/v1.4.0...v1.4.1) (2026-06-19)
 
 

@@ -20,6 +20,10 @@ if [ -n "${OBF_PROFILE}" ] && [ "${OBF_PROFILE}" != "none" ]; then
     set -- "$@" -obf-profile "$OBF_PROFILE" -obf-key "$OBF"
 fi
 
+if [ -n "${OBF_TIMING}" ]; then
+    set -- "$@" -obf-timing "${OBF_TIMING}"
+fi
+
 if [ "${DEBUG}" = "true" ]; then
     set -- "$@" -debug
 fi

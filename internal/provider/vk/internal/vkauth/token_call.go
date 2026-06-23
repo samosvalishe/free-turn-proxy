@@ -169,6 +169,12 @@ func (c *Client) solveCaptcha(
 
 // buildCaptchaRetryData формирует тело POST для следующей попытки captcha.
 func buildCaptchaRetryData(link, escapedName, token1 string, captchaErr *captcha.Error, successToken, captchaKey string) string {
+	if captchaErr.CaptchaSid == "" {
+		return fmt.Sprintf(
+			"vk_join_link=https://vk.ru/call/join/%s&name=%s&success_token=%s&access_token=%s",
+			link, escapedName, neturl.QueryEscape(successToken), token1,
+		)
+	}
 	if captchaKey != "" {
 		return fmt.Sprintf(
 			"vk_join_link=https://vk.ru/call/join/%s&name=%s&captcha_key=%s&captcha_sid=%s&access_token=%s",
