@@ -577,6 +577,7 @@ func solveCaptchaPoW(ctx context.Context, input string, difficulty int) string {
 	target := strings.Repeat("0", difficulty)
 	buf := make([]byte, 0, len(input)+20)
 	buf = append(buf, input...)
+	start := time.Now()
 	for nonce := 1; nonce <= 10_000_000; nonce++ {
 		if nonce&1023 == 0 {
 			select {
@@ -589,7 +590,9 @@ func solveCaptchaPoW(ctx context.Context, input string, difficulty int) string {
 		sum := sha256.Sum256(buf)
 		hashHex := hex.EncodeToString(sum[:])
 		if strings.HasPrefix(hashHex, target) {
-			return hashHex
+			durationMs := time.Since(start).Milliseconds()
+			payload := fmt.Sprintf(`{"hash":"%s","nonce":%d,"duration_ms":%d}`, hashHex, nonce, durationMs)
+			return "v2." + base64.RawStdEncoding.EncodeToString([]byte(payload))
 		}
 	}
 	return ""

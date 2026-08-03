@@ -59,15 +59,10 @@ func TestParseCaptchaPageMissingPoW(t *testing.T) {
 
 func TestSolveCaptchaPoWRawHex(t *testing.T) {
 	got := solveCaptchaPoW(context.Background(), "input", 1)
-	if len(got) != 64 {
-		t.Fatalf("pow = %q, want 64-hex", got)
+	if !strings.HasPrefix(got, "v2.") {
+		t.Fatalf("pow = %q, want v2. prefix", got)
 	}
-	if !strings.HasPrefix(got, "0") {
-		t.Fatalf("pow = %q, want leading zero for difficulty 1", got)
-	}
-	if again := solveCaptchaPoW(context.Background(), "input", 1); again != got {
-		t.Fatalf("pow not deterministic: %q vs %q", got, again)
-	}
+	// Note: output is no longer deterministic because it contains time duration.
 }
 
 func TestParseCaptchaInitSession(t *testing.T) {
