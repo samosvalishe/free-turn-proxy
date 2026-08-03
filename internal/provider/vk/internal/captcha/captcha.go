@@ -509,7 +509,7 @@ func (s *captchaSession) sendComponentDone(sessionToken string) error {
 		{"session_token", sessionToken},
 		{"domain", s.domain},
 		{"adFp", ""},
-		{"browser_fp", s.browserFP},
+		{"browser_fp", ""},
 		{"device", s.profile.DeviceJSON},
 		{"access_token", ""},
 	}); err != nil {

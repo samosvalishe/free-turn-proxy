@@ -167,7 +167,7 @@ func For(p Platform, id Identity) Profile {
 		SecChUa:         chromeSecChUa,
 		SecChUaMobile:   "?0",
 		SecChUaPlatform: s.chPlatform,
-		AcceptLanguage:  "ru-RU,ru;q=0.9",
+		AcceptLanguage:  "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 		UserAgent:       s.userAgent,
 	}
 	if p == Mobile {
@@ -188,13 +188,12 @@ func newDevice(screenW, screenH, availH, innerW, innerH int, dpr float64, cores,
 		InnerWidth: innerW, InnerHeight: innerH,
 		DevicePixelRatio:    dpr,
 		Language:            "ru-RU",
-		Languages:           []string{"ru-RU"},
+		Languages:           []string{"ru-RU", "ru", "en-US", "en"},
+		Webdriver:           false,
 		HardwareConcurrency: cores,
 		DeviceMemory:        &memory,
-		// Сеть репортится как 4g и на Wi-Fi: NetworkInformation огрубляет тип до
-		// класса скорости.
 		ConnectionEffectiveType: "4g",
-		NotificationsPermission: "prompt",
+		NotificationsPermission: "denied",
 	}
 }
 
