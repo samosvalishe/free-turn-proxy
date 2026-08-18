@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.1.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.0.0...v3.1.0) (2026-08-18)
+
+
+### Features
+
+* **server:** адрес клиента в логах сессии и handshake ([c670378](https://github.com/samosvalishe/free-turn-proxy/commit/c6703783c4a796045c0c385a8705c2756a1d8710))
+
+
+### Bug Fixes
+
+* ci ([c3fc939](https://github.com/samosvalishe/free-turn-proxy/commit/c3fc9396d4a38f6c77644a6bce04f1ed615aa397))
+* ci ([022692e](https://github.com/samosvalishe/free-turn-proxy/commit/022692ea18e012f8bc8feb2c1e5bb96e4998fc0e))
+* **session:** рецикл после пробуждения только при тишине в канале ([9c2cc93](https://github.com/samosvalishe/free-turn-proxy/commit/9c2cc93a1caa2ecbea87be8501dd13e6fb358071))
+* **udprelay:** рецикл turn-аллокации пересоздаёт dtls-сессию ([fd9c6ab](https://github.com/samosvalishe/free-turn-proxy/commit/fd9c6abf1e3be6e570af41ab03522c584a06df46))
+* **vkauth:** отмена капчи не сжигает персону ([60e3a69](https://github.com/samosvalishe/free-turn-proxy/commit/60e3a69a7d237d1635cd840bbbeaaada6b56a562))
+
 ## [3.0.0](https://github.com/samosvalishe/free-turn-proxy/compare/v2.1.2...v3.0.0) (2026-08-17)
 
 
