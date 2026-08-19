@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.1.1](https://github.com/samosvalishe/free-turn-proxy/compare/v3.1.0...v3.1.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* **captcha:** адаптация ([9d454db](https://github.com/samosvalishe/free-turn-proxy/commit/9d454dbd419961ccdd2eebfeaacede4f40672fa8))
+
 ## [3.1.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.0.0...v3.1.0) (2026-08-18)
 
 
