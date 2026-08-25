@@ -1,5 +1,30 @@
 # Changelog
 
+## [3.2.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.1.1...v3.2.0) (2026-08-25)
+
+
+### Features
+
+* **proxy:** tcp-режим для xray/sing-box поверх turn ([f712909](https://github.com/samosvalishe/free-turn-proxy/commit/f7129099f711d627f6645fd18fd4c9be2b8a1437))
+* **session:** реконнект релея без пересоздания туннеля ([f61dc8c](https://github.com/samosvalishe/free-turn-proxy/commit/f61dc8c9578eb76f6cdf0a686af024ebbeab5b6b))
+* **tunnel:** параметры обфускации awg 3+ ([77fbdec](https://github.com/samosvalishe/free-turn-proxy/commit/77fbdec70703fd7222d58867cf033b371ab41849))
+
+
+### Bug Fixes
+
+* **captcha:** не жечь персону, когда страница не дошла до вердикта ([1547aae](https://github.com/samosvalishe/free-turn-proxy/commit/1547aaeed74bb23d45dd15f1d5cc030000c43481))
+* **core:** паника горутины больше не убивает процесс приложения ([748d5a0](https://github.com/samosvalishe/free-turn-proxy/commit/748d5a07ce21bec1620e3a4c55b5f2f33171fb99))
+* **logs:** убрать пострим-шум из лога без debug ([c2a9f0f](https://github.com/samosvalishe/free-turn-proxy/commit/c2a9f0f1d7054669eda7817a2f9d8d067573dcc4))
+* **udprelay:** не зависать на фатальной ошибке провайдера ([4863161](https://github.com/samosvalishe/free-turn-proxy/commit/48631616f143bc07f93d4a6cf6d5d2647022129e))
+* **udprelay:** фатальная ошибка не ждёт барьер прогрева ([03eb41e](https://github.com/samosvalishe/free-turn-proxy/commit/03eb41e2fb5cad671c52bb4807d424688145ba36))
+* **vkauth:** не считать отменённый поход за реквизитами нагрузкой на провайдера ([623ef46](https://github.com/samosvalishe/free-turn-proxy/commit/623ef46f2f908d4b5d011b1b099928d7a2e3714c))
+* **vkauth:** сбрасывать реквизиты при неподтверждённом deallocate ([7fc7fe2](https://github.com/samosvalishe/free-turn-proxy/commit/7fc7fe2e79906d5cd386da65e2064c2e159ae891))
+
+
+### Performance
+
+* **udprelay:** общий шлюз на allocate вместо per-stream джиттера ([e63279d](https://github.com/samosvalishe/free-turn-proxy/commit/e63279db185ae6205080fab6b4a9d4dd36e5c29c))
+
 ## [3.1.1](https://github.com/samosvalishe/free-turn-proxy/compare/v3.1.0...v3.1.1) (2026-08-19)
 
 
