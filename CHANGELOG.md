@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.3.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.2.0...v3.3.0) (2026-09-06)
+
+
+### Features
+
+* **scripts:** поддержка amneziawg 3.1, управление клиентами и qr-коды в установщике ([daf8cec](https://github.com/samosvalishe/free-turn-proxy/commit/daf8cece80ba388788b67596168c79f4b0741e69))
+* прямой туннель без релея ([2812ded](https://github.com/samosvalishe/free-turn-proxy/commit/2812ded2ed4a6c2d9c0f44bf0e79e218a5a801dc))
+
+
+### Bug Fixes
+
+* fmt ([67f9a4f](https://github.com/samosvalishe/free-turn-proxy/commit/67f9a4fe4e3f6578b5fb88c976878fcc42e87648))
+* **tunnel:** race ([02c696f](https://github.com/samosvalishe/free-turn-proxy/commit/02c696fa28ac687e979a4c11f9bf630746ef3098))
+* **tunnel:** обработка защиты сокетов и стабильность прямого режима ([1cc5e93](https://github.com/samosvalishe/free-turn-proxy/commit/1cc5e93d0333d107b7193c6d74c87d27b737ab21))
+
 ## [3.2.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.1.1...v3.2.0) (2026-08-25)
 
 
