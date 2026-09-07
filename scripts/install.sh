@@ -112,6 +112,7 @@ OVERRIDES=()
 
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 export PATH
+export COLORFGBG="15;0"
 
 valid_port()     { [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
 valid_hex64()    { [[ "$1" =~ ^[0-9a-fA-F]{64}$ ]]; }
@@ -217,7 +218,15 @@ die() {
     exit 1
 }
 
-ui_abort() { log_info "Отменено."; exit 0; }
+ui_drain_input() {
+    [ -t 0 ] || [ -r /dev/tty ] || return 0
+    stty -echo </dev/tty 2>/dev/null || true
+    local discard
+    while read -r -t 0.05 -n 1000 discard </dev/tty 2>/dev/null; do :; done
+    stty echo </dev/tty 2>/dev/null || true
+}
+
+ui_abort() { ui_drain_input; log_info "Отменено."; exit 0; }
 
 ui_banner() {
     [ "$_IS_RPC" = 1 ] && return 0
@@ -2417,23 +2426,24 @@ review_config() {
     [ "$INSTALL_AWG" = "0" ] && comp_name="Только FreeTurn"
 
     if [ "$HAS_GUM" = 1 ]; then
-        gum format <<EOF | gum style --border double --border-foreground "$MD_PRIMARY" --padding "1 2"
-# Настройки установки
+        local lines=()
+        lines+=("$(gum style --foreground "$MD_PRIMARY" --bold "Настройки установки")")
+        lines+=("")
+        lines+=("$(printf '%-20s %s' "Компоненты:" "$comp_name")")
+        lines+=("$(printf '%-20s %s' "Метод запуска:" "$INSTALL_METHOD")")
+        [ "$INSTALL_FREETURN" = "1" ] && lines+=("$(printf '%-20s %s' "Порт FreeTurn:" "0.0.0.0:$LISTEN_PORT")")
+        [ "$INSTALL_FREETURN" = "1" ] && lines+=("$(printf '%-20s %s' "Режим релея:" "$PROXY_MODE")")
+        [ "$INSTALL_FREETURN" = "1" ] && lines+=("$(printf '%-20s %s' "Обфускация:" "$OBF_PROFILE")")
+        [ "$INSTALL_AWG" = "1" ]      && lines+=("$(printf '%-20s %s' "Порт AmneziaWG:" "$BACKEND_PORT")")
+        [ "$INSTALL_AWG" = "1" ]      && lines+=("$(printf '%-20s %s' "Прямой AWG:" "$([ "$AWG_DIRECT_PORT" = "1" ] && echo "да" || echo "нет")")")
+        lines+=("$(printf '%-20s %s' "Файрвол:" "$([ "$OPEN_FIREWALL" = "1" ] && echo "открыть" || echo "не трогать")")")
 
-| Параметр            | Значение |
-| ------------------- | -------- |
-| Компоненты          | $comp_name |
-| Метод               | $INSTALL_METHOD |
-$([ "$INSTALL_FREETURN" = "1" ] && echo "| Порт FreeTurn       | 0.0.0.0:$LISTEN_PORT |")
-$([ "$INSTALL_FREETURN" = "1" ] && echo "| Режим релея         | $PROXY_MODE |")
-$([ "$INSTALL_FREETURN" = "1" ] && echo "| Обфускация          | $OBF_PROFILE |")
-$([ "$INSTALL_AWG" = "1" ] && echo "| Порт AmneziaWG      | $BACKEND_PORT |")
-$([ "$INSTALL_AWG" = "1" ] && echo "| Прямой AWG          | $([ "$AWG_DIRECT_PORT" = "1" ] && echo "да" || echo "нет") |")
-| Файрвол             | $([ "$OPEN_FIREWALL" = "1" ] && echo "открыть" || echo "не трогать") |
-EOF
+        local body; body=$(printf '%s\n' "${lines[@]}")
+        gum style --border double --border-foreground "$MD_PRIMARY" --padding "1 2" "$body"
     else
         echo; log_info "Настройки: components=$comp_name method=$INSTALL_METHOD"
     fi
+    ui_drain_input
     ui_yesno "Применить конфигурацию?" "Y" || ui_abort
 }
 
@@ -2453,30 +2463,29 @@ apply() {
 }
 
 print_summary() {
+    ui_drain_input
     local ext_ip; ext_ip="$(get_public_ip)"
     echo
-    local summary="# ✔ Установка успешно завершена!
-
-"
-    if [ "$INSTALL_FREETURN" = "1" ]; then
-        summary+="- **Сервер FreeTurn:** \`${ext_ip}:${LISTEN_PORT}\` (\`${OBF_PROFILE}\`)
-"
-    fi
-    if [ "$INSTALL_AWG" = "1" ]; then
-        summary+="- **AmneziaWG 3.1:** порт \`${BACKEND_PORT}\`"
-        [ "$AWG_DIRECT_PORT" = "1" ] && summary+=" (прямой доступ открыт)"
-        summary+="
-"
-    fi
-    summary+="
----
-### Управление клиентами
-\`sudo bash install.sh client add [name]\`  - добавить клиента
-\`sudo bash install.sh client list\`        - список клиентов
-\`sudo bash install.sh client qr [name]\`   - показать QR-код"
-
     if [ "$HAS_GUM" = 1 ]; then
-        printf '%s\n' "$summary" | gum format | gum style --border rounded --border-foreground "$MD_SUCCESS" --padding "1 2"
+        local lines=()
+        lines+=("$(gum style --foreground "$MD_SUCCESS" --bold "✔ Установка успешно завершена!")")
+        lines+=("")
+        if [ "$INSTALL_FREETURN" = "1" ]; then
+            lines+=("$(gum style --foreground "$MD_SECONDARY" "• Сервер FreeTurn:") $(gum style --bold "${ext_ip}:${LISTEN_PORT}") $(gum style --foreground "$MD_TERTIARY" "(${OBF_PROFILE})")")
+        fi
+        if [ "$INSTALL_AWG" = "1" ]; then
+            local awg_info=""
+            [ "$AWG_DIRECT_PORT" = "1" ] && awg_info=" (прямой доступ открыт)"
+            lines+=("$(gum style --foreground "$MD_SECONDARY" "• AmneziaWG 3.1:  ") $(gum style --bold "порт ${BACKEND_PORT}")${awg_info}")
+        fi
+        lines+=("")
+        lines+=("$(gum style --foreground "$MD_PRIMARY" --bold "Управление клиентами:")")
+        lines+=("  sudo bash install.sh client add [name]  - добавить клиента")
+        lines+=("  sudo bash install.sh client list        - список клиентов")
+        lines+=("  sudo bash install.sh client qr [name]   - показать QR-код")
+
+        local body; body=$(printf '%s\n' "${lines[@]}")
+        gum style --border rounded --border-foreground "$MD_SUCCESS" --padding "1 2" "$body"
     else
         echo "========================================================"
         echo "  Установка успешно завершена!"
@@ -2484,6 +2493,7 @@ print_summary() {
         [ "$INSTALL_FREETURN" = "1" ] && echo "FreeTurn: ${ext_ip}:${LISTEN_PORT}"
         [ "$INSTALL_AWG" = "1" ] && echo "AmneziaWG: порт ${BACKEND_PORT}"
     fi
+    ui_drain_input
 }
 
 flow_install()     { wizard; validate_config; review_config; apply; print_summary; }
@@ -2689,6 +2699,7 @@ main() {
     else
         flow_install
     fi
+    ui_drain_input
 }
 
 if [ "${BASH_SOURCE[0]:-$0}" = "$0" ]; then
