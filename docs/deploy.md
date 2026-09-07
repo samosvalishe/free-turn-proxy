@@ -23,8 +23,14 @@ freeturn client add phone
 # Показать список существующих клиентов
 freeturn client list
 
-# Показать QR-код конкретного клиента (direct / relay / freeturn)
-freeturn client qr phone direct
+# Показать QR-коды клиента (выводит все 3 формата: Direct, FreeTurn App, Relay)
+freeturn client qr phone
+
+# Временный веб-сервер для скачивания всех 3 картинок в браузере (ПК / телефон)
+freeturn client web phone
+
+# Скачивание картинок напрямую на ПК (выполняется в PowerShell / терминале ПК):
+# scp root@<vps_ip>:/opt/free-turn-proxy/clients/phone*.png .
 
 # Удалить клиента
 freeturn client remove phone
