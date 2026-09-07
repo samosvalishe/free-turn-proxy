@@ -23,6 +23,9 @@ OWNERCIDFILE="$PREFIX/owner.cid"
 SHARE_DIR="$PREFIX/share"
 APP_DIR="$PREFIX"
 CONF_FILE="${PREFIX}/install.conf"
+WEB_PID="$PREFIX/web.pid"
+WEB_LOG="$PREFIX/web.log"
+FT_WEB_PORT="${FT_WEB_PORT:-8080}"
 
 # Службы и контейнеры
 SERVICE="free-turn-proxy.service"
@@ -963,6 +966,7 @@ PROXY_MODE="$PROXY_MODE"
 BACKEND_TYPE="$BACKEND_TYPE"
 BACKEND_PORT="$BACKEND_PORT"
 LISTEN_PORT="$LISTEN_PORT"
+FT_WEB_PORT="$FT_WEB_PORT"
 AWG_DIRECT_PORT="$AWG_DIRECT_PORT"
 OBF_PROFILE="$OBF_PROFILE"
 OBF_KEY="$OBF_KEY"
@@ -2262,6 +2266,7 @@ do_uninstall() {
             firewall_close_port "$LISTEN_PORT" "udp"
             firewall_close_port "$LISTEN_PORT" "tcp"
             [ -n "$BACKEND_PORT" ] && firewall_close_port "$BACKEND_PORT" "udp"
+            stop_web_server
             rm -f /etc/sysctl.d/99-free-turn-proxy.conf
             if [ "$purge" = "1" ] || [ "$PURGE" = "1" ]; then
                 rm -rf "$APP_DIR"
@@ -2280,6 +2285,108 @@ cmd_uninstall() {
     d_str target "${ARG_TARGET:-all}"
     d_bool uninstalled true
     ok
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Веб-сервер раздачи файлов клиентов и QR-кодов
+# ─────────────────────────────────────────────────────────────────────────────
+ensure_web_server() {
+    local port="${FT_WEB_PORT:-8080}"
+    mkdir -p "$CLIENTS_DIR"
+
+    if [ -f "$WEB_PID" ]; then
+        local p; p=$(cat "$WEB_PID" 2>/dev/null || true)
+        if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then
+            return 0
+        fi
+        rm -f "$WEB_PID"
+    fi
+
+    if command -v ss >/dev/null 2>&1 && ss -tulpn 2>/dev/null | grep -q ":${port} "; then
+        return 0
+    elif command -v netstat >/dev/null 2>&1 && netstat -tulpn 2>/dev/null | grep -q ":${port} "; then
+        return 0
+    fi
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        pkg_install python3 >/dev/null 2>&1 || true
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        return 1
+    fi
+
+    chmod 755 "$CLIENTS_DIR" 2>/dev/null || true
+    (
+        cd "$CLIENTS_DIR"
+        nohup python3 -m http.server "$port" >"$WEB_LOG" 2>&1 &
+        echo $! > "$WEB_PID"
+    )
+
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+    fi
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || \
+            iptables -I INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || true
+    fi
+    return 0
+}
+
+stop_web_server() {
+    local port="${FT_WEB_PORT:-8080}"
+    if [ -f "$WEB_PID" ]; then
+        local p; p=$(cat "$WEB_PID" 2>/dev/null || true)
+        [ -n "$p" ] && kill "$p" 2>/dev/null || true
+        rm -f "$WEB_PID"
+    fi
+    pkill -f "python3 -m http.server ${port}" 2>/dev/null || true
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
+        ufw delete allow "${port}/tcp" >/dev/null 2>&1 || true
+    fi
+    if command -v iptables >/dev/null 2>&1; then
+        iptables -D INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || true
+    fi
+}
+
+show_client_links() {
+    local cname="$1" title="${2:-Клиент '$1' готов!}"
+    ensure_web_server || true
+    local ext_ip; ext_ip="$(get_public_ip)"
+    local base_url="http://${ext_ip}:${FT_WEB_PORT:-8080}"
+
+    local direct_png="${CLIENTS_DIR}/${cname}-direct.png"
+    local ft_vpn_png="${CLIENTS_DIR}/${cname}-freeturn-vpn.png"
+    local ft_png="${CLIENTS_DIR}/${cname}-freeturn.png"
+    local relay_png="${CLIENTS_DIR}/${cname}-relay.png"
+
+    echo
+    if [ "$HAS_GUM" = 1 ]; then
+        local lines=()
+        lines+=("$(gum style --foreground "$MD_SUCCESS" --bold "✔ ${title}")")
+        lines+=("")
+        lines+=("$(gum style --foreground "$MD_PRIMARY" --bold "Ссылки на QR-коды и конфиги:")")
+        [ -f "$direct_png" ] && lines+=("  • AmneziaWG Direct:   ${base_url}/${cname}-direct.png")
+        [ -f "$ft_vpn_png" ] && lines+=("  • FreeTurn App (VPN): ${base_url}/${cname}-freeturn-vpn.png")
+        [ -f "$ft_png" ] && [ ! -f "$ft_vpn_png" ] && lines+=("  • FreeTurn App:       ${base_url}/${cname}-freeturn.png")
+        [ -f "$relay_png" ]  && lines+=("  • AmneziaWG Relay:    ${base_url}/${cname}-relay.png")
+        lines+=("  • Каталог файлов:     ${base_url}/")
+        lines+=("")
+        lines+=("$(gum style --foreground "$MD_SECONDARY" --italic "Скачать на ПК (SCP): scp root@${ext_ip}:${CLIENTS_DIR}/${cname}* .")")
+
+        local body; body=$(printf '%s\n' "${lines[@]}")
+        gum style --border rounded --border-foreground "$MD_PRIMARY" --padding "1 2" "$body"
+    else
+        echo "========================================================"
+        echo "  ${title}"
+        echo "========================================================"
+        [ -f "$direct_png" ] && echo "  AmneziaWG Direct:   ${base_url}/${cname}-direct.png"
+        [ -f "$ft_vpn_png" ] && echo "  FreeTurn App (VPN): ${base_url}/${cname}-freeturn-vpn.png"
+        [ -f "$ft_png" ] && [ ! -f "$ft_vpn_png" ] && echo "  FreeTurn App:       ${base_url}/${cname}-freeturn.png"
+        [ -f "$relay_png" ]  && echo "  AmneziaWG Relay:    ${base_url}/${cname}-relay.png"
+        echo "  Каталог файлов:     ${base_url}/"
+        echo "  Скачать на ПК (SCP): scp root@${ext_ip}:${CLIENTS_DIR}/${cname}* ."
+        echo "========================================================"
+    fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2418,6 +2525,7 @@ EOF
         fi
     fi
 
+    chmod 644 "${CLIENTS_DIR}/${cname}"* 2>/dev/null || true
     echo "${cname}|${client_ip}|${cid}|$(date '+%Y-%m-%d %H:%M')" >> "$CLIENTS_META"
 
     # При silent=1 (первый клиент в ходе установки) не спамим в консоль —
@@ -2427,52 +2535,7 @@ EOF
     fi
 
     log_success "Клиент '${cname}' добавлен!"
-    echo
-    if [ "$HAS_GUM" = 1 ]; then
-        local card=()
-        card+=("$(gum style --foreground "$MD_SUCCESS" --bold "✔ Клиент '${cname}' готов к работе!")")
-        card+=("")
-        if [ -f "$direct_conf" ]; then
-            card+=("$(gum style --foreground "$MD_PRIMARY" --bold "• [1/3] AmneziaWG Direct (AWG 3.1):")")
-            card+=("  Конфиг:   $direct_conf")
-            card+=("  QR (PNG): $direct_png")
-        fi
-        if [ -n "$ft_vpn_uri" ]; then
-            [ -f "$direct_conf" ] && card+=("")
-            card+=("$(gum style --foreground "$MD_PRIMARY" --bold "• [2/3] FreeTurn App (релей + вшитый VPN):")")
-            card+=("  QR (PNG): $ft_vpn_png")
-            card+=("  Ссылка:   $ft_vpn_uri")
-        elif [ -n "$ft_uri" ]; then
-            [ -f "$direct_conf" ] && card+=("")
-            card+=("$(gum style --foreground "$MD_PRIMARY" --bold "• [2/3] FreeTurn App (прокси-режим):")")
-            card+=("  QR (PNG): $ft_png")
-            card+=("  Ссылка:   $ft_uri")
-        fi
-        if [ -f "$relay_conf" ]; then
-            card+=("")
-            card+=("$(gum style --foreground "$MD_PRIMARY" --bold "• [3/3] AmneziaWG Relay (127.0.0.1:9000):")")
-            card+=("  Конфиг:   $relay_conf")
-            card+=("  QR (PNG): $relay_png")
-        fi
-        card+=("")
-        card+=("$(gum style --foreground "$MD_SECONDARY" --bold "Скачать все 3 QR-картинки на телефон/ПК:")")
-        card+=("  scp root@${ext_ip}:${CLIENTS_DIR}/${cname}* .")
-        card+=("")
-        card+=("$(gum style --foreground "$MD_SECONDARY" --italic "Показать все QR в консоли: freeturn client qr ${cname}")")
-
-        local card_body; card_body=$(printf '%s\n' "${card[@]}")
-        gum style --border rounded --border-foreground "$MD_PRIMARY" --padding "1 2" "$card_body"
-    else
-        echo "========================================================"
-        echo "  Клиент '${cname}' успешно добавлен!"
-        echo "========================================================"
-        [ -f "$direct_conf" ] && echo "  [1/3] AmneziaWG Direct:   $direct_conf (QR: $direct_png)"
-        [ -n "$ft_vpn_uri" ]  && echo "  [2/3] FreeTurn App (VPN): $ft_vpn_uri (QR: $ft_vpn_png)"
-        [ -f "$relay_conf" ]  && echo "  [3/3] AmneziaWG Relay:    $relay_conf (QR: $relay_png)"
-        echo "  Скачать на ПК: scp root@${ext_ip}:${CLIENTS_DIR}/${cname}* ."
-        echo "  Показать все QR в консоли: freeturn client qr ${cname}"
-        echo "========================================================"
-    fi
+    show_client_links "$cname" "Клиент '${cname}' готов!"
 }
 
 client_list() {
@@ -2515,212 +2578,8 @@ client_resolve_name() {
     return 1
 }
 
-_show_qr_direct() {
-    local cname="$1" num="${2:-}"
-    local conf="${CLIENTS_DIR}/${cname}-direct.conf"
-    local png="${CLIENTS_DIR}/${cname}-direct.png"
-    [ ! -f "$conf" ] && return 0
-    [ ! -f "$png" ] && generate_qr_png_file "$conf" "$png"
-
-    local prefix=""
-    [ -n "$num" ] && prefix="[${num}] "
-
-    echo
-    if [ "$HAS_GUM" = 1 ]; then
-        gum style --border normal --border-foreground "$MD_PRIMARY" --padding "0 1" \
-            "$(gum style --foreground "$MD_PRIMARY" --bold "${prefix}AmneziaWG Direct (AWG 3.1) — прямое подключение")" \
-            "Для официального приложения AmneziaWG (напрямую к серверу, минуя релей)."
-    else
-        echo -e "${C_CYAN}--- ${prefix}AmneziaWG Direct (AWG 3.1) — прямое подключение ---${C_NC}"
-        echo "Для официального приложения AmneziaWG (напрямую к серверу, минуя релей)."
-    fi
-
-    render_qr_file "$conf" "" "$png"
-    download_file_osc1337 "$png"
-}
-
-_show_qr_freeturn() {
-    local cname="$1" num="${2:-}"
-    local txt="${CLIENTS_DIR}/${cname}-freeturn-vpn.txt"
-    local png="${CLIENTS_DIR}/${cname}-freeturn-vpn.png"
-    local is_vpn=1
-
-    if [ ! -f "$txt" ]; then
-        txt="${CLIENTS_DIR}/${cname}-freeturn.txt"
-        png="${CLIENTS_DIR}/${cname}-freeturn.png"
-        is_vpn=0
-    fi
-    [ ! -f "$txt" ] && return 0
-    [ ! -f "$png" ] && generate_qr_png_text "$(<"$txt")" "$png"
-
-    local prefix=""
-    [ -n "$num" ] && prefix="[${num}] "
-
-    echo
-    if [ "$HAS_GUM" = 1 ]; then
-        if [ "$is_vpn" = 1 ]; then
-            gum style --border normal --border-foreground "$MD_SUCCESS" --padding "0 1" \
-                "$(gum style --foreground "$MD_SUCCESS" --bold "${prefix}FreeTurn App — релей + вшитый VPN (всё в одном)")" \
-                "Сканируйте встроенным сканером ВНУТРИ приложения FreeTurn (Android / iOS)!" \
-                "Ссылка freeturn:// автоматически настраивает и релей, и VPN-туннель."
-        else
-            gum style --border normal --border-foreground "$MD_SUCCESS" --padding "0 1" \
-                "$(gum style --foreground "$MD_SUCCESS" --bold "${prefix}FreeTurn App — ссылка freeturn:// (прокси-режим)")" \
-                "Сканируйте встроенным сканером ВНУТРИ приложения FreeTurn (Android / iOS)."
-        fi
-    else
-        echo -e "${C_GREEN}--- ${prefix}FreeTurn App — релей + вшитый VPN (всё в одном) ---${C_NC}"
-        echo "Сканируйте встроенным сканером ВНУТРИ приложения FreeTurn (Android / iOS)!"
-        echo "Ссылка freeturn:// автоматически настраивает и релей, и VPN-туннель."
-    fi
-
-    render_qr_text "$(<"$txt")" "" "$png"
-    download_file_osc1337 "$png"
-}
-
-_show_qr_relay() {
-    local cname="$1" num="${2:-}"
-    local conf="${CLIENTS_DIR}/${cname}-relay.conf"
-    local png="${CLIENTS_DIR}/${cname}-relay.png"
-    [ ! -f "$conf" ] && return 0
-    [ ! -f "$png" ] && generate_qr_png_file "$conf" "$png"
-
-    local prefix=""
-    [ -n "$num" ] && prefix="[${num}] "
-
-    echo
-    if [ "$HAS_GUM" = 1 ]; then
-        gum style --border normal --border-foreground "$MD_SECONDARY" --padding "0 1" \
-            "$(gum style --foreground "$MD_SECONDARY" --bold "${prefix}AmneziaWG Relay (127.0.0.1:9000) — раздельный запуск")" \
-            "Конфиг для связки с отдельным CLI/Termux клиентом на ПК/телефоне." \
-            "⚠ НЕ сканируйте в приложении FreeTurn — для него предназначен QR [2/3]!"
-    else
-        echo -e "${C_YELLOW}--- ${prefix}AmneziaWG Relay (127.0.0.1:9000) — раздельный запуск ---${C_NC}"
-        echo "Конфиг для связки с отдельным CLI/Termux клиентом на ПК/телефоне."
-        echo "⚠ НЕ сканируйте в приложении FreeTurn — для него предназначен QR [2/3]!"
-    fi
-
-    render_qr_file "$conf" "" "$png"
-    download_file_osc1337 "$png"
-}
-
-_show_download_card() {
-    local cname="$1" ext_ip="$2"
-    echo
-    if [ "$HAS_GUM" = 1 ]; then
-        local card=()
-        card+=("$(gum style --foreground "$MD_PRIMARY" --bold "📥 Как скачать все 3 картинки QR-кода на свой компьютер (ПК):")")
-        card+=("")
-        card+=("В терминале вашего ПК (PowerShell / macOS / Linux) выполните команду:")
-        card+=("  $(gum style --foreground "$MD_SUCCESS" --bold "scp root@${ext_ip}:${CLIENTS_DIR}/${cname}*.png .")")
-        card+=("")
-        card+=("Будут сохранены все 3 файла:")
-        card+=("  • ${cname}-direct.png       (AmneziaWG Direct - прямой доступ)")
-        card+=("  • ${cname}-freeturn-vpn.png (FreeTurn App - со вшитым VPN)")
-        card+=("  • ${cname}-relay.png        (AmneziaWG Relay - 127.0.0.1:9000)")
-        if command -v python3 >/dev/null 2>&1; then
-            card+=("")
-            card+=("Или откройте веб-доступ для скачивания в браузере: freeturn client web ${cname}")
-        fi
-        gum style --border rounded --border-foreground "$MD_PRIMARY" --padding "1 2" "$(printf '%s\n' "${card[@]}")"
-    else
-        echo "===================================================================="
-        echo "  📥 Как скачать все 3 картинки QR-кода на свой компьютер (ПК):"
-        echo "  В терминале на вашем ПК выполните команду:"
-        echo "    scp root@${ext_ip}:${CLIENTS_DIR}/${cname}*.png ."
-        echo "  Будут скачаны:"
-        echo "    • ${cname}-direct.png       (AmneziaWG Direct)"
-        echo "    • ${cname}-freeturn-vpn.png (FreeTurn App со вшитым VPN)"
-        echo "    • ${cname}-relay.png        (AmneziaWG Relay 127.0.0.1:9000)"
-        command -v python3 >/dev/null 2>&1 && echo "  Или скачайте в браузере: freeturn client web ${cname}"
-        echo "===================================================================="
-    fi
-
-    if [ "$NONINTERACTIVE" != "1" ] && command -v python3 >/dev/null 2>&1 && [ -t 0 ]; then
-        echo
-        if ui_yesno "Запустить временный веб-доступ для скачивания картинок через браузер?" "N"; then
-            client_web "$cname" 8080
-        fi
-    fi
-}
-
-client_web() {
-    local cname="${1:-}" port="${2:-8080}"
-    if [ -z "$cname" ]; then
-        [ ! -s "$CLIENTS_META" ] && die "Нет клиентов."
-        local names=()
-        while IFS='|' read -r n _ _ _; do names+=("$n"); done < "$CLIENTS_META"
-        [ "$HAS_GUM" = 1 ] && cname=$(gum choose --header "Клиент для скачивания:" "${names[@]}" </dev/tty) || ui_input cname "Имя" "${names[0]}"
-    else
-        local resolved; resolved=$(client_resolve_name "$cname" || true)
-        if [ -n "$resolved" ]; then
-            cname="$resolved"
-        else
-            log_error "Клиент '$cname' не найден."
-            echo
-            client_list
-            return 1
-        fi
-    fi
-
-    local ext_ip; ext_ip="$(get_public_ip)"
-
-    if ! command -v python3 >/dev/null 2>&1; then
-        log_warn "python3 не установлен. Скачайте файлы через SCP:"
-        echo "  scp root@${ext_ip}:${CLIENTS_DIR}/${cname}*.png ."
-        return 0
-    fi
-
-    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        ufw allow "${port}/tcp" >/dev/null 2>&1 || true
-    fi
-    if command -v iptables >/dev/null 2>&1; then
-        iptables -I INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || true
-    fi
-
-    echo
-    if [ "$HAS_GUM" = 1 ]; then
-        local wcard=()
-        wcard+=("$(gum style --foreground "$MD_SUCCESS" --bold "🌐 Временный веб-доступ открыт (порт ${port})")")
-        wcard+=("")
-        wcard+=("Ссылки для скачивания в браузере (телефон / ПК):")
-        [ -f "${CLIENTS_DIR}/${cname}-direct.png" ]       && wcard+=("  • 1. AmneziaWG Direct:   http://${ext_ip}:${port}/${cname}-direct.png")
-        [ -f "${CLIENTS_DIR}/${cname}-freeturn-vpn.png" ] && wcard+=("  • 2. FreeTurn App QR:    http://${ext_ip}:${port}/${cname}-freeturn-vpn.png")
-        [ -f "${CLIENTS_DIR}/${cname}-relay.png" ]        && wcard+=("  • 3. AmneziaWG Relay:    http://${ext_ip}:${port}/${cname}-relay.png")
-        wcard+=("")
-        wcard+=("Каталог со всеми файлами: http://${ext_ip}:${port}/")
-        wcard+=("")
-        wcard+=("$(gum style --foreground "$MD_TERTIARY" --italic "Нажмите Enter для остановки веб-сервера и закрытия порта...")")
-        gum style --border rounded --border-foreground "$MD_PRIMARY" --padding "1 2" "$(printf '%s\n' "${wcard[@]}")"
-    else
-        echo "===================================================================="
-        echo "  🌐 Временный веб-сервер открыт: http://${ext_ip}:${port}/"
-        [ -f "${CLIENTS_DIR}/${cname}-direct.png" ]       && echo "  • AmneziaWG Direct: http://${ext_ip}:${port}/${cname}-direct.png"
-        [ -f "${CLIENTS_DIR}/${cname}-freeturn-vpn.png" ] && echo "  • FreeTurn App:     http://${ext_ip}:${port}/${cname}-freeturn-vpn.png"
-        [ -f "${CLIENTS_DIR}/${cname}-relay.png" ]        && echo "  • AmneziaWG Relay:  http://${ext_ip}:${port}/${cname}-relay.png"
-        echo "  Нажмите Enter для остановки веб-сервера и закрытия порта..."
-        echo "===================================================================="
-    fi
-
-    ( cd "$CLIENTS_DIR" && python3 -m http.server "$port" >/dev/null 2>&1 ) &
-    local srv_pid=$!
-
-    read -r _ </dev/tty 2>/dev/null || read -r _ 2>/dev/null || sleep 60
-    kill "$srv_pid" 2>/dev/null || true
-    wait "$srv_pid" 2>/dev/null || true
-
-    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        ufw delete allow "${port}/tcp" >/dev/null 2>&1 || true
-    fi
-    if command -v iptables >/dev/null 2>&1; then
-        iptables -D INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || true
-    fi
-    echo
-    log_info "Веб-сервер остановлен, порт ${port} закрыт."
-}
-
 client_qr() {
-    local cname="${1:-}" mode="${2:-all}"
+    local cname="${1:-}"
     if [ -z "$cname" ]; then
         [ ! -s "$CLIENTS_META" ] && die "Нет клиентов."
         local names=()
@@ -2738,48 +2597,11 @@ client_qr() {
         fi
     fi
 
-    local ext_ip; ext_ip="$(get_public_ip)"
+    show_client_links "$cname" "Ссылки для клиента '${cname}'"
+}
 
-    case "$mode" in
-        direct)
-            _show_qr_direct "$cname" "1/1"
-            ;;
-        freeturn|freeturn_vpn|ft|vpn)
-            _show_qr_freeturn "$cname" "1/1"
-            ;;
-        relay)
-            _show_qr_relay "$cname" "1/1"
-            ;;
-        all|"")
-            local total=0
-            [ -f "${CLIENTS_DIR}/${cname}-direct.conf" ] && ((total++)) || true
-            if [ -f "${CLIENTS_DIR}/${cname}-freeturn-vpn.txt" ] || [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ]; then
-                ((total++)) || true
-            fi
-            [ -f "${CLIENTS_DIR}/${cname}-relay.conf" ] && ((total++)) || true
-
-            local idx=1
-            if [ -f "${CLIENTS_DIR}/${cname}-direct.conf" ]; then
-                _show_qr_direct "$cname" "${idx}/${total}"
-                ((idx++))
-                echo
-            fi
-            if [ -f "${CLIENTS_DIR}/${cname}-freeturn-vpn.txt" ] || [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ]; then
-                _show_qr_freeturn "$cname" "${idx}/${total}"
-                ((idx++))
-                echo
-            fi
-            if [ -f "${CLIENTS_DIR}/${cname}-relay.conf" ]; then
-                _show_qr_relay "$cname" "${idx}/${total}"
-                echo
-            fi
-            ;;
-        *)
-            die "Неизвестный формат QR: $mode (доступно: all, direct, freeturn, relay)"
-            ;;
-    esac
-
-    _show_download_card "$cname" "$ext_ip"
+client_web() {
+    client_qr "${1:-}"
 }
 
 client_remove() {
@@ -2939,12 +2761,14 @@ apply() {
     if [ ! -s "$CLIENTS_META" ] && [ "$INSTALL_AWG" = "1" ]; then
         client_add "client-1" 1
     fi
+    ensure_web_server || true
     install_cli_symlink
 }
 
 print_summary() {
     ui_drain_input
     local ext_ip; ext_ip="$(get_public_ip)"
+    local web_url="http://${ext_ip}:${FT_WEB_PORT:-8080}"
     echo
     if [ "$HAS_GUM" = 1 ]; then
         local lines=()
@@ -2964,20 +2788,20 @@ print_summary() {
             local first_cname; first_cname=$(head -n1 "$CLIENTS_META" | cut -d'|' -f1)
             if [ -n "$first_cname" ]; then
                 lines+=("")
-                lines+=("$(gum style --foreground "$MD_PRIMARY" --bold "Первый клиент ('${first_cname}'):")")
-                [ -f "${CLIENTS_DIR}/${first_cname}-direct.png" ]       && lines+=("  • [1/3] AmneziaWG Direct: ${CLIENTS_DIR}/${first_cname}-direct.png")
-                [ -f "${CLIENTS_DIR}/${first_cname}-freeturn-vpn.png" ] && lines+=("  • [2/3] FreeTurn App:     ${CLIENTS_DIR}/${first_cname}-freeturn-vpn.png")
-                [ -f "${CLIENTS_DIR}/${first_cname}-relay.png" ]        && lines+=("  • [3/3] AmneziaWG Relay:  ${CLIENTS_DIR}/${first_cname}-relay.png")
-                lines+=("  • Скачать на ПК (SCP):    scp root@${ext_ip}:${CLIENTS_DIR}/${first_cname}*.png .")
+                lines+=("$(gum style --foreground "$MD_PRIMARY" --bold "Ссылки для клиента '${first_cname}':")")
+                [ -f "${CLIENTS_DIR}/${first_cname}-direct.png" ]       && lines+=("  • AmneziaWG Direct:   ${web_url}/${first_cname}-direct.png")
+                [ -f "${CLIENTS_DIR}/${first_cname}-freeturn-vpn.png" ] && lines+=("  • FreeTurn App (VPN): ${web_url}/${first_cname}-freeturn-vpn.png")
+                [ -f "${CLIENTS_DIR}/${first_cname}-relay.png" ]        && lines+=("  • AmneziaWG Relay:    ${web_url}/${first_cname}-relay.png")
+                lines+=("  • Каталог файлов:     ${web_url}/")
             fi
         fi
 
         lines+=("")
         lines+=("$(gum style --foreground "$MD_PRIMARY" --bold "Управление клиентами:")")
-        lines+=("  freeturn client add [name]        - добавить клиента")
-        lines+=("  freeturn client list              - список клиентов")
-        lines+=("  freeturn client qr [name]         - показать все 3 QR-кода")
-        lines+=("  freeturn client web [name] [port] - скачать картинки через браузер")
+        lines+=("  freeturn client add [name]    - добавить клиента")
+        lines+=("  freeturn client list          - список клиентов")
+        lines+=("  freeturn client qr [name]     - показать ссылки на QR-коды")
+        lines+=("  freeturn client remove [name] - удалить клиента")
 
         local body; body=$(printf '%s\n' "${lines[@]}")
         gum style --border rounded --border-foreground "$MD_SUCCESS" --padding "1 2" "$body"
@@ -2985,32 +2809,24 @@ print_summary() {
         echo "========================================================"
         echo "  Установка успешно завершена!"
         echo "========================================================"
-        [ "$INSTALL_FREETURN" = "1" ] && echo "FreeTurn: ${ext_ip}:${LISTEN_PORT} (${OBF_PROFILE})"
-        [ "$INSTALL_AWG" = "1" ] && echo "AmneziaWG: порт ${BACKEND_PORT}"
+        [ "$INSTALL_FREETURN" = "1" ] && echo "FreeTurn:  ${ext_ip}:${LISTEN_PORT} (${OBF_PROFILE})"
+        [ "$INSTALL_AWG" = "1" ]      && echo "AmneziaWG: порт ${BACKEND_PORT}"
         if [ -s "$CLIENTS_META" ]; then
             local first_cname; first_cname=$(head -n1 "$CLIENTS_META" | cut -d'|' -f1)
             if [ -n "$first_cname" ]; then
-                echo "Первый клиент: ${first_cname}"
-                [ -f "${CLIENTS_DIR}/${first_cname}-direct.png" ]       && echo "  [1/3] Direct QR:   ${CLIENTS_DIR}/${first_cname}-direct.png"
-                [ -f "${CLIENTS_DIR}/${first_cname}-freeturn-vpn.png" ] && echo "  [2/3] FreeTurn QR: ${CLIENTS_DIR}/${first_cname}-freeturn-vpn.png"
-                [ -f "${CLIENTS_DIR}/${first_cname}-relay.png" ]        && echo "  [3/3] Relay QR:    ${CLIENTS_DIR}/${first_cname}-relay.png"
-                echo "  Скачать: scp root@${ext_ip}:${CLIENTS_DIR}/${first_cname}*.png ."
+                echo
+                echo "Ссылки для клиента '${first_cname}':"
+                [ -f "${CLIENTS_DIR}/${first_cname}-direct.png" ]       && echo "  • AmneziaWG Direct:   ${web_url}/${first_cname}-direct.png"
+                [ -f "${CLIENTS_DIR}/${first_cname}-freeturn-vpn.png" ] && echo "  • FreeTurn App (VPN): ${web_url}/${first_cname}-freeturn-vpn.png"
+                [ -f "${CLIENTS_DIR}/${first_cname}-relay.png" ]        && echo "  • AmneziaWG Relay:    ${web_url}/${first_cname}-relay.png"
+                echo "  • Каталог файлов:     ${web_url}/"
             fi
         fi
-        echo "Управление клиентами: freeturn client <add|list|qr|web>"
+        echo
+        echo "Управление клиентами: freeturn client <add|list|qr|remove>"
+        echo "========================================================"
     fi
     ui_drain_input
-
-    if [ "$NONINTERACTIVE" != "1" ] && [ -s "$CLIENTS_META" ]; then
-        local first_cname; first_cname=$(head -n1 "$CLIENTS_META" | cut -d'|' -f1)
-        if [ -n "$first_cname" ]; then
-            echo
-            if ui_yesno "Вывести QR-коды клиента '${first_cname}' (все 3 формата) прямо сейчас?" "Y"; then
-                echo
-                client_qr "$first_cname" "all"
-            fi
-        fi
-    fi
 }
 
 flow_install()     { wizard; validate_config; review_config; apply; print_summary; }
@@ -3032,7 +2848,7 @@ flow_uninstall() {
 menu_existing() {
     local choice
     ui_menu choice "Сервер настроен. Действие:" "clients" \
-        clients     "Управление клиентами (добавить, список, QR, скачивание)" \
+        clients     "Управление клиентами (добавить, список, QR/файлы)" \
         reconfigure "Изменить настройки (переконфигурировать)" \
         update      "Обновить версию" \
         logs        "Просмотреть последние логи" \
@@ -3041,8 +2857,8 @@ menu_existing() {
     case "$choice" in
         clients)
             while :; do
-                local c; ui_menu c "Клиенты:" "add" add "Добавить" list "Список" qr "QR-коды (все 3)" web "Скачать через браузер" remove "Удалить" back "Назад"
-                case "$c" in add) client_add "" 0 ;; list) client_list ;; qr) client_qr "" "all" ;; web) client_web "" 8080 ;; remove) client_remove "" ;; back) break ;; esac
+                local c; ui_menu c "Клиенты:" "add" add "Добавить" list "Список" qr "Ссылки на QR/файлы" remove "Удалить" back "Назад"
+                case "$c" in add) client_add "" 0 ;; list) client_list ;; qr) client_qr "" ;; remove) client_remove "" ;; back) break ;; esac
             done; menu_existing ;;
         reconfigure) flow_reconfigure ;;
         update)      flow_update ;;
@@ -3068,10 +2884,9 @@ Free Turn Proxy & AmneziaWG - установщик и контроллер се�
 
 Использование:
   freeturn                                интерактивный мастер (gum TUI)
-  freeturn client add [name]              добавить клиента и показать QR
+  freeturn client add [name]              добавить клиента и показать ссылки
   freeturn client list                    список клиентов
-  freeturn client qr [name] [mode]        показать QR-коды (все 3 или конкретный: direct/freeturn/relay)
-  freeturn client web [name] [port]       раздать картинки QR для скачивания в браузере
+  freeturn client qr [name]               ссылки на QR-коды и конфиги
   freeturn client remove [name]           удалить клиента
   freeturn -y [опции]                     неинтерактивная установка (скрипты/CI)
 
@@ -3087,6 +2902,7 @@ Free Turn Proxy & AmneziaWG - установщик и контроллер се�
   --mode   udp|tcp               режим туннеля (default: udp)
   --backend-port N               порт AmneziaWG (default: 51820)
   --listen-port N                внешний порт FreeTurn (default: 56000)
+  --web-port N                   порт веб-раздачи QR и файлов (default: 8080)
   --awg-direct | --no-awg-direct прямой доступ к порту AWG (default: да)
   --obf rtpopus3|rtpopus2|rtpopus|none  обфускация (default: rtpopus3)
   --obf-key HEX64                ключ обфускации (нет -> сгенерируется)
@@ -3118,6 +2934,7 @@ parse_cli_args() {
             --mode)            OVERRIDES+=("PROXY_MODE=${2:-udp}"); shift ;;
             --backend-port)    OVERRIDES+=("BACKEND_PORT=${2:-51820}"); shift ;;
             --listen-port)     OVERRIDES+=("LISTEN_PORT=${2:-56000}"); shift ;;
+            --web-port)        OVERRIDES+=("FT_WEB_PORT=${2:-8080}"); shift ;;
             --awg-direct)      OVERRIDES+=("AWG_DIRECT_PORT=1") ;;
             --no-awg-direct)   OVERRIDES+=("AWG_DIRECT_PORT=0") ;;
             --obf)             OVERRIDES+=("OBF_PROFILE=${2:-rtpopus3}"); shift ;;
@@ -3181,12 +2998,11 @@ main() {
         [ -n "$sub" ] && shift || true
         load_config
         case "$sub" in
-            add)    client_add "${1:-}" 0 ;;
-            list)   client_list ;;
-            qr)     client_qr "${1:-}" "${2:-all}" ;;
-            web)    client_web "${1:-}" "${2:-8080}" ;;
-            remove) client_remove "${1:-}" ;;
-            *)      die "Использование: freeturn client <add|list|qr|web|remove>" ;;
+            add)       client_add "${1:-}" 0 ;;
+            list)      client_list ;;
+            qr|web)    client_qr "${1:-}" ;;
+            remove)    client_remove "${1:-}" ;;
+            *)         die "Использование: freeturn client <add|list|qr|remove>" ;;
         esac
         return 0
     fi

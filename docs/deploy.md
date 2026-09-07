@@ -17,20 +17,17 @@ curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master
 **Управление клиентами и сервером:**
 После установки скрипт доступен глобально через команду `freeturn`:
 ```bash
-# Добавить нового клиента (сгенерирует ключи AWG, Client ID и выведет QR-код)
+# Добавить нового клиента (сгенерирует ключи AWG, Client ID и выведет ссылки на QR и файлы)
 freeturn client add phone
 
 # Показать список существующих клиентов
 freeturn client list
 
-# Показать QR-коды клиента (выводит все 3 формата: Direct, FreeTurn App, Relay)
+# Показать ссылки на QR-коды и файлы конфигурации
 freeturn client qr phone
 
-# Временный веб-сервер для скачивания всех 3 картинок в браузере (ПК / телефон)
-freeturn client web phone
-
-# Скачивание картинок напрямую на ПК (выполняется в PowerShell / терминале ПК):
-# scp root@<vps_ip>:/opt/free-turn-proxy/clients/phone*.png .
+# Скачивание файлов напрямую на ПК (выполняется в PowerShell / терминале ПК):
+# scp root@<vps_ip>:/opt/free-turn-proxy/clients/phone* .
 
 # Удалить клиента
 freeturn client remove phone
