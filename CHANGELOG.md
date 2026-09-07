@@ -1,5 +1,21 @@
 # Changelog
 
+## [3.5.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.4.0...v3.5.0) (2026-09-07)
+
+
+### Features
+
+* **installer:** вывод всех 3 форматов QR-кодов и поддержка скачивания картинок на ПК ([092ea59](https://github.com/samosvalishe/free-turn-proxy/commit/092ea5916a724251a3cdd1b118d605320a2de157))
+* **installer:** генерация QR в PNG, M3 TUI для клиентов и фикс утечки escape-последовательностей ([b894608](https://github.com/samosvalishe/free-turn-proxy/commit/b8946081101241620d2ddf8a9e940ae1243c20b8))
+* **installer:** глобальный CLI freeturn, авторизация по Client ID по умолчанию и компактный QR ([8d551c6](https://github.com/samosvalishe/free-turn-proxy/commit/8d551c61aedb9b4125834c2b24f4c486a1f495b1))
+* **installer:** раздача QR-кодов и конфигов по веб-ссылкам без вывода в терминал ([065385e](https://github.com/samosvalishe/free-turn-proxy/commit/065385e656085a06bf8079958bf1b563901db64f))
+
+
+### Bug Fixes
+
+* **installer:** передача obf_profile, obf_key и proxy_mode в systemd и docker args ([5dc5095](https://github.com/samosvalishe/free-turn-proxy/commit/5dc5095e2a6c23e73e63398639bfc91b44d70920))
+* **ui:** убрать утечку OSC 11/CPR escape-последовательностей при выводе плашек ([5568670](https://github.com/samosvalishe/free-turn-proxy/commit/5568670f515e34b23fc67b7ae17b63c80b510303))
+
 ## [3.4.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.3.2...v3.4.0) (2026-09-07)
 
 
