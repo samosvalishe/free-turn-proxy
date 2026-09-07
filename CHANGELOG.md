@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.3.1](https://github.com/samosvalishe/free-turn-proxy/compare/v3.3.0...v3.3.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* installer ([408b68e](https://github.com/samosvalishe/free-turn-proxy/commit/408b68e960a668898ad39056f9f0e3b87a187b37))
+* installer ([032d1fa](https://github.com/samosvalishe/free-turn-proxy/commit/032d1fac562498b1d4c54f06978d38807b7d435b))
+* release awg img ([c447fc4](https://github.com/samosvalishe/free-turn-proxy/commit/c447fc405b0fb918e5ba2576f60bd60f726dd442))
+
 ## [3.3.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.2.0...v3.3.0) (2026-09-06)
 
 
