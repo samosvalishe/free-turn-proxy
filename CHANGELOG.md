@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.3.2](https://github.com/samosvalishe/free-turn-proxy/compare/v3.3.1...v3.3.2) (2026-09-07)
+
+
+### Bug Fixes
+
+* небольшие улучшения ([c435605](https://github.com/samosvalishe/free-turn-proxy/commit/c435605fe20ef6b5cbb9b6d6149f374d3aa9a3df))
+* собственный iface для awg ([82907f3](https://github.com/samosvalishe/free-turn-proxy/commit/82907f3cc60cdb5a59aafe2633ec99c519f916bb))
+
 ## [3.3.1](https://github.com/samosvalishe/free-turn-proxy/compare/v3.3.0...v3.3.1) (2026-09-07)
 
 
