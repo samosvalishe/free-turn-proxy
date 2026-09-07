@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.4.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.3.2...v3.4.0) (2026-09-07)
+
+
+### Features
+
+* профиль freeturn vpn со вшитым wg и фикс ui_spin ([9da2c8e](https://github.com/samosvalishe/free-turn-proxy/commit/9da2c8ebd27f26e52cd79bceb14dbc5eac732575))
+
 ## [3.3.2](https://github.com/samosvalishe/free-turn-proxy/compare/v3.3.1...v3.3.2) (2026-09-07)
 
 
