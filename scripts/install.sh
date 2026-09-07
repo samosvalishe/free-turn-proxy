@@ -377,7 +377,7 @@ render_qr_text() {
         echo
         if [ "$HAS_GUM" = 1 ]; then gum style --foreground "$MD_PRIMARY" --bold "$title"
         else echo -e "${C_CYAN}${title}${C_NC}"; fi
-        qrencode -t ansiutf8 -m 1 <<< "$text"
+        printf '%s' "$text" | qrencode -t ansiutf8 -m 1
     else
         log_warn "qrencode не установлен - QR пропущен."
     fi
@@ -1399,6 +1399,10 @@ _write_args_file() {
         fi
         local prof="${ARG_OBF_PROFILE:-$OBF_PROFILE}"
         local key="${ARG_OBF_KEY:-$OBF_KEY}"
+        if [ "$prof" != "none" ] && [ -z "$key" ]; then
+            key="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 32 2>/dev/null || true)"
+            OBF_KEY="$key"
+        fi
         if [ "$prof" != "none" ] && [ -n "$key" ]; then
             echo "-obf-profile"; echo "$prof"
             echo "-obf-key";     echo "$key"
@@ -1487,6 +1491,16 @@ apply_docker() {
     init_clients_file
     mkdir -p "$APP_DIR"
 
+    local mode="${ARG_MODE:-$PROXY_MODE}"
+    local prof="${ARG_OBF_PROFILE:-$OBF_PROFILE}"
+    local key="${ARG_OBF_KEY:-$OBF_KEY}"
+    local listen_val="${ARG_LISTEN:-0.0.0.0:${LISTEN_PORT}}"
+    local connect_val="${ARG_CONNECT:-$(connect_addr)}"
+    if [ "$prof" != "none" ] && [ -z "$key" ]; then
+        key="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 32 2>/dev/null || true)"
+        OBF_KEY="$key"
+    fi
+
     {
         echo "services:"
         if [ "$INSTALL_FREETURN" = "1" ]; then
@@ -1496,11 +1510,12 @@ apply_docker() {
             echo "    network_mode: \"host\""
             echo "    restart: unless-stopped"
             echo "    environment:"
-            echo "      - CONNECT_ADDR=$(connect_addr)"
-            echo "      - LISTEN_ADDR=0.0.0.0:${LISTEN_PORT}"
-            echo "      - MODE=${PROXY_MODE}"
-            echo "      - OBF_PROFILE=${OBF_PROFILE}"
-            [ "$OBF_PROFILE" != "none" ] && echo "      - OBF_KEY=${OBF_KEY}"
+            echo "      - CONNECT_ADDR=${connect_val}"
+            echo "      - LISTEN_ADDR=${listen_val}"
+            echo "      - MODE=${mode}"
+            echo "      - OBF_PROFILE=${prof}"
+            [ "$prof" != "none" ] && [ -n "$key" ] && echo "      - OBF_KEY=${key}"
+            [ -n "${ARG_OBF_TIMING:-}" ] && echo "      - OBF_TIMING=${ARG_OBF_TIMING}"
             if [ -n "$CLIENTS_FILE_CONF" ]; then
                 local cdir; cdir="$(dirname "$CLIENTS_FILE_CONF")"
                 echo "      - CLIENTS_FILE=${CLIENTS_FILE_CONF}"
@@ -1560,13 +1575,17 @@ healthcheck_systemd() {
 
 apply_systemd() {
     state_set runtime systemd
-    download_binary
-    init_clients_file
-    _write_args_file
-    _write_env_file
-    _install_systemd_unit
-    systemctl restart "$UNIT_NAME" || fail start_failed "systemctl restart failed"
-    healthcheck_systemd
+    if [ "$INSTALL_FREETURN" = "1" ]; then
+        download_binary
+        init_clients_file
+        _write_args_file
+        _write_env_file
+        _install_systemd_unit
+        systemctl restart "$UNIT_NAME" || fail start_failed "systemctl restart failed"
+        healthcheck_systemd
+    else
+        systemctl disable --now "$UNIT_NAME" 2>/dev/null || true
+    fi
 }
 
 rt_start() {
@@ -1586,7 +1605,15 @@ rt_start() {
             local args=(-listen "${ARG_LISTEN:-0.0.0.0:${LISTEN_PORT}}" -connect "${ARG_CONNECT:-$(connect_addr)}")
             [ "${ARG_MODE:-$PROXY_MODE}" = "tcp" ] && args+=(-mode tcp ${ARG_KCP[@]+"${ARG_KCP[@]}"}) || args+=(-mode udp)
             local prof="${ARG_OBF_PROFILE:-$OBF_PROFILE}" key="${ARG_OBF_KEY:-$OBF_KEY}"
+            if [ "$prof" != "none" ] && [ -z "$key" ]; then
+                key="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | xxd -p -c 32 2>/dev/null || true)"
+                OBF_KEY="$key"
+            fi
             [ "$prof" != "none" ] && [ -n "$key" ] && args+=(-obf-profile "$prof" -obf-key "$key")
+            [ -n "${ARG_OBF_TIMING:-}" ] && args+=(-obf-timing "$ARG_OBF_TIMING")
+            if [ -n "${ARG_CLIENT_ID:-}" ] || [ -n "${CLIENTS_FILE_CONF:-}" ]; then
+                args+=(-clients-file "${CLIENTS_FILE_CONF:-$CLIENTSFILE}")
+            fi
             ( cd "$PREFIX" && nohup "$bin" "${args[@]}" >"$LOGFILE" 2>&1 & echo $! > "$PIDFILE" )
             sleep 1; kill -0 "$(<"$PIDFILE")" 2>/dev/null || fail start_failed "nohup start failed" ;;
         *)  fail start_failed "unknown runtime" ;;
@@ -1596,33 +1623,36 @@ rt_start() {
 }
 
 firewall_open_port() {
-    local port=${1:-}
+    local port=${1:-} proto=${2:-udp}
     [[ "$port" =~ ^[0-9]+$ ]] || return 0
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        ufw allow "${port}/udp" >/dev/null 2>&1 || true
+        ufw allow "${port}/${proto}" >/dev/null 2>&1 || true
     elif command -v iptables >/dev/null 2>&1; then
-        if ! iptables -C INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null; then
-            iptables -I INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null || true
+        if ! iptables -C INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null; then
+            iptables -I INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
             command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1 || true
         fi
     fi
 }
 
 firewall_close_port() {
-    local port=${1:-}
+    local port=${1:-} proto=${2:-udp}
     [[ "$port" =~ ^[0-9]+$ ]] || return 0
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        ufw delete allow "${port}/udp" >/dev/null 2>&1 || true
+        ufw delete allow "${port}/${proto}" >/dev/null 2>&1 || true
     elif command -v iptables >/dev/null 2>&1; then
-        iptables -D INPUT -p udp --dport "$port" -j ACCEPT 2>/dev/null || true
+        iptables -D INPUT -p "$proto" --dport "$port" -j ACCEPT 2>/dev/null || true
         command -v netfilter-persistent >/dev/null 2>&1 && netfilter-persistent save >/dev/null 2>&1 || true
     fi
 }
 
 firewall_open() {
-    [ "$INSTALL_FREETURN" = "1" ] && firewall_open_port "$LISTEN_PORT"
+    if [ "$INSTALL_FREETURN" = "1" ]; then
+        firewall_open_port "$LISTEN_PORT" "udp"
+        [ "$PROXY_MODE" = "tcp" ] && firewall_open_port "$LISTEN_PORT" "tcp"
+    fi
     if [ "$INSTALL_AWG" = "1" ] && [ "$AWG_DIRECT_PORT" = "1" ] && [ -n "$BACKEND_PORT" ]; then
-        firewall_open_port "$BACKEND_PORT"
+        firewall_open_port "$BACKEND_PORT" "udp"
     fi
 }
 
@@ -1690,7 +1720,7 @@ clients_json() {
 # ─────────────────────────────────────────────────────────────────────────────
 # JSON RPC v2 парсер и команды
 # ─────────────────────────────────────────────────────────────────────────────
-ARG_LISTEN="" ARG_CONNECT="" ARG_MODE="udp" ARG_KCP=() ARG_OBF_PROFILE="none"
+ARG_LISTEN="" ARG_CONNECT="" ARG_MODE="" ARG_KCP=() ARG_OBF_PROFILE=""
 ARG_OBF_KEY="" ARG_OBF_TIMING="" ARG_TAIL=80 ARG_WG_PORT="" ARG_WG_ENDPOINT=""
 ARG_NAME_B64="" ARG_PUBKEY="" ARG_CLIENT_ID="" ARG_SHA256="" ARG_DNS="1.1.1.1"
 ARG_WITH_WG_PKG=0 ARG_DRY_RUN=0 ARG_TARGET="all"
@@ -1840,6 +1870,7 @@ cmd_start() {
     stage start
     [ -n "$ARG_LISTEN" ]  || fail bad_arg "--listen required"
     [ -n "$ARG_CONNECT" ] || fail bad_arg "--connect required"
+    load_config
     with_lock
 
     if [ -n "$ARG_CLIENT_ID" ]; then
@@ -1849,6 +1880,7 @@ cmd_start() {
     fi
 
     local port proto=udp owner opid; port=${ARG_LISTEN##*:}
+    [ "${ARG_MODE:-$PROXY_MODE}" = "tcp" ] && proto=tcp
     if [[ "$port" =~ ^[0-9]+$ ]]; then
         owner=$(port_owner "$proto" "$port")
         case "$owner" in
@@ -1856,7 +1888,7 @@ cmd_start() {
             *)  opid=$(port_pid "$proto" "$port")
                 [ -n "$opid" ] && ! pid_is_ours "$opid" && fail listen_port_busy "$proto port $port busy" ;;
         esac
-        firewall_open_port "$port"
+        firewall_open_port "$port" "$proto"
     fi
 
     rt_stop
@@ -2045,7 +2077,8 @@ do_uninstall() {
                 systemctl disable --now "$SERVICE" >/dev/null 2>&1 || true
                 rm -f "$UNIT_FILE"; systemctl daemon-reload || true
             fi
-            firewall_close_port "$LISTEN_PORT"
+            firewall_close_port "$LISTEN_PORT" "udp"
+            firewall_close_port "$LISTEN_PORT" "tcp"
             log_success "FreeTurn удалён. AmneziaWG остался активен."
             ;;
         awg)
@@ -2073,8 +2106,9 @@ do_uninstall() {
                 rm -f "$UNIT_FILE" "$LAUNCHER"
                 systemctl daemon-reload || true
             fi
-            firewall_close_port "$LISTEN_PORT"
-            [ -n "$BACKEND_PORT" ] && firewall_close_port "$BACKEND_PORT"
+            firewall_close_port "$LISTEN_PORT" "udp"
+            firewall_close_port "$LISTEN_PORT" "tcp"
+            [ -n "$BACKEND_PORT" ] && firewall_close_port "$BACKEND_PORT" "udp"
             rm -f /etc/sysctl.d/99-free-turn-proxy.conf
             if [ "$purge" = "1" ] || [ "$PURGE" = "1" ]; then
                 rm -rf "$APP_DIR"
@@ -2369,6 +2403,8 @@ wizard() {
         ui_yesno "Открыть порт AmneziaWG (${BACKEND_PORT}/udp) для прямого подключения?" "Y" \
             && AWG_DIRECT_PORT=1 || AWG_DIRECT_PORT=0
         ui_input WG_ENDPOINT "Локальный Endpoint клиента (-listen)" "${WG_ENDPOINT:-127.0.0.1:9000}"
+    elif [ "$INSTALL_FREETURN" = "1" ]; then
+        ask_port BACKEND_PORT "Порт бэкенда (куда пересылать трафик)" "${BACKEND_PORT:-51820}"
     fi
 
     ui_yesno "Открыть необходимые порты в файрволе сервера?" "Y" \
@@ -2389,6 +2425,7 @@ review_config() {
 | Компоненты          | $comp_name |
 | Метод               | $INSTALL_METHOD |
 $([ "$INSTALL_FREETURN" = "1" ] && echo "| Порт FreeTurn       | 0.0.0.0:$LISTEN_PORT |")
+$([ "$INSTALL_FREETURN" = "1" ] && echo "| Режим релея         | $PROXY_MODE |")
 $([ "$INSTALL_FREETURN" = "1" ] && echo "| Обфускация          | $OBF_PROFILE |")
 $([ "$INSTALL_AWG" = "1" ] && echo "| Порт AmneziaWG      | $BACKEND_PORT |")
 $([ "$INSTALL_AWG" = "1" ] && echo "| Прямой AWG          | $([ "$AWG_DIRECT_PORT" = "1" ] && echo "да" || echo "нет") |")
@@ -2404,7 +2441,11 @@ apply() {
     save_config
     [ "$INSTALL_AWG" = "1" ] && awg_bootstrap
     [ "$INSTALL_WG" = "1" ] && wireguard_bootstrap
-    [ "$INSTALL_METHOD" = "docker" ] && apply_docker || apply_systemd
+    if [ "$INSTALL_METHOD" = "docker" ]; then
+        apply_docker
+    else
+        apply_systemd
+    fi
     [ "$OPEN_FIREWALL" = 1 ] && firewall_open
     if [ ! -s "$CLIENTS_META" ] && [ "$INSTALL_AWG" = "1" ]; then
         client_add "client-1" 1
