@@ -19,7 +19,7 @@ curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master
 > 
 > **Добавление новых клиентов:** Выполните на сервере:
 > ```bash
-> sudo bash install.sh client add myphone
+> freeturn client add myphone
 > ```
 
 ---

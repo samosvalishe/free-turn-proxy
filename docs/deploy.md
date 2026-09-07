@@ -14,19 +14,23 @@ curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master
 ```
 > Скрипт идемпотентен: при повторном запуске он предлагает интерактивное меню: управление клиентами (добавить, список, QR-коды), обновление версии, переконфигурация или удаление.
 
-**Управление клиентами через скрипт:**
+**Управление клиентами и сервером:**
+После установки скрипт доступен глобально через команду `freeturn`:
 ```bash
 # Добавить нового клиента (сгенерирует ключи AWG, Client ID и выведет QR-код)
-sudo bash install.sh client add phone
+freeturn client add phone
 
 # Показать список существующих клиентов
-sudo bash install.sh client list
+freeturn client list
 
 # Показать QR-код конкретного клиента (direct / relay / freeturn)
-sudo bash install.sh client qr phone direct
+freeturn client qr phone direct
 
 # Удалить клиента
-sudo bash install.sh client remove phone
+freeturn client remove phone
+
+# Открыть интерактивное меню управления сервером
+freeturn
 ```
 
 **Неинтерактивный режим** (для автоматизации / CI):
@@ -36,12 +40,12 @@ curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master
   sudo bash -s -- -y --backend awg --backend-port 51820 --obf rtpopus3
 
 # Обновление до конкретной версии
-sudo bash install.sh -y --update --version v1.2.3
+freeturn -y --update --version v1.2.3
 
 # Полное удаление
-sudo bash install.sh -y --uninstall --purge
+freeturn -y --uninstall --purge
 ```
-*Все доступные флаги:* `sudo bash install.sh --help`
+*Все доступные флаги:* `freeturn --help`
 
 ---
 

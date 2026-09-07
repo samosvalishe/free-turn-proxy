@@ -1,0 +1,4 @@
+# Ensure shell scripts and configs always have LF line endings
+*.sh text eol=lf
+*.bats text eol=lf
+*.conf text eol=lf

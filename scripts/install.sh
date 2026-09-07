@@ -80,7 +80,7 @@ LISTEN_PORT="56000"
 AWG_DIRECT_PORT=1              # 1 = открыть BACKEND_PORT/udp в файрволе
 OBF_PROFILE="rtpopus3"         # rtpopus3 | rtpopus2 | rtpopus | none
 OBF_KEY=""
-CLIENTS_FILE_CONF=""
+CLIENTS_FILE_CONF="${CLIENTS_DIR}/clients.json"
 WG_ENDPOINT="127.0.0.1:9000"
 
 # AmneziaWG 3.1 параметры
@@ -401,7 +401,10 @@ generate_qr_png_text() {
 render_qr_file() {
     local file="$1" title="$2" png_file="${3:-${file%.*}.png}"
     [ "$_IS_RPC" = 1 ] && return 0
-    [ -f "$file" ] || return 0
+    if [ ! -f "$file" ]; then
+        log_warn "Файл конфигурации '$file' не найден."
+        return 1
+    fi
     [ -n "$png_file" ] && [ ! -f "$png_file" ] && generate_qr_png_file "$file" "$png_file"
 
     command -v qrencode >/dev/null 2>&1 || pkg_install qrencode || true
@@ -434,24 +437,27 @@ render_qr_file() {
         esac
     fi
 
-    # 2. Проверка ширины терминала для предотвращения искажения
+    # 2. Очистка конфига от комментариев и пустых строк для максимальной компактности.
+    # Флаг -l L (Low ECC) сжимает размер QR до ~51 символов ширины,
+    # что гарантированно помещается в стандартные 80 колонок PowerShell/PuTTY/CMD без переносов строк.
+    local clean_conf
+    clean_conf=$(grep -v '^[[:space:]]*#' "$file" 2>/dev/null | grep -v '^[[:space:]]*$' || cat "$file")
+
     local cols=80
     command -v tput >/dev/null 2>&1 && cols=$(tput cols 2>/dev/null || echo 80)
-    if [ "$cols" -lt 92 ]; then
+    if [ "$cols" -lt 55 ]; then
         if [ "$HAS_GUM" = 1 ]; then
             gum style --border rounded --border-foreground "$MD_TERTIARY" --padding "0 1" \
-                "$(gum style --foreground "$MD_TERTIARY" --bold "⚠ Терминал узкий (${cols} колонок, нужно ≥95).")" \
-                "Текстовый код может исказиться из-за переноса строк." \
+                "$(gum style --foreground "$MD_TERTIARY" --bold "⚠ Окно терминала очень узкое (${cols} колонок, нужно ≥55).")" \
                 "Рекомендуется использовать сохранённую картинку:" \
                 "$(gum style --foreground "$MD_PRIMARY" --bold "${png_file}")"
         else
-            log_warn "Ширина терминала (${cols}) меньше размера QR (~95). Текстовый QR может исказиться."
-            [ -n "$png_file" ] && log_info "Используйте PNG файл: $png_file"
+            log_warn "Окно терминала (${cols}) очень узкое. Используйте PNG файл: $png_file"
         fi
         echo
     fi
 
-    qrencode -t ansiutf8 -m 1 < "$file"
+    printf '%s\n' "$clean_conf" | qrencode -t ansiutf8 -m 1 -l L
     echo
     [ -n "$png_file" ] && [ -f "$png_file" ] && log_info "Картинка QR-кода (PNG): $png_file"
 }
@@ -492,24 +498,23 @@ render_qr_text() {
         esac
     fi
 
-    # 2. Проверка ширины терминала
+    # 2. Проверка ширины терминала (для длинных URI со вшитыми конфигами)
     local cols=80
     command -v tput >/dev/null 2>&1 && cols=$(tput cols 2>/dev/null || echo 80)
-    if [ "$cols" -lt 92 ]; then
+    if [ "${#text}" -gt 500 ] && [ "$cols" -lt 85 ]; then
         if [ "$HAS_GUM" = 1 ]; then
             gum style --border rounded --border-foreground "$MD_TERTIARY" --padding "0 1" \
-                "$(gum style --foreground "$MD_TERTIARY" --bold "⚠ Терминал узкий (${cols} колонок, нужно ≥95).")" \
-                "Текстовый код может исказиться из-за переноса строк." \
-                "Рекомендуется использовать сохранённую картинку:" \
+                "$(gum style --foreground "$MD_TERTIARY" --bold "⚠ Длинная ссылка со вшитым VPN (${cols} колонок, нужно ≥85).")" \
+                "Текстовый код может перенестись по строкам." \
+                "Используйте сохранённую картинку:" \
                 "$(gum style --foreground "$MD_PRIMARY" --bold "${png_file:-$CLIENTS_DIR}")"
         else
-            log_warn "Ширина терминала (${cols}) меньше размера QR (~95). Текстовый QR может исказиться."
-            [ -n "$png_file" ] && log_info "Используйте PNG файл: $png_file"
+            log_warn "Ширина терминала (${cols}) меньше размера QR. Используйте PNG файл: $png_file"
         fi
         echo
     fi
 
-    printf '%s' "$text" | qrencode -t ansiutf8 -m 1
+    printf '%s' "$text" | qrencode -t ansiutf8 -m 1 -l L
     echo
     [ -n "$png_file" ] && [ -f "$png_file" ] && log_info "Картинка QR-кода (PNG): $png_file"
 }
@@ -2243,6 +2248,7 @@ do_uninstall() {
             rm -f /etc/sysctl.d/99-free-turn-proxy.conf
             if [ "$purge" = "1" ] || [ "$PURGE" = "1" ]; then
                 rm -rf "$APP_DIR"
+                rm -f /usr/local/bin/freeturn /usr/local/bin/free-turn-proxy 2>/dev/null || true
                 log_success "Каталог $APP_DIR полностью удалён."
             fi
             log_success "Все компоненты удалены."
@@ -2429,7 +2435,7 @@ EOF
         card+=("$(gum style --foreground "$MD_SECONDARY" --bold "Скачать файлы на телефон/ПК:")")
         card+=("  scp root@${ext_ip}:${CLIENTS_DIR}/${cname}* .")
         card+=("")
-        card+=("$(gum style --foreground "$MD_SECONDARY" --italic "Показать QR в консоли: sudo bash install.sh client qr ${cname}")")
+        card+=("$(gum style --foreground "$MD_SECONDARY" --italic "Показать QR в консоли: freeturn client qr ${cname}")")
 
         local card_body; card_body=$(printf '%s\n' "${card[@]}")
         gum style --border rounded --border-foreground "$MD_PRIMARY" --padding "1 2" "$card_body"
@@ -2440,7 +2446,7 @@ EOF
         [ -f "$direct_conf" ] && echo "  AmneziaWG Direct: $direct_conf (QR: $direct_png)"
         [ -n "$ft_vpn_uri" ]  && echo "  FreeTurn VPN: $ft_vpn_uri (QR: $ft_vpn_png)"
         echo "  Скачать: scp root@${ext_ip}:${CLIENTS_DIR}/${cname}* ."
-        echo "  Показать QR в консоли: sudo bash install.sh client qr ${cname}"
+        echo "  Показать QR в консоли: freeturn client qr ${cname}"
         echo "========================================================"
     fi
 }
@@ -2459,6 +2465,32 @@ client_list() {
     fi
 }
 
+client_resolve_name() {
+    local input="${1:-}"
+    [ -z "$input" ] && return 1
+    [ ! -s "$CLIENTS_META" ] && return 1
+    # 1. Точное совпадение
+    if grep -q "^${input}|" "$CLIENTS_META" 2>/dev/null; then
+        echo "$input"; return 0
+    fi
+    # 2. Совпадение без дефисов и подчеркиваний (например client1 -> client-1)
+    local clean_in; clean_in=$(printf '%s' "$input" | tr -d '-_')
+    local name
+    while IFS='|' read -r name _ _ _; do
+        local clean_name; clean_name=$(printf '%s' "$name" | tr -d '-_')
+        if [ "${clean_in,,}" = "${clean_name,,}" ]; then
+            echo "$name"; return 0
+        fi
+    done < "$CLIENTS_META"
+    # 3. Подстрока без учета регистра
+    while IFS='|' read -r name _ _ _; do
+        if [[ "${name,,}" == *"${input,,}"* ]]; then
+            echo "$name"; return 0
+        fi
+    done < "$CLIENTS_META"
+    return 1
+}
+
 client_qr() {
     local cname="${1:-}" mode="${2:-}"
     if [ -z "$cname" ]; then
@@ -2466,6 +2498,16 @@ client_qr() {
         local names=()
         while IFS='|' read -r n _ _ _; do names+=("$n"); done < "$CLIENTS_META"
         [ "$HAS_GUM" = 1 ] && cname=$(gum choose --header "Клиент:" "${names[@]}" </dev/tty) || ui_input cname "Имя" "${names[0]}"
+    else
+        local resolved; resolved=$(client_resolve_name "$cname" || true)
+        if [ -n "$resolved" ]; then
+            cname="$resolved"
+        else
+            log_error "Клиент '$cname' не найден."
+            echo
+            client_list
+            return 1
+        fi
     fi
 
     if [ -z "$mode" ]; then
@@ -2515,6 +2557,9 @@ client_remove() {
         local names=()
         while IFS='|' read -r n _ _ _; do names+=("$n"); done < "$CLIENTS_META"
         [ "$HAS_GUM" = 1 ] && cname=$(gum choose --header "Удалить клиента:" "${names[@]}" </dev/tty) || ui_input cname "Имя" "${names[0]}"
+    else
+        local resolved; resolved=$(client_resolve_name "$cname" || true)
+        [ -n "$resolved" ] && cname="$resolved"
     fi
 
     local cid=""; [ -f "$CLIENTS_META" ] && cid=$(grep "^${cname}|" "$CLIENTS_META" | awk -F'|' '{print $3}' || true)
@@ -2578,7 +2623,7 @@ wizard() {
         if [ "$OBF_PROFILE" != "none" ]; then
             [ -z "$OBF_KEY" ] && OBF_KEY="$(openssl rand -hex 32)"
         else OBF_KEY=""; fi
-        ui_yesno "Включить авторизацию по Client ID (allowlist)?" "N" \
+        ui_yesno "Включить авторизацию по Client ID (allowlist)?" "Y" \
             && CLIENTS_FILE_CONF="${CLIENTS_DIR}/clients.json" || CLIENTS_FILE_CONF=""
     fi
 
@@ -2622,6 +2667,33 @@ review_config() {
     ui_yesno "Применить конфигурацию?" "Y" || ui_abort
 }
 
+install_cli_symlink() {
+    mkdir -p "$PREFIX" 2>/dev/null || true
+    mkdir -p /usr/local/bin 2>/dev/null || true
+
+    local script_target="$PREFIX/install.sh"
+    local cur_script="${BASH_SOURCE[0]:-$0}"
+
+    if [ -f "$cur_script" ]; then
+        if [ "$(readlink -f "$cur_script" 2>/dev/null || true)" != "$(readlink -f "$script_target" 2>/dev/null || true)" ]; then
+            cp -f "$cur_script" "$script_target" 2>/dev/null || true
+        fi
+    elif [ ! -f "$script_target" ]; then
+        local repo_raw="https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master/scripts/install.sh"
+        if command -v curl >/dev/null 2>&1; then
+            curl -sSL "$repo_raw" -o "$script_target" 2>/dev/null || true
+        elif command -v wget >/dev/null 2>&1; then
+            wget -qO "$script_target" "$repo_raw" 2>/dev/null || true
+        fi
+    fi
+
+    if [ -f "$script_target" ]; then
+        chmod 0755 "$script_target" 2>/dev/null || true
+        ln -sf "$script_target" /usr/local/bin/freeturn 2>/dev/null || true
+        ln -sf "$script_target" /usr/local/bin/free-turn-proxy 2>/dev/null || true
+    fi
+}
+
 apply() {
     save_config
     [ "$INSTALL_AWG" = "1" ] && awg_bootstrap
@@ -2635,6 +2707,7 @@ apply() {
     if [ ! -s "$CLIENTS_META" ] && [ "$INSTALL_AWG" = "1" ]; then
         client_add "client-1" 1
     fi
+    install_cli_symlink
 }
 
 print_summary() {
@@ -2669,9 +2742,9 @@ print_summary() {
 
         lines+=("")
         lines+=("$(gum style --foreground "$MD_PRIMARY" --bold "Управление клиентами:")")
-        lines+=("  sudo bash install.sh client add [name]  - добавить клиента")
-        lines+=("  sudo bash install.sh client list        - список клиентов")
-        lines+=("  sudo bash install.sh client qr [name]   - показать QR-код")
+        lines+=("  freeturn client add [name]  - добавить клиента")
+        lines+=("  freeturn client list        - список клиентов")
+        lines+=("  freeturn client qr [name]   - показать QR-код")
 
         local body; body=$(printf '%s\n' "${lines[@]}")
         gum style --border rounded --border-foreground "$MD_SUCCESS" --padding "1 2" "$body"
@@ -2685,9 +2758,20 @@ print_summary() {
             local first_cname; first_cname=$(head -n1 "$CLIENTS_META" | cut -d'|' -f1)
             [ -n "$first_cname" ] && echo "Первый клиент: ${CLIENTS_DIR}/${first_cname}-direct.conf (QR: ${CLIENTS_DIR}/${first_cname}-direct.png)"
         fi
-        echo "Управление клиентами: sudo bash install.sh client <add|list|qr>"
+        echo "Управление клиентами: freeturn client <add|list|qr>"
     fi
     ui_drain_input
+
+    if [ "$NONINTERACTIVE" != "1" ] && [ -s "$CLIENTS_META" ]; then
+        local first_cname; first_cname=$(head -n1 "$CLIENTS_META" | cut -d'|' -f1)
+        if [ -n "$first_cname" ]; then
+            echo
+            if ui_yesno "Вывести QR-код клиента '${first_cname}' в терминал прямо сейчас?" "Y"; then
+                echo
+                client_qr "$first_cname" "direct"
+            fi
+        fi
+    fi
 }
 
 flow_install()     { wizard; validate_config; review_config; apply; print_summary; }
@@ -2744,12 +2828,12 @@ usage() {
 Free Turn Proxy & AmneziaWG - установщик и контроллер сервера.
 
 Использование:
-  sudo bash install.sh                    интерактивный мастер (gum TUI)
-  sudo bash install.sh client add [name]  добавить клиента и показать QR
-  sudo bash install.sh client list        список клиентов
-  sudo bash install.sh client qr [name]   показать QR-код (direct/relay/freeturn)
-  sudo bash install.sh client remove [n]  удалить клиента
-  sudo bash install.sh -y [опции]         неинтерактивная установка (скрипты/CI)
+  freeturn                                интерактивный мастер (gum TUI)
+  freeturn client add [name]              добавить клиента и показать QR
+  freeturn client list                    список клиентов
+  freeturn client qr [name] [mode]        показать QR-код (direct/relay/freeturn)
+  freeturn client remove [name]           удалить клиента
+  freeturn -y [опции]                     неинтерактивная установка (скрипты/CI)
 
 Опции компонентов:
   --only-awg                     установить только AmneziaWG 3.1 (без FreeTurn)
@@ -2778,7 +2862,7 @@ Free Turn Proxy & AmneziaWG - установщик и контроллер се�
   -h, --help                     справка
 
 Машиночитаемый JSON RPC v2 (мобильное приложение):
-  sudo bash install.sh <probe|install|wg-setup|start|stop|logs|share-info|share-list|peer-add|peer-conf|peer-remove|client-add|client-remove|uninstall> [flags]
+  freeturn <probe|install|wg-setup|start|stop|logs|share-info|share-list|peer-add|peer-conf|peer-remove|client-add|client-remove|uninstall> [flags]
 EOF
 }
 
@@ -2846,6 +2930,7 @@ main() {
 
     # Проверка прав root
     [ "$(id -u 2>/dev/null || echo -1)" -ne 0 ] && die "Запустите скрипт от root (sudo)."
+    install_cli_symlink
     ensure_base_deps
     detect_arch >/dev/null 2>&1 || true
 
@@ -2860,7 +2945,7 @@ main() {
             list)   client_list ;;
             qr)     client_qr "${1:-}" "${2:-direct}" ;;
             remove) client_remove "${1:-}" ;;
-            *)      die "Использование: sudo bash install.sh client <add|list|qr|remove>" ;;
+            *)      die "Использование: freeturn client <add|list|qr|remove>" ;;
         esac
         return 0
     fi
