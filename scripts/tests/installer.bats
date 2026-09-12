@@ -141,7 +141,6 @@ run_script() { run bash "$SCRIPT" "$@"; }
         source '$SCRIPT'
         INSTALL_FREETURN=0
         INSTALL_AWG=0
-        INSTALL_WG=0
         validate_config
     "
     [ "$status" -ne 0 ]
@@ -154,7 +153,6 @@ run_script() { run bash "$SCRIPT" "$@"; }
         # Только FreeTurn
         INSTALL_FREETURN=1
         INSTALL_AWG=0
-        INSTALL_WG=0
         INSTALL_METHOD='docker'
         PROVIDER='vk'
         PROXY_MODE='udp'
@@ -165,7 +163,6 @@ run_script() { run bash "$SCRIPT" "$@"; }
         # Только AmneziaWG
         INSTALL_FREETURN=0
         INSTALL_AWG=1
-        INSTALL_WG=0
         BACKEND_PORT='51820'
         WG_ENDPOINT='127.0.0.1:9000'
         validate_config || exit 1
@@ -363,7 +360,6 @@ EOF
         INSTALL_METHOD='docker'
         INSTALL_FREETURN=1
         INSTALL_AWG=1
-        INSTALL_WG=0
         PROXY_MODE='tcp'
         BACKEND_PORT=51821
         LISTEN_PORT=56001
@@ -499,4 +495,291 @@ EOF
         ensure_awg_image
     "
     [ "$status" -eq 0 ]
+}
+
+@test "web_token стабилен между вызовами и ложится на диск" {
+    run bash -c "
+        source '$SCRIPT'
+        t1=\$(web_token); t2=\$(web_token)
+        [ \"\$t1\" = \"\$t2\" ] || exit 1
+        [ \"\${#t1}\" -eq 32 ] || exit 1
+        [ -f \"\$WEB_TOKEN_FILE\" ] || exit 1
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "токен свой у каждого клиента и не равен мастер-секрету" {
+    run bash -c "
+        source '$SCRIPT'
+        a=\$(client_token phone); b=\$(client_token laptop)
+        [ \"\$a\" = \"\$(client_token phone)\" ] || exit 1
+        [ \"\$a\" != \"\$b\" ] || exit 1
+        [ \"\$a\" != \"\$(web_token)\" ] || exit 1
+        [ \"\${#a}\" -eq 32 ] || exit 1
+        [ \"\$(web_base_url 1.2.3.4 phone)\" = \"http://1.2.3.4:8080/\$a\" ] || exit 1
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "docroot прячет листинг, за токеном клиента виден только его каталог" {
+    ln -s "$FT_TEST_DIR" "$FT_TEST_DIR/lnprobe" 2>/dev/null
+    [ -L "$FT_TEST_DIR/lnprobe" ] || skip "ФС без симлинков (не Linux)"
+    run bash -c "
+        source '$SCRIPT'
+        mkdir -p \"\$CLIENTS_DIR/phone\" \"\$CLIENTS_DIR/laptop\"
+        printf 'phone|10.13.13.2||now\nlaptop|10.13.13.3||now\n' > \"\$CLIENTS_META\"
+        _web_layout || exit 1
+        [ -f \"\$WEB_ROOT/index.html\" ] || exit 1
+        [ -f \"\$WEB_ROOT/\$(web_token)\$WEB_PROBE_EXT\" ] || exit 1
+        [ -L \"\$WEB_ROOT/\$(client_token phone)\" ] || exit 1
+        [ \"\$(readlink \"\$WEB_ROOT/\$(client_token phone)\")\" = \"\$CLIENTS_DIR/phone\" ] || exit 1
+        [ -L \"\$WEB_ROOT/\$(client_token laptop)\" ] || exit 1
+        # мастер-секрет каталогом не раздаётся
+        [ -L \"\$WEB_ROOT/\$(web_token)\" ] && exit 1
+        true
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "_web_layout убирает симлинк удалённого клиента" {
+    ln -s "$FT_TEST_DIR" "$FT_TEST_DIR/lnprobe" 2>/dev/null
+    [ -L "$FT_TEST_DIR/lnprobe" ] || skip "ФС без симлинков (не Linux)"
+    run bash -c "
+        source '$SCRIPT'
+        mkdir -p \"\$CLIENTS_DIR/phone\" \"\$CLIENTS_DIR/laptop\"
+        printf 'phone|10.13.13.2||now\nlaptop|10.13.13.3||now\n' > \"\$CLIENTS_META\"
+        _web_layout || exit 1
+        gone=\$(client_token laptop)
+        rm -rf \"\$CLIENTS_DIR/laptop\"
+        printf 'phone|10.13.13.2||now\n' > \"\$CLIENTS_META\"
+        _web_layout || exit 1
+        [ -L \"\$WEB_ROOT/\$gone\" ] && exit 1
+        [ -L \"\$WEB_ROOT/\$(client_token phone)\" ] || exit 1
+        true
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "migrate_client_dirs раскладывает плоские артефакты по каталогам клиентов" {
+    run bash -c "
+        source '$SCRIPT'
+        mkdir -p \"\$CLIENTS_DIR\"
+        printf 'phone|10.13.13.2||now\nphone-2|10.13.13.3||now\n' > \"\$CLIENTS_META\"
+        : > \"\$CLIENTS_DIR/phone-direct.conf\"
+        : > \"\$CLIENTS_DIR/phone-direct.png\"
+        : > \"\$CLIENTS_DIR/phone-2-direct.conf\"
+        migrate_client_dirs
+        [ -f \"\$CLIENTS_DIR/phone/phone-direct.conf\" ] || exit 1
+        [ -f \"\$CLIENTS_DIR/phone/phone-direct.png\" ] || exit 1
+        # префиксы не должны перетягивать чужие файлы
+        [ -f \"\$CLIENTS_DIR/phone-2/phone-2-direct.conf\" ] || exit 1
+        [ -f \"\$CLIENTS_DIR/phone/phone-2-direct.conf\" ] && exit 1
+        true
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "allowlist и метаданные лежат вне раздаваемого каталога" {
+    run bash -c "
+        source '$SCRIPT'
+        case \"\$CLIENTS_FILE_CONF\" in \"\$CLIENTS_DIR\"/*) exit 1 ;; esac
+        case \"\$CLIENTS_META\" in \"\$CLIENTS_DIR\"/*) exit 1 ;; esac
+        true
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "migrate_layout переносит clients.json из раздаваемого каталога" {
+    run bash -c "
+        source '$SCRIPT'
+        mkdir -p \"\$CLIENTS_DIR\"
+        echo '{\"clients\":{\"a\":1}}' > \"\$CLIENTS_DIR/clients.json\"
+        echo 'old|10.13.13.2||now' > \"\$CLIENTS_DIR/clients.list\"
+        migrate_layout
+        [ ! -f \"\$CLIENTS_DIR/clients.json\" ] || exit 1
+        [ ! -f \"\$CLIENTS_DIR/clients.list\" ] || exit 1
+        grep -q '\"a\":1' \"\$CLIENTSFILE\" || exit 1
+        grep -q '^old|' \"\$CLIENTS_META\" || exit 1
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "valid_client_name отсекает traversal и метасимволы regex" {
+    run bash -c "
+        source '$SCRIPT'
+        valid_client_name 'phone-1' || exit 1
+        valid_client_name 'a.b_c' || exit 1
+        valid_client_name '../etc' && exit 1
+        valid_client_name 'a/b' && exit 1
+        valid_client_name 'a|b' && exit 1
+        valid_client_name '.hidden' && exit 1
+        valid_client_name '' && exit 1
+        true
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "alloc_client_ip упирается в границу /24" {
+    run bash -c "
+        source '$SCRIPT'
+        conf=\"\$FT_PREFIX/full.conf\"
+        for i in \$(seq 2 254); do echo \"AllowedIPs = 10.13.13.\$i/32\" >> \"\$conf\"; done
+        alloc_client_ip \"\$conf\" 10.13.13
+    "
+    [ "$status" -ne 0 ]
+}
+
+@test "write_compose_file убирает снятый сервис и удаляет файл без компонентов" {
+    run bash -c "
+        source '$SCRIPT'
+        INSTALL_FREETURN=1 INSTALL_AWG=1
+        write_compose_file
+        grep -q 'free-turn-proxy:' \"\$COMPOSE_FILE\" || exit 1
+        grep -q 'freeturn-awg:' \"\$COMPOSE_FILE\" || exit 1
+
+        INSTALL_FREETURN=0
+        write_compose_file
+        grep -q 'free-turn-proxy:' \"\$COMPOSE_FILE\" && exit 1
+        grep -q 'freeturn-awg:' \"\$COMPOSE_FILE\" || exit 1
+
+        INSTALL_AWG=0
+        write_compose_file
+        [ ! -f \"\$COMPOSE_FILE\" ] || exit 1
+        true
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "compose AWG не включает verbose-логи демона" {
+    run bash -c "
+        source '$SCRIPT'
+        INSTALL_FREETURN=0 INSTALL_AWG=1
+        write_compose_file
+        grep -q 'AWG_LOG_LEVEL=error' \"\$COMPOSE_FILE\" || exit 1
+        grep -q 'AWG_LOG_LEVEL=verbose' \"\$COMPOSE_FILE\" && exit 1
+        true
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "get_public_ip возвращает ошибку вместо плейсхолдера" {
+    run bash -c "
+        source '$SCRIPT'
+        curl() { return 1; }
+        export -f curl
+        get_public_ip
+    "
+    [ "$status" -ne 0 ]
+    [[ "$output" != *"IP_СЕРВЕРА"* ]]
+}
+
+@test "validate_config отсекает невалидный web-port" {
+    run bash -c "
+        source '$SCRIPT'
+        INSTALL_FREETURN=0 INSTALL_AWG=1
+        BACKEND_PORT=51820 WG_ENDPOINT='127.0.0.1:9000' FT_WEB_PORT=99999
+        validate_config
+    "
+    [ "$status" -ne 0 ]
+}
+
+@test "CLI-флаги не уезжают в JSON RPC диспетчер" {
+    run bash -c "
+        source '$SCRIPT'
+        for f in -y --yes --update --uninstall --reconfigure --purge --only-awg --method; do
+            is_rpc_command \"\$f\" && { echo \"флаг \$f опознан как RPC\"; exit 1; }
+        done
+        for c in \$RPC_COMMANDS; do
+            is_rpc_command \"\$c\" || { echo \"команда \$c не опознана\"; exit 1; }
+        done
+        true
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "веб-раздача не оставляет постоянного systemd-юнита" {
+    run grep -n 'WantedBy=multi-user.target' "$SCRIPT"
+    # единственный постоянный юнит - сам сервер free-turn-proxy
+    [ "$(printf '%s\n' "$output" | wc -l)" -eq 1 ]
+
+    run bash -c "grep -c 'RuntimeMaxSec' '$SCRIPT'"
+    [ "$output" -ge 1 ]
+}
+
+@test "firewall_open не держит веб-порт открытым постоянно" {
+    run bash -c "
+        source '$SCRIPT'
+        opened=()
+        firewall_open_port() { opened+=(\"\$1/\$2\"); }
+        INSTALL_FREETURN=1 INSTALL_AWG=1 AWG_DIRECT_PORT=1
+        LISTEN_PORT=56000 BACKEND_PORT=51820 PROXY_MODE=udp FT_WEB_PORT=8080
+        firewall_open
+        printf '%s\n' \"\${opened[@]}\"
+    "
+    [[ "$output" == *"56000/udp"* ]]
+    [[ "$output" == *"51820/udp"* ]]
+    [[ "$output" != *"8080"* ]]
+}
+
+@test "ensure_web_server открывает порт сам и закрывает при неудаче запуска" {
+    run bash -c "
+        source '$SCRIPT'
+        log=\"\$FT_PREFIX/fw.log\"
+        firewall_open_port() { echo \"open \$1/\$2\" >> \"\$log\"; }
+        firewall_close_port() { echo \"close \$1/\$2\" >> \"\$log\"; }
+        port_owner() { echo free; }
+        _web_server_argv() { printf '%s\n' fake-httpd \"\$1\"; }
+        _web_start_systemd() { return 1; }
+        _web_start_nohup() { return 1; }
+        ensure_web_server && exit 1
+        grep -q 'open 8080/tcp' \"\$log\" || exit 1
+        grep -q 'close 8080/tcp' \"\$log\" || exit 1
+        true
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "_web_server_argv берёт python3, иначе busybox" {
+    # подменяем 'command -v', а не PATH: иначе тест зависел бы от того, стоит ли python3 в CI
+    run bash -c "
+        source '$SCRIPT'
+        HAVE=''
+        command() {
+            if [ \"\$1\" = '-v' ]; then
+                case \" \$HAVE \" in *\" \$2 \"*) echo \"/usr/bin/\$2\"; return 0 ;; esac
+                return 1
+            fi
+            builtin command \"\$@\"
+        }
+        pkg_install() { return 1; }
+
+        _web_server_argv 8080 && exit 1
+
+        HAVE='busybox'
+        [ \"\$(_web_server_argv 8080 | tr '\n' ' ')\" = \"busybox httpd -f -p 8080 -h \$WEB_ROOT \" ] || exit 1
+
+        HAVE='python3 busybox'
+        [ \"\$(_web_server_argv 8080 | tr '\n' ' ')\" = \"python3 -m http.server 8080 --directory \$WEB_ROOT \" ] || exit 1
+        true
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "validate_config отсекает слишком короткий web-ttl" {
+    run bash -c "
+        source '$SCRIPT'
+        INSTALL_FREETURN=0 INSTALL_AWG=1
+        BACKEND_PORT=51820 WG_ENDPOINT='127.0.0.1:9000' FT_WEB_TTL=10
+        validate_config
+    "
+    [ "$status" -ne 0 ]
+}
+
+@test "web_token не выдаёт нестабильный токен, если его негде сохранить" {
+    run bash -c "
+        source '$SCRIPT'
+        WEB_TOKEN_FILE='/proc/nonexistent/web.token'
+        web_token
+    "
+    [ "$status" -ne 0 ]
 }

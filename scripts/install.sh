@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Free Turn Proxy - установщик и контроллер сервера.
-# Сгенерирован из scripts/control/*.sh.
+# Единый файл: устанавливает и обслуживает сервер, служит бэкендом JSON RPC для мобильного приложения.
 
 set -Eeuo pipefail
 umask 077
@@ -18,21 +18,29 @@ VERFILE="$PREFIX/version"
 ARGSFILE="$PREFIX/run.args"
 ENVFILE="$PREFIX/run.env"
 LAUNCHER="$PREFIX/launch.sh"
-CLIENTSFILE="$PREFIX/clients.json"
+CLIENTSFILE="$PREFIX/auth/clients.json"
 OWNERCIDFILE="$PREFIX/owner.cid"
 SHARE_DIR="$PREFIX/share"
 APP_DIR="$PREFIX"
 CONF_FILE="${PREFIX}/install.conf"
-WEB_PID="$PREFIX/web.pid"
+AUTH_DIR="$PREFIX/auth"
+
+# Веб-раздача: QR-коды AWG 3.1 (~600 Б конфига) не влезают в 80 колонок терминала,
+# картинку надо снять телефоном. Сервер поднимается по требованию и умирает через TTL -
+# порт с приватными ключами не должен стоять открытым между добавлениями клиентов.
+WEB_ROOT="$PREFIX/web"
+WEB_TOKEN_FILE="$PREFIX/web.token"
 WEB_LOG="$PREFIX/web.log"
+WEB_UNIT="freeturn-web"
+WEB_PROBE_EXT=".ok"
 FT_WEB_PORT="${FT_WEB_PORT:-8080}"
+FT_WEB_TTL="${FT_WEB_TTL:-900}"
 
 # Службы и контейнеры
 SERVICE="free-turn-proxy.service"
 UNIT_NAME="$SERVICE"
 UNIT_FILE="/etc/systemd/system/${SERVICE}"
 UNIT_PATH="$UNIT_FILE"
-LEGACY_UNIT="vk-turn-proxy.service"
 COMPOSE_FILE="${PREFIX}/docker-compose.yml"
 CONTAINER="free-turn-proxy"
 AWG_CONTAINER="freeturn-awg"
@@ -47,11 +55,10 @@ WG_DIR="${FT_WG_DIR:-/etc/wireguard}"
 WG_IFACE="${FT_WG_IFACE:-ft-wg0}"
 WG_CONF="${WG_DIR}/${WG_IFACE}.conf"
 WG_MARKER="# managed-by: free-turn-proxy"
-WG_NET="${FT_WG_NET:-10.13.13}"
-WG_CLIENT_CONF="${PREFIX}/wireguard-client.conf"
-WG_MTU="${FT_WG_MTU:-1280}"
+AWG_MTU_DEFAULT=1280              # тот же фоллбэк, что в start.sh контейнера AWG
+# Каталог артефактов клиента (ключи, QR). Раздаётся наружу - метаданные и allowlist держим вне его.
 CLIENTS_DIR="${PREFIX}/clients"
-CLIENTS_META="${CLIENTS_DIR}/clients.list"
+CLIENTS_META="${PREFIX}/clients.list"
 
 # Репозитории и ссылки
 REPO="samosvalishe/free-turn-proxy"
@@ -73,18 +80,17 @@ C_RED='\033[0;31m' C_GREEN='\033[0;32m' C_YELLOW='\033[1;33m' C_CYAN='\033[0;36m
 INSTALL_METHOD="docker"        # docker | systemd
 INSTALL_FREETURN=1             # 1 = ставить релей FreeTurn
 INSTALL_AWG=1                  # 1 = ставить AmneziaWG 3.1
-INSTALL_WG=0                   # 1 = ставить WireGuard
 VERSION="latest"
 PROVIDER="vk"
 PROXY_MODE="udp"               # udp | tcp
-BACKEND_TYPE="awg"             # awg | wg | custom
 BACKEND_PORT="51820"
 LISTEN_PORT="56000"
 AWG_DIRECT_PORT=1              # 1 = открыть BACKEND_PORT/udp в файрволе
 OBF_PROFILE="rtpopus3"         # rtpopus3 | rtpopus2 | rtpopus | none
 OBF_KEY=""
-CLIENTS_FILE_CONF="${CLIENTS_DIR}/clients.json"
+CLIENTS_FILE_CONF="${AUTH_DIR}/clients.json"
 WG_ENDPOINT="127.0.0.1:9000"
+AWG_LOG_LEVEL="${FT_AWG_LOG_LEVEL:-error}"
 
 # AmneziaWG 3.1 параметры
 AWG_JC=""
@@ -111,6 +117,7 @@ ACTION=""
 CLIENT_SUBCOMMAND=""
 CLIENT_SUBARG=""
 UNINSTALL_TARGET="all"         # freeturn | awg | all
+NEW_CLIENT=""                  # клиент, созданный этим прогоном - только ему печатаем ссылки
 OVERRIDES=()
 
 PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
@@ -121,8 +128,6 @@ valid_port()     { [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 
 valid_hex64()    { [[ "$1" =~ ^[0-9a-fA-F]{64}$ ]]; }
 valid_endpoint() { [[ "$1" =~ ^(\[[0-9a-fA-F:]+\]|[a-zA-Z0-9._-]+):[0-9]{1,5}$ ]]; }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Модуль: 10-proto.sh
 # ─────────────────────────────────────────────────────────────────────────────
 # JSON RPC v2 для Android ServerControl.kt (буферизация в 1 JSON-объект, trap EXIT)
 
@@ -190,8 +195,6 @@ _on_exit() {
 }
 trap _on_exit EXIT
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Модуль: 20-ui.sh
 # ─────────────────────────────────────────────────────────────────────────────
 # UI-слой: обёртки над gum с plain-fallback при отсутствии gum.
 gum() {
@@ -401,146 +404,6 @@ generate_qr_png_text() {
     fi
 }
 
-render_qr_file() {
-    local file="$1" title="$2" png_file="${3:-${file%.*}.png}"
-    [ "$_IS_RPC" = 1 ] && return 0
-    if [ ! -f "$file" ]; then
-        log_warn "Файл конфигурации '$file' не найден."
-        return 1
-    fi
-    [ -n "$png_file" ] && [ ! -f "$png_file" ] && generate_qr_png_file "$file" "$png_file"
-
-    command -v qrencode >/dev/null 2>&1 || pkg_install qrencode || true
-    if ! command -v qrencode >/dev/null 2>&1; then
-        log_warn "qrencode не установлен - QR пропущен."
-        return 0
-    fi
-
-    if [ -n "$title" ]; then
-        echo
-        if [ "$HAS_GUM" = 1 ]; then
-            gum style --foreground "$MD_PRIMARY" --bold "$title"
-        else
-            echo -e "${C_CYAN}${title}${C_NC}"
-        fi
-    fi
-
-    # 1. Проверка поддержки inline-графики (iTerm2, WezTerm, Ghostty)
-    if [ -n "$png_file" ] && [ -f "$png_file" ] && [ -n "${TERM_PROGRAM:-}" ]; then
-        case "$TERM_PROGRAM" in
-            iTerm.app|WezTerm|ghostty)
-                if command -v base64 >/dev/null 2>&1; then
-                    local b64_img; b64_img=$(base64 -w0 < "$png_file" 2>/dev/null || base64 < "$png_file" | tr -d '\r\n')
-                    if [ -n "$b64_img" ]; then
-                        printf '\033]1337;File=inline=1;width=45%%;height=auto:%s\a\n' "$b64_img"
-                        echo
-                        log_info "Картинка QR-кода (PNG): $png_file"
-                        return 0
-                    fi
-                fi
-                ;;
-        esac
-    fi
-
-    # 2. Очистка конфига от комментариев и пустых строк для максимальной компактности.
-    # Флаг -l L (Low ECC) сжимает размер QR до ~51 символов ширины,
-    # что гарантированно помещается в стандартные 80 колонок PowerShell/PuTTY/CMD без переносов строк.
-    local clean_conf
-    clean_conf=$(grep -v '^[[:space:]]*#' "$file" 2>/dev/null | grep -v '^[[:space:]]*$' || cat "$file")
-
-    local cols=80
-    command -v tput >/dev/null 2>&1 && cols=$(tput cols 2>/dev/null || echo 80)
-    if [ "$cols" -lt 55 ]; then
-        if [ "$HAS_GUM" = 1 ]; then
-            gum style --border rounded --border-foreground "$MD_TERTIARY" --padding "0 1" \
-                "$(gum style --foreground "$MD_TERTIARY" --bold "⚠ Окно терминала очень узкое (${cols} колонок, нужно ≥55).")" \
-                "Рекомендуется использовать сохранённую картинку:" \
-                "$(gum style --foreground "$MD_PRIMARY" --bold "${png_file}")"
-        else
-            log_warn "Окно терминала (${cols}) очень узкое. Используйте PNG файл: $png_file"
-        fi
-        echo
-    fi
-
-    printf '%s\n' "$clean_conf" | qrencode -t ansiutf8 -m 1 -l L
-    echo
-    [ -n "$png_file" ] && [ -f "$png_file" ] && log_info "Картинка QR-кода (PNG): $png_file"
-}
-
-download_file_osc1337() {
-    local f="$1"
-    [ -f "$f" ] || return 0
-    if command -v base64 >/dev/null 2>&1; then
-        local b64; b64=$(base64 -w0 < "$f" 2>/dev/null || base64 < "$f" | tr -d '\r\n')
-        local fname; fname=$(basename "$f")
-        local fsize; fsize=$(wc -c < "$f" 2>/dev/null || echo 0)
-        if [ -n "${TERM_PROGRAM:-}" ] || [ -n "${WT_SESSION:-}" ]; then
-            printf '\033]1337;File=name=%s;size=%s;inline=0:%s\a' "$fname" "$fsize" "$b64" 2>/dev/null || true
-        fi
-    fi
-}
-
-render_qr_text() {
-    local text="$1" title="$2" png_file="${3:-}"
-    [ "$_IS_RPC" = 1 ] && return 0
-    [ -n "$text" ] || return 0
-    [ -n "$png_file" ] && [ ! -f "$png_file" ] && generate_qr_png_text "$text" "$png_file"
-
-    command -v qrencode >/dev/null 2>&1 || pkg_install qrencode || true
-    if ! command -v qrencode >/dev/null 2>&1; then
-        log_warn "qrencode не установлен - QR пропущен."
-        return 0
-    fi
-
-    if [ -n "$title" ]; then
-        echo
-        if [ "$HAS_GUM" = 1 ]; then
-            gum style --foreground "$MD_PRIMARY" --bold "$title"
-        else
-            echo -e "${C_CYAN}${title}${C_NC}"
-        fi
-    fi
-
-    # 1. Проверка поддержки inline-графики
-    if [ -n "$png_file" ] && [ -f "$png_file" ] && [ -n "${TERM_PROGRAM:-}" ]; then
-        case "$TERM_PROGRAM" in
-            iTerm.app|WezTerm|ghostty)
-                if command -v base64 >/dev/null 2>&1; then
-                    local b64_img; b64_img=$(base64 -w0 < "$png_file" 2>/dev/null || base64 < "$png_file" | tr -d '\r\n')
-                    if [ -n "$b64_img" ]; then
-                        printf '\033]1337;File=inline=1;width=45%%;height=auto:%s\a\n' "$b64_img"
-                        echo
-                        log_info "Картинка QR-кода (PNG): $png_file"
-                        return 0
-                    fi
-                fi
-                ;;
-        esac
-    fi
-
-    # 2. Проверка ширины терминала (для длинных URI со вшитыми конфигами)
-    local cols=80
-    command -v tput >/dev/null 2>&1 && cols=$(tput cols 2>/dev/null || echo 80)
-    if [ "${#text}" -gt 500 ] && [ "$cols" -lt 85 ]; then
-        if [ "$HAS_GUM" = 1 ]; then
-            gum style --border rounded --border-foreground "$MD_TERTIARY" --padding "0 1" \
-                "$(gum style --foreground "$MD_TERTIARY" --bold "⚠ Длинная ссылка со вшитым VPN (${cols} колонок, нужно ≥85).")" \
-                "Текстовый код может перенестись по строкам." \
-                "Используйте сохранённую картинку:" \
-                "$(gum style --foreground "$MD_PRIMARY" --bold "${png_file:-$CLIENTS_DIR}")"
-        else
-            log_warn "Ширина терминала (${cols}) меньше размера QR. Используйте PNG файл: $png_file"
-        fi
-        echo
-    fi
-
-    printf '%s' "$text" | qrencode -t ansiutf8 -m 1 -l L
-    echo
-    [ -n "$png_file" ] && [ -f "$png_file" ] && log_info "Картинка QR-кода (PNG): $png_file"
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Модуль: 30-system.sh
 # ─────────────────────────────────────────────────────────────────────────────
 # Системные примитивы: блокировки flock, пакетный менеджер, детекция окружения.
 
@@ -899,7 +762,8 @@ get_public_ip() {
             echo "$ip"; return 0
         fi
     done
-    echo "IP_СЕРВЕРА"
+    # Плейсхолдер уехал бы в Endpoint конфига и в ссылку - лучше явная ошибка.
+    return 1
 }
 
 detect_wg_port() {
@@ -918,8 +782,6 @@ detect_wg_port() {
     fi
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Модуль: 40-state.sh
 # ─────────────────────────────────────────────────────────────────────────────
 # Сохранение, загрузка и валидация конфигурации сервера (install.conf и state).
 
@@ -945,11 +807,53 @@ is_installed() {
     [ -f "$CONF_FILE" ] || [ -f "$COMPOSE_FILE" ] || [ -f "$UNIT_FILE" ] || [ -f "$AWG_CONF" ]
 }
 
+# Установки до 3.4.1 держали allowlist и метаданные внутри раздаваемого наружу clients/.
+migrate_layout() {
+    [ -d "$PREFIX" ] || return 0
+    mkdir -p "$AUTH_DIR" 2>/dev/null || return 0
+    chmod 0700 "$AUTH_DIR" 2>/dev/null || true
+    local old_json="${CLIENTS_DIR}/clients.json" old_meta="${CLIENTS_DIR}/clients.list"
+    if [ -f "$old_json" ] && [ ! -f "$CLIENTSFILE" ]; then
+        mv -f "$old_json" "$CLIENTSFILE" 2>/dev/null || true
+        chmod 0600 "$CLIENTSFILE" 2>/dev/null || true
+    fi
+    [ -f "$old_json" ] && rm -f "$old_json"
+    if [ -f "$old_meta" ] && [ ! -f "$CLIENTS_META" ]; then
+        mv -f "$old_meta" "$CLIENTS_META" 2>/dev/null || true
+    fi
+    [ -f "$old_meta" ] && rm -f "$old_meta"
+    [ -d "$CLIENTS_DIR" ] && chmod 0700 "$CLIENTS_DIR" 2>/dev/null || true
+    migrate_client_dirs
+    return 0
+}
+
+# Те же установки держали артефакты плоско в clients/ - один секрет открывал всех клиентов.
+migrate_client_dirs() {
+    [ -s "$CLIENTS_META" ] || return 0
+    local name suf src dst
+    while IFS='|' read -r name _; do
+        valid_client_name "$name" || continue
+        dst="${CLIENTS_DIR}/${name}"
+        [ -d "$dst" ] && continue
+        for suf in direct.conf relay.conf freeturn.txt freeturn-vpn.txt \
+                   direct.png relay.png freeturn.png freeturn-vpn.png; do
+            src="${CLIENTS_DIR}/${name}-${suf}"
+            [ -f "$src" ] || continue
+            mkdir -p "$dst" 2>/dev/null && chmod 0700 "$dst" 2>/dev/null || true
+            mv -f "$src" "$dst/" 2>/dev/null || true
+        done
+    done < "$CLIENTS_META"
+    return 0
+}
+
 # shellcheck disable=SC1090
 load_config() {
     [ -f "$CONF_FILE" ] && . "$CONF_FILE" || true
     if [ -n "${AWG_SETUP:-}" ]; then INSTALL_AWG="$AWG_SETUP"; fi
-    if [ -n "${WG_SETUP:-}" ]; then INSTALL_WG="$WG_SETUP"; fi
+    case "$CLIENTS_FILE_CONF" in
+        "${CLIENTS_DIR}/"*) CLIENTS_FILE_CONF="$CLIENTSFILE" ;;
+    esac
+    migrate_layout
     return 0
 }
 
@@ -959,19 +863,19 @@ save_config() {
 INSTALL_METHOD="$INSTALL_METHOD"
 INSTALL_FREETURN="$INSTALL_FREETURN"
 INSTALL_AWG="$INSTALL_AWG"
-INSTALL_WG="$INSTALL_WG"
 VERSION="$VERSION"
 PROVIDER="$PROVIDER"
 PROXY_MODE="$PROXY_MODE"
-BACKEND_TYPE="$BACKEND_TYPE"
 BACKEND_PORT="$BACKEND_PORT"
 LISTEN_PORT="$LISTEN_PORT"
 FT_WEB_PORT="$FT_WEB_PORT"
+FT_WEB_TTL="$FT_WEB_TTL"
 AWG_DIRECT_PORT="$AWG_DIRECT_PORT"
 OBF_PROFILE="$OBF_PROFILE"
 OBF_KEY="$OBF_KEY"
 CLIENTS_FILE_CONF="$CLIENTS_FILE_CONF"
 WG_ENDPOINT="$WG_ENDPOINT"
+AWG_LOG_LEVEL="$AWG_LOG_LEVEL"
 AWG_JC="$AWG_JC"
 AWG_JMIN="$AWG_JMIN"
 AWG_JMAX="$AWG_JMAX"
@@ -998,8 +902,12 @@ apply_overrides() {
 connect_addr() { echo "127.0.0.1:${BACKEND_PORT}"; }
 
 validate_config() {
-    [ "$INSTALL_FREETURN" != "1" ] && [ "$INSTALL_AWG" != "1" ] && [ "$INSTALL_WG" != "1" ] \
+    [ "$INSTALL_FREETURN" != "1" ] && [ "$INSTALL_AWG" != "1" ] \
         && die "Не выбран ни один компонент для установки (FreeTurn или AmneziaWG)."
+
+    valid_port "${FT_WEB_PORT:-8080}" || die "web-port невалиден: '${FT_WEB_PORT}'"
+    [[ "${FT_WEB_TTL:-900}" =~ ^[0-9]+$ ]] && [ "${FT_WEB_TTL:-900}" -ge 60 ] \
+        || die "web-ttl - число секунд, минимум 60. Получено: '${FT_WEB_TTL}'"
 
     if [ "$INSTALL_FREETURN" = "1" ]; then
         case "$INSTALL_METHOD" in docker | systemd) ;; *) die "method: docker|systemd, а не '$INSTALL_METHOD'" ;; esac
@@ -1015,15 +923,13 @@ validate_config() {
         esac
     fi
 
-    if [ "$INSTALL_AWG" = "1" ] || [ "$INSTALL_WG" = "1" ]; then
+    if [ "$INSTALL_AWG" = "1" ]; then
         valid_port "$BACKEND_PORT" || die "backend-port невалиден: '$BACKEND_PORT'"
         valid_endpoint "$WG_ENDPOINT" || die "wg-endpoint невалиден (host:port): '$WG_ENDPOINT'"
     fi
     return 0
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Модуль: 50-download.sh
 # ─────────────────────────────────────────────────────────────────────────────
 # Загрузка бинарников и проверка целостности.
 
@@ -1112,9 +1018,7 @@ download_binary() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Модуль: 60-backend.sh
-# ─────────────────────────────────────────────────────────────────────────────
-# VPN-бэкенды: AmneziaWG (AWG 3.1) и классический WireGuard (ft-wg0).
+# VPN-бэкенд AmneziaWG (AWG 3.1); ft-wg0 - только детекция legacy-установок.
 
 init_awg_params() {
     if [ -f "$AWG_CONF" ]; then
@@ -1261,6 +1165,8 @@ alloc_client_ip() {
             [ "$num" -gt "$max_ip" ] && max_ip="$num"
         done
     fi
+    # .1 - сервер, .255 - broadcast: за 254 клиента /24 кончается.
+    [ "$max_ip" -ge 254 ] && { log_error "Подсеть ${net_prefix}.0/24 исчерпана (254 клиента)."; return 1; }
     echo "${net_prefix}.$((max_ip + 1))"
 }
 
@@ -1324,31 +1230,6 @@ awg_reconcile() {
     fi
 }
 
-wireguard_bootstrap() {
-    [ "$INSTALL_WG" = "1" ] || return 0
-    enable_ip_forwarding
-    mkdir -p "$WG_DIR" "$CLIENTS_DIR"
-    [ -f "$WG_CONF" ] && return 0
-
-    local kp priv pub
-    kp="$(generate_awg_keypair)"
-    priv="${kp%% *}"; pub="${kp##* }"
-
-    echo "$priv" > "${WG_DIR}/server.key"; chmod 0600 "${WG_DIR}/server.key"
-    echo "$pub"  > "${WG_DIR}/server.pub"
-
-    ( umask 077
-      cat > "$WG_CONF" <<EOF
-[Interface]
-$WG_MARKER
-Address = ${WG_NET}.1/24
-ListenPort = ${BACKEND_PORT}
-MTU = ${WG_MTU}
-PrivateKey = ${priv}
-EOF
-    )
-}
-
 wg_reconcile() {
     command -v wg >/dev/null 2>&1 || return 0
     ip link show "$WG_IFACE" >/dev/null 2>&1 || return 0
@@ -1367,8 +1248,7 @@ generate_freeturn_uri() {
     if [ -n "$obf" ] && [ "$obf" != "none" ]; then
         json="$json,\"obf\":\"$(esc "$obf")\",\"key\":\"$(esc "$key")\""
     fi
-    local n="${STREAMS:-12}" spc="${STREAMS_PER_CRED:-12}"
-    json="$json,\"n\":${n},\"spc\":${spc}"
+    # n/spc не пишем: клиент подставит свои дефолты, второй источник значений не нужен.
     if [ -n "$cid" ]; then
         json="$json,\"cid\":\"$(esc "$cid")\""
     fi
@@ -1424,8 +1304,6 @@ peers_json() {
     printf '[%s]' "$out"
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Модуль: 70-runtime.sh
 # ─────────────────────────────────────────────────────────────────────────────
 # Управление рантаймами (Docker Compose / Systemd), процессами и файрволом.
 
@@ -1550,7 +1428,7 @@ _write_args_file() {
         echo "-connect"; echo "${ARG_CONNECT:-$(connect_addr)}"
         if [ "${ARG_MODE:-$PROXY_MODE}" = "tcp" ]; then
             echo "-mode"; echo "tcp"
-            for tok in ${ARG_KCP[@]+"${ARG_KCP[@]}"}; do echo "$tok"; done
+            local tok; for tok in ${ARG_KCP[@]+"${ARG_KCP[@]}"}; do echo "$tok"; done
         else
             echo "-mode"; echo "udp"
         fi
@@ -1658,6 +1536,40 @@ apply_docker() {
         OBF_KEY="$key"
     fi
 
+    write_compose_file "$mode" "$prof" "$key" "$listen_val" "$connect_val"
+
+    if [ "$INSTALL_FREETURN" = "1" ]; then
+        if [ "$_IS_RPC" = 1 ]; then
+            docker pull "${IMAGE}:$(image_tag)" >/dev/null 2>&1 || true
+        else
+            ui_spin "Загрузка Docker-образа FreeTurn" docker pull "${IMAGE}:$(image_tag)" || true
+        fi
+    fi
+
+    if [ "$INSTALL_AWG" = "1" ]; then
+        ensure_awg_image
+    fi
+
+    if [ "$_IS_RPC" = 1 ]; then
+        ( cd "$APP_DIR" && compose_cmd up -d >/dev/null 2>&1 ) \
+            || fail compose_up_failed "docker compose up failed"
+    else
+        ( cd "$APP_DIR" && ui_spin "Запуск служб" compose_cmd up -d ) || die "docker compose up не удался."
+    fi
+    healthcheck_docker
+}
+
+# Отдельно от apply_docker: частичное удаление обязано перегенерировать файл,
+# иначе следующий `compose up` воскресит снесённый сервис.
+write_compose_file() {
+    local mode="${1:-$PROXY_MODE}" prof="${2:-$OBF_PROFILE}" key="${3:-$OBF_KEY}"
+    local listen_val="${4:-0.0.0.0:${LISTEN_PORT}}" connect_val="${5:-$(connect_addr)}"
+
+    if [ "$INSTALL_FREETURN" != "1" ] && [ "$INSTALL_AWG" != "1" ]; then
+        rm -f "$COMPOSE_FILE"
+        return 0
+    fi
+
     {
         echo "services:"
         if [ "$INSTALL_FREETURN" = "1" ]; then
@@ -1689,7 +1601,7 @@ apply_docker() {
             echo "    environment:"
             echo "      - AWG_IFACE=${AWG_IFACE}"
             echo "      - AWG_CONF=/etc/awg/${AWG_IFACE}.conf"
-            echo "      - AWG_LOG_LEVEL=verbose"
+            echo "      - AWG_LOG_LEVEL=${AWG_LOG_LEVEL:-error}"
             echo "    cap_add:"
             echo "      - NET_ADMIN"
             echo "    devices:"
@@ -1700,26 +1612,6 @@ apply_docker() {
         fi
     } > "$COMPOSE_FILE"
     chmod 0600 "$COMPOSE_FILE"
-
-    if [ "$INSTALL_FREETURN" = "1" ]; then
-        if [ "$_IS_RPC" = 1 ]; then
-            docker pull "${IMAGE}:$(image_tag)" >/dev/null 2>&1 || true
-        else
-            ui_spin "Загрузка Docker-образа FreeTurn" docker pull "${IMAGE}:$(image_tag)" || true
-        fi
-    fi
-
-    if [ "$INSTALL_AWG" = "1" ]; then
-        ensure_awg_image
-    fi
-
-    if [ "$_IS_RPC" = 1 ]; then
-        ( cd "$APP_DIR" && compose_cmd up -d >/dev/null 2>&1 ) \
-            || fail compose_up_failed "docker compose up failed"
-    else
-        ( cd "$APP_DIR" && ui_spin "Запуск служб" compose_cmd up -d ) || die "docker compose up не удался."
-    fi
-    healthcheck_docker
 }
 
 healthcheck_systemd() {
@@ -1869,8 +1761,6 @@ clients_json() {
     printf '[%s]' "$out"
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Модуль: 80-commands.sh
 # ─────────────────────────────────────────────────────────────────────────────
 # Обработчики команд JSON RPC v2, CLI управления клиентами и интерактивных мастеров.
 
@@ -2219,8 +2109,32 @@ cmd_client_remove() {
     ok
 }
 
+awg_conf_mtu() {
+    local v
+    v=$(sed -n "/^[[:space:]]*\[[pP][eE][eE][rR]\]/q; s/^[[:space:]]*MTU[[:space:]]*=[[:space:]]*//Ip" "$AWG_CONF" 2>/dev/null \
+        | head -n1 | sed 's/[#;].*//' | tr -d ' \r')
+    case "$v" in ''|*[!0-9]*) v="$AWG_MTU_DEFAULT" ;; esac
+    echo "$v"
+}
+
+# start.sh контейнера AWG пишет правила в host netns (network_mode: host) - убирать за ним.
+awg_firewall_cleanup() {
+    command -v iptables >/dev/null 2>&1 || return 0
+    # MSS берём из того же conf, что и start.sh, иначе -D не совпадёт с поставленным правилом.
+    local wan mss=$(( $(awg_conf_mtu) - 40 ))
+    wan=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}' || true)
+    iptables -D FORWARD -i "$AWG_IFACE" -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -o "$AWG_IFACE" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+    iptables -t mangle -D FORWARD -o "$AWG_IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$mss" 2>/dev/null || true
+    [ -n "$wan" ] || return 0
+    iptables -t nat -D POSTROUTING -s "${AWG_NET}.0/24" -o "$wan" -j MASQUERADE 2>/dev/null || true
+    iptables -t mangle -D FORWARD -o "$wan" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || true
+}
+
 do_uninstall() {
     local target=${1:-all} purge=${2:-0}
+    load_config
+    apply_overrides   # load_config перечитал install.conf - вернуть флаги CLI поверх него
     with_lock
 
     case "$target" in
@@ -2232,10 +2146,13 @@ do_uninstall() {
             fi
             if has_systemd; then
                 systemctl disable --now "$SERVICE" >/dev/null 2>&1 || true
-                rm -f "$UNIT_FILE"; systemctl daemon-reload || true
+                rm -f "$UNIT_FILE" "$LAUNCHER"; systemctl daemon-reload || true
             fi
             firewall_close_port "$LISTEN_PORT" "udp"
             firewall_close_port "$LISTEN_PORT" "tcp"
+            INSTALL_FREETURN=0
+            [ -f "$COMPOSE_FILE" ] && write_compose_file
+            save_config
             log_success "FreeTurn удалён. AmneziaWG остался активен."
             ;;
         awg)
@@ -2247,8 +2164,13 @@ do_uninstall() {
             if has_systemd; then
                 systemctl disable --now "wg-quick@${WG_IFACE}" >/dev/null 2>&1 || true
             fi
-            firewall_close_port "$BACKEND_PORT"
+            awg_firewall_cleanup
+            firewall_close_port "$BACKEND_PORT" "udp"
             rm -rf "$AWG_DIR"
+            stop_web_server
+            INSTALL_AWG=0
+            [ -f "$COMPOSE_FILE" ] && write_compose_file
+            save_config
             log_success "AmneziaWG удалён. FreeTurn остался активен."
             ;;
         all)
@@ -2266,8 +2188,9 @@ do_uninstall() {
             firewall_close_port "$LISTEN_PORT" "udp"
             firewall_close_port "$LISTEN_PORT" "tcp"
             [ -n "$BACKEND_PORT" ] && firewall_close_port "$BACKEND_PORT" "udp"
+            awg_firewall_cleanup
             stop_web_server
-            rm -f /etc/sysctl.d/99-free-turn-proxy.conf
+            rm -f "$COMPOSE_FILE" /etc/sysctl.d/99-free-turn-proxy.conf
             if [ "$purge" = "1" ] || [ "$PURGE" = "1" ]; then
                 rm -rf "$APP_DIR"
                 rm -f /usr/local/bin/freeturn /usr/local/bin/free-turn-proxy 2>/dev/null || true
@@ -2290,74 +2213,202 @@ cmd_uninstall() {
 # ─────────────────────────────────────────────────────────────────────────────
 # Веб-сервер раздачи файлов клиентов и QR-кодов
 # ─────────────────────────────────────────────────────────────────────────────
-ensure_web_server() {
-    local port="${FT_WEB_PORT:-8080}"
-    mkdir -p "$CLIENTS_DIR"
-
-    if [ -f "$WEB_PID" ]; then
-        local p; p=$(cat "$WEB_PID" 2>/dev/null || true)
-        if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then
-            return 0
-        fi
-        rm -f "$WEB_PID"
-    fi
-
-    if command -v ss >/dev/null 2>&1 && ss -tulpn 2>/dev/null | grep -q ":${port} "; then
-        return 0
-    elif command -v netstat >/dev/null 2>&1 && netstat -tulpn 2>/dev/null | grep -q ":${port} "; then
+# Секрет живёт столько же, сколько установка: ссылки, выданные раньше, не должны протухать.
+# Токен читается заново в каждом $(...) - subshell не вернёт кэш. Поэтому он обязан
+# лечь на диск: незаписанный токен = новая ссылка на каждый вызов, т.е. нерабочая ссылка.
+web_token() {
+    if [ -s "$WEB_TOKEN_FILE" ]; then
+        tr -d ' \r\n' < "$WEB_TOKEN_FILE"
         return 0
     fi
+    local tok
+    tok=$(openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    [ -n "$tok" ] || return 1
+    mkdir -p "$PREFIX" 2>/dev/null || true
+    printf '%s\n' "$tok" > "$WEB_TOKEN_FILE" 2>/dev/null || return 1
+    chmod 0600 "$WEB_TOKEN_FILE" 2>/dev/null || true
+    printf '%s' "$tok"
+}
 
-    if ! command -v python3 >/dev/null 2>&1; then
-        pkg_install python3 >/dev/null 2>&1 || true
-    fi
-    if ! command -v python3 >/dev/null 2>&1; then
-        return 1
-    fi
+# Токен на клиента, а не один на всех: ссылка на 'phone' не должна открывать конфиги 'laptop'.
+# Выводится из мастер-секрета, поэтому отдельного состояния на клиента хранить не надо.
+client_token() {
+    local master h; master=$(web_token) || return 1
+    h=$(printf '%s:%s' "$master" "$1" | sha256sum 2>/dev/null | awk '{print $1}')
+    [ -n "$h" ] || h=$(printf '%s:%s' "$master" "$1" | openssl dgst -sha256 2>/dev/null | awk '{print $NF}')
+    case "$h" in [0-9a-f][0-9a-f]*) ;; *) return 1 ;; esac
+    printf '%s' "${h:0:32}"
+}
 
-    chmod 755 "$CLIENTS_DIR" 2>/dev/null || true
-    (
-        cd "$CLIENTS_DIR"
-        nohup python3 -m http.server "$port" >"$WEB_LOG" 2>&1 &
-        echo $! > "$WEB_PID"
-    )
+web_base_url() {
+    local tok; tok=$(client_token "$2") || return 1
+    printf 'http://%s:%s/%s' "$1" "${FT_WEB_PORT:-8080}" "$tok"
+}
 
-    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        ufw allow "${port}/tcp" >/dev/null 2>&1 || true
-    fi
-    if command -v iptables >/dev/null 2>&1; then
-        iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || \
-            iptables -I INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || true
-    fi
+# docroot отдаёт только index.html; каталог клиента - за симлинком с именем-секретом.
+_web_layout() {
+    local master; master=$(web_token) || { log_warn "Не удалось сохранить $WEB_TOKEN_FILE - веб-раздача выключена."; return 1; }
+    mkdir -p "$WEB_ROOT" "$CLIENTS_DIR" 2>/dev/null || return 1
+    chmod 0755 "$WEB_ROOT" 2>/dev/null || true
+    chmod 0700 "$CLIENTS_DIR" 2>/dev/null || true
+    printf '<!doctype html><title>freeturn</title>\n' > "$WEB_ROOT/index.html"
+    chmod 0644 "$WEB_ROOT/index.html" 2>/dev/null || true
+    # Пустой маяк на неугадываемом имени: по нему _web_listening узнаёт свой сервер.
+    : > "$WEB_ROOT/${master}${WEB_PROBE_EXT}"
+    chmod 0644 "$WEB_ROOT/${master}${WEB_PROBE_EXT}" 2>/dev/null || true
+
+    local keep=" " name tok link
+    while IFS='|' read -r name _; do
+        [ -n "$name" ] && [ -d "${CLIENTS_DIR}/${name}" ] || continue
+        tok=$(client_token "$name") || continue
+        ln -sfn "${CLIENTS_DIR}/${name}" "$WEB_ROOT/$tok" 2>/dev/null || return 1
+        keep="${keep}${tok} "
+    done < <(cat "$CLIENTS_META" 2>/dev/null)
+
+    for link in "$WEB_ROOT"/*; do
+        [ -L "$link" ] || continue
+        case "$keep" in *" ${link##*/} "*) ;; *) rm -f "$link" ;; esac
+    done
     return 0
+}
+
+_web_systemd_active() {
+    has_systemd && systemctl is-active --quiet "${WEB_UNIT}.service" 2>/dev/null
+}
+
+# Пробой по маяку, а не по ss: ss может отсутствовать, и 200 на нём отдаём только мы -
+# чужой слушатель на этом порту вернёт 404.
+_web_listening() {
+    local i=${1:-1}
+    while :; do
+        curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:${FT_WEB_PORT:-8080}/$(web_token)${WEB_PROBE_EXT}" 2>/dev/null \
+            && return 0
+        i=$((i - 1))
+        [ "$i" -le 0 ] && return 1
+        sleep 1
+    done
+}
+
+# Закрытие порта нужно уже вне этого скрипта (ExecStopPost юнита, детач-обёртка фоллбэка),
+# поэтому строкой, а не функцией. Зеркалит firewall_open_port: ufw ИЛИ iptables, не оба,
+# иначе снесём постоянное правило админа на этом порту. Пути абсолютные - PATH юнита чужой.
+_web_close_cmd() {
+    local port=$1 ufw_bin ipt_bin
+    ufw_bin=$(command -v ufw 2>/dev/null || true)
+    ipt_bin=$(command -v iptables 2>/dev/null || true)
+    if [ -n "$ufw_bin" ] && ufw status 2>/dev/null | grep -q "Status: active"; then
+        printf "%s delete allow %s/tcp >/dev/null 2>&1; exit 0" "$ufw_bin" "$port"
+    elif [ -n "$ipt_bin" ]; then
+        printf "%s -D INPUT -p tcp --dport %s -j ACCEPT >/dev/null 2>&1; exit 0" "$ipt_bin" "$port"
+    else
+        printf "exit 0"
+    fi
+}
+
+# Чем поднимать раздачу, по одному аргументу на строку. Оба сервера отдают файлы через
+# симлинк docroot и режут traversal; busybox идёт вторым, т.к. не умеет листинг каталога.
+# Ставить python3 пакетом - только если нет ни того, ни другого.
+_web_server_argv() {
+    local port=$1
+    if command -v python3 >/dev/null 2>&1; then
+        printf '%s\n' python3 -m http.server "$port" --directory "$WEB_ROOT"
+    elif command -v busybox >/dev/null 2>&1; then
+        printf '%s\n' busybox httpd -f -p "$port" -h "$WEB_ROOT"
+    else
+        pkg_install python3 >/dev/null 2>&1 || true
+        command -v python3 >/dev/null 2>&1 || return 1
+        printf '%s\n' python3 -m http.server "$port" --directory "$WEB_ROOT"
+    fi
+}
+
+# Транзиентный юнит: RuntimeMaxSec гасит сервер сам, ExecStopPost закрывает порт при любом
+# исходе, включая SIGKILL. Файл юнита не создаётся, --collect убирает его после смерти.
+_web_start_systemd() {
+    local port=$1 ttl=$2; shift 2
+    has_systemd || return 1
+    command -v systemd-run >/dev/null 2>&1 || return 1
+    systemd-run --collect --quiet --unit="$WEB_UNIT" \
+        --property=RuntimeMaxSec="$ttl" \
+        --property=WorkingDirectory="$WEB_ROOT" \
+        --property=ExecStopPost="/bin/sh -c \"$(_web_close_cmd "$port")\"" \
+        "$@" >/dev/null 2>&1
+}
+
+# Фоллбэк без systemd: одна отвязанная обёртка держит и таймер, и закрытие порта -
+# отдельный сторож пришлось бы ждать через wait, а он потомок не наш.
+_web_start_nohup() {
+    local port=$1 ttl=$2; shift 2
+    command -v timeout >/dev/null 2>&1 || return 1
+    local cmd; cmd=$(printf '%q ' "$@")
+    setsid nohup bash -c \
+        "timeout $ttl $cmd >>'$WEB_LOG' 2>&1; $(_web_close_cmd "$port")" \
+        >/dev/null 2>&1 &
+    _web_listening 8
+}
+
+ensure_web_server() {
+    local port="${FT_WEB_PORT:-8080}" ttl="${FT_WEB_TTL:-900}"
+    _web_layout || return 1
+    # Сервер ещё жив с прошлого вызова - правило в файрволе могли снести извне, вернуть.
+    if _web_systemd_active || _web_listening; then
+        firewall_open_port "$port" tcp
+        return 0
+    fi
+
+    local argv=()
+    while IFS= read -r a; do argv+=("$a"); done < <(_web_server_argv "$port")
+    [ "${#argv[@]}" -gt 0 ] || { log_warn "нет ни python3, ни busybox - веб-раздача выключена."; return 1; }
+
+    # Чужой слушатель на порту: выдавать его ответы за свои ссылки нельзя.
+    local owner; owner=$(port_owner tcp "$port")
+    case "$owner" in
+        free | unknown) ;;
+        *) log_warn "Порт ${port}/tcp занят процессом '${owner}' - веб-раздача выключена, задайте --web-port."
+           return 1 ;;
+    esac
+
+    firewall_open_port "$port" tcp
+    if _web_start_systemd "$port" "$ttl" "${argv[@]}"; then
+        _web_listening 8 && return 0
+        # Юнит есть, а сервера нет - снять, иначе фоллбэк не забиндит порт.
+        systemctl stop "${WEB_UNIT}.service" >/dev/null 2>&1 || true
+    fi
+    _web_start_nohup "$port" "$ttl" "${argv[@]}" && return 0
+    firewall_close_port "$port" tcp
+    log_warn "Не удалось поднять веб-раздачу."
+    return 1
 }
 
 stop_web_server() {
     local port="${FT_WEB_PORT:-8080}"
-    if [ -f "$WEB_PID" ]; then
-        local p; p=$(cat "$WEB_PID" 2>/dev/null || true)
-        [ -n "$p" ] && kill "$p" 2>/dev/null || true
-        rm -f "$WEB_PID"
-    fi
-    pkill -f "python3 -m http.server ${port}" 2>/dev/null || true
-    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q "Status: active"; then
-        ufw delete allow "${port}/tcp" >/dev/null 2>&1 || true
-    fi
-    if command -v iptables >/dev/null 2>&1; then
-        iptables -D INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null || true
-    fi
+    has_systemd && systemctl stop "${WEB_UNIT}.service" >/dev/null 2>&1 || true
+    pkill -f "http\.server ${port} --directory ${WEB_ROOT}" >/dev/null 2>&1 || true
+    pkill -f "httpd -f -p ${port} -h ${WEB_ROOT}" >/dev/null 2>&1 || true
+    firewall_close_port "$port" tcp
+    rm -rf "$WEB_ROOT"
+    rm -f "$WEB_LOG"
 }
 
 show_client_links() {
     local cname="$1" title="${2:-Клиент '$1' готов!}"
-    ensure_web_server || true
-    local ext_ip; ext_ip="$(get_public_ip)"
-    local base_url="http://${ext_ip}:${FT_WEB_PORT:-8080}"
+    local cdir; cdir="$(client_dir "$cname")"
+    local ext_ip; ext_ip="$(get_public_ip)" || { log_error "Не удалось определить внешний IP."; return 1; }
+    if ! ensure_web_server; then
+        log_warn "Файлы клиента '${cname}' лежат в ${cdir}."
+        log_warn "Заберите их так: scp -r root@${ext_ip}:${cdir} ."
+        return 0
+    fi
+    local base_url; base_url="$(web_base_url "$ext_ip" "$cname")"
+    local ttl_min=$(( ${FT_WEB_TTL:-900} / 60 ))
+    # busybox httpd листинга не отдаёт - ссылку на каталог показываем, только если она рабочая.
+    local dir_ok=0
+    curl -fsS --max-time 2 -o /dev/null \
+        "http://127.0.0.1:${FT_WEB_PORT:-8080}/$(client_token "$cname")/" 2>/dev/null && dir_ok=1
 
-    local direct_png="${CLIENTS_DIR}/${cname}-direct.png"
-    local ft_vpn_png="${CLIENTS_DIR}/${cname}-freeturn-vpn.png"
-    local ft_png="${CLIENTS_DIR}/${cname}-freeturn.png"
-    local relay_png="${CLIENTS_DIR}/${cname}-relay.png"
+    local direct_png="${cdir}/${cname}-direct.png"
+    local ft_vpn_png="${cdir}/${cname}-freeturn-vpn.png"
+    local ft_png="${cdir}/${cname}-freeturn.png"
+    local relay_png="${cdir}/${cname}-relay.png"
 
     echo
     if [ "$HAS_GUM" = 1 ]; then
@@ -2369,9 +2420,11 @@ show_client_links() {
         [ -f "$ft_vpn_png" ] && lines+=("  • FreeTurn App (VPN): ${base_url}/${cname}-freeturn-vpn.png")
         [ -f "$ft_png" ] && [ ! -f "$ft_vpn_png" ] && lines+=("  • FreeTurn App:       ${base_url}/${cname}-freeturn.png")
         [ -f "$relay_png" ]  && lines+=("  • AmneziaWG Relay:    ${base_url}/${cname}-relay.png")
-        lines+=("  • Каталог файлов:     ${base_url}/")
+        [ "$dir_ok" = 1 ] && lines+=("  • Каталог файлов:     ${base_url}/")
         lines+=("")
-        lines+=("$(gum style --foreground "$MD_SECONDARY" --italic "Скачать на ПК (SCP): scp root@${ext_ip}:${CLIENTS_DIR}/${cname}* .")")
+        lines+=("$(gum style --foreground "$MD_TERTIARY" "Раздача живёт ${ttl_min} мин, потом порт закрывается. Снова: freeturn client qr ${cname}")")
+        lines+=("$(gum style --foreground "$MD_TERTIARY" "Ссылка содержит приватные ключи '${cname}' - открыта всем, у кого она есть.")")
+        lines+=("$(gum style --foreground "$MD_SECONDARY" --italic "Скачать на ПК (SCP): scp -r root@${ext_ip}:${cdir} .")")
 
         local body; body=$(printf '%s\n' "${lines[@]}")
         gum style --border rounded --border-foreground "$MD_PRIMARY" --padding "1 2" "$body"
@@ -2383,8 +2436,10 @@ show_client_links() {
         [ -f "$ft_vpn_png" ] && echo "  FreeTurn App (VPN): ${base_url}/${cname}-freeturn-vpn.png"
         [ -f "$ft_png" ] && [ ! -f "$ft_vpn_png" ] && echo "  FreeTurn App:       ${base_url}/${cname}-freeturn.png"
         [ -f "$relay_png" ]  && echo "  AmneziaWG Relay:    ${base_url}/${cname}-relay.png"
-        echo "  Каталог файлов:     ${base_url}/"
-        echo "  Скачать на ПК (SCP): scp root@${ext_ip}:${CLIENTS_DIR}/${cname}* ."
+        [ "$dir_ok" = 1 ] && echo "  Каталог файлов:     ${base_url}/"
+        echo "  Раздача живёт ${ttl_min} мин, потом порт закрывается (freeturn client qr ${cname})."
+        echo "  ВНИМАНИЕ: ссылка содержит приватные ключи '${cname}' - открыта всем, у кого она есть."
+        echo "  Скачать на ПК (SCP): scp -r root@${ext_ip}:${cdir} ."
         echo "========================================================"
     fi
 }
@@ -2392,16 +2447,31 @@ show_client_links() {
 # ─────────────────────────────────────────────────────────────────────────────
 # CLI управление клиентами
 # ─────────────────────────────────────────────────────────────────────────────
+# Имя уходит в пути файлов - допускаем только безопасный алфавит (ни '/', ни ведущей точки).
+valid_client_name() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$ ]]; }
+
+client_dir() { printf '%s/%s' "$CLIENTS_DIR" "$1"; }
+
 client_add() {
     local cname="${1:-}" silent="${2:-0}"
-    mkdir -p "$CLIENTS_DIR" "$SHARE_DIR"
-    local ext_ip; ext_ip="$(get_public_ip)"
+    mkdir -p "$CLIENTS_DIR" "$SHARE_DIR"; chmod 0700 "$CLIENTS_DIR" 2>/dev/null || true
+    local ext_ip; ext_ip="$(get_public_ip)" || die "Не удалось определить внешний IP сервера - конфиг клиента был бы нерабочим."
 
     if [ -z "$cname" ]; then
         local next_num=1
         [ -f "$CLIENTS_META" ] && next_num="$(( $(wc -l < "$CLIENTS_META") + 1 ))"
-        ui_input cname "Имя нового клиента" "client-${next_num}"
+        while :; do
+            ui_input cname "Имя нового клиента" "client-${next_num}"
+            valid_client_name "$cname" && break
+            ui_note "Ошибка" "Имя: латиница, цифры, . _ - (до 32 символов). Получено: '$cname'"
+        done
     fi
+    valid_client_name "$cname" || die "Недопустимое имя клиента: '$cname' (латиница, цифры, . _ -)"
+    awk -F'|' -v n="$cname" '$1 == n { found = 1 } END { exit !found }' "$CLIENTS_META" 2>/dev/null \
+        && die "Клиент '$cname' уже существует."
+
+    local cdir; cdir="$(client_dir "$cname")"
+    mkdir -p "$cdir"; chmod 0700 "$cdir" 2>/dev/null || true
 
     local cid=""
     if [ "$INSTALL_FREETURN" = "1" ] && [ -n "$CLIENTS_FILE_CONF" ]; then
@@ -2428,8 +2498,8 @@ AllowedIPs = ${client_ip}/32
 EOF
         awg_reconcile
 
-        direct_conf="${CLIENTS_DIR}/${cname}-direct.conf"
-        relay_conf="${CLIENTS_DIR}/${cname}-relay.conf"
+        direct_conf="${cdir}/${cname}-direct.conf"
+        relay_conf="${cdir}/${cname}-relay.conf"
 
         ( umask 077
           cat > "$direct_conf" <<EOF
@@ -2502,8 +2572,8 @@ EOF
         )
         cp -f "$direct_conf" "$SHARE_DIR/$(_pub_fs "$cli_pub").conf" 2>/dev/null || true
         [ -n "$cid" ] && printf '%s\n' "$cid" > "$SHARE_DIR/$(_pub_fs "$cli_pub").cid" 2>/dev/null || true
-        direct_png="${CLIENTS_DIR}/${cname}-direct.png"
-        relay_png="${CLIENTS_DIR}/${cname}-relay.png"
+        local direct_png="${cdir}/${cname}-direct.png"
+        local relay_png="${cdir}/${cname}-relay.png"
         generate_qr_png_file "$direct_conf" "$direct_png"
         [ -f "$relay_conf" ] && generate_qr_png_file "$relay_conf" "$relay_png"
     fi
@@ -2511,25 +2581,24 @@ EOF
     local ft_uri="" ft_vpn_uri="" ft_png="" ft_vpn_png=""
     if [ "$INSTALL_FREETURN" = "1" ]; then
         ft_uri="$(generate_freeturn_uri "${ext_ip}:${LISTEN_PORT}" "${PROXY_MODE}" "${OBF_PROFILE}" "${OBF_KEY}" "${cid}" "${cname}")"
-        ft_file="${CLIENTS_DIR}/${cname}-freeturn.txt"
-        ft_png="${CLIENTS_DIR}/${cname}-freeturn.png"
+        ft_file="${cdir}/${cname}-freeturn.txt"
+        ft_png="${cdir}/${cname}-freeturn.png"
         echo "$ft_uri" > "$ft_file"; chmod 0600 "$ft_file"
         generate_qr_png_text "$ft_uri" "$ft_png"
 
         if [ -f "$relay_conf" ]; then
             ft_vpn_uri="$(generate_freeturn_uri "${ext_ip}:${LISTEN_PORT}" "${PROXY_MODE}" "${OBF_PROFILE}" "${OBF_KEY}" "${cid}" "${cname}" "$(<"$relay_conf")")"
-            ft_vpn_file="${CLIENTS_DIR}/${cname}-freeturn-vpn.txt"
-            ft_vpn_png="${CLIENTS_DIR}/${cname}-freeturn-vpn.png"
+            local ft_vpn_file="${cdir}/${cname}-freeturn-vpn.txt"
+            ft_vpn_png="${cdir}/${cname}-freeturn-vpn.png"
             echo "$ft_vpn_uri" > "$ft_vpn_file"; chmod 0600 "$ft_vpn_file"
             generate_qr_png_text "$ft_vpn_uri" "$ft_vpn_png"
         fi
     fi
 
-    chmod 644 "${CLIENTS_DIR}/${cname}"* 2>/dev/null || true
     echo "${cname}|${client_ip}|${cid}|$(date '+%Y-%m-%d %H:%M')" >> "$CLIENTS_META"
+    chmod 0600 "$CLIENTS_META" 2>/dev/null || true
 
-    # При silent=1 (первый клиент в ходе установки) не спамим в консоль —
-    # полная информация будет показана в финальной M3-рамке print_summary.
+    # silent=1 - первый клиент в ходе установки: ссылки покажет print_summary.
     if [ "$silent" = "1" ]; then
         return 0
     fi
@@ -2557,7 +2626,7 @@ client_resolve_name() {
     [ -z "$input" ] && return 1
     [ ! -s "$CLIENTS_META" ] && return 1
     # 1. Точное совпадение
-    if grep -q "^${input}|" "$CLIENTS_META" 2>/dev/null; then
+    if awk -F'|' -v n="$input" '$1 == n { found = 1 } END { exit !found }' "$CLIENTS_META" 2>/dev/null; then
         echo "$input"; return 0
     fi
     # 2. Совпадение без дефисов и подчеркиваний (например client1 -> client-1)
@@ -2600,10 +2669,6 @@ client_qr() {
     show_client_links "$cname" "Ссылки для клиента '${cname}'"
 }
 
-client_web() {
-    client_qr "${1:-}"
-}
-
 client_remove() {
     local cname="${1:-}"
     if [ -z "$cname" ]; then
@@ -2613,10 +2678,12 @@ client_remove() {
         [ "$HAS_GUM" = 1 ] && cname=$(gum choose --header "Удалить клиента:" "${names[@]}" </dev/tty) || ui_input cname "Имя" "${names[0]}"
     else
         local resolved; resolved=$(client_resolve_name "$cname" || true)
-        [ -n "$resolved" ] && cname="$resolved"
+        [ -n "$resolved" ] || { log_error "Клиент '$cname' не найден."; client_list; return 1; }
+        cname="$resolved"
     fi
+    valid_client_name "$cname" || die "Недопустимое имя клиента: '$cname'"
 
-    local cid=""; [ -f "$CLIENTS_META" ] && cid=$(grep "^${cname}|" "$CLIENTS_META" | awk -F'|' '{print $3}' || true)
+    local cid=""; [ -f "$CLIENTS_META" ] && cid=$(awk -F'|' -v n="$cname" '$1 == n { print $3; exit }' "$CLIENTS_META" || true)
     [ -n "$cid" ] && clients_remove_soft "$cid"
 
     if [ -f "$AWG_CONF" ]; then
@@ -2631,11 +2698,14 @@ client_remove() {
         rm -f "$tmp"
     fi
 
-    rm -f "${CLIENTS_DIR}/${cname}-direct.conf" "${CLIENTS_DIR}/${cname}-relay.conf" \
-          "${CLIENTS_DIR}/${cname}-freeturn.txt" "${CLIENTS_DIR}/${cname}-freeturn-vpn.txt" \
-          "${CLIENTS_DIR}/${cname}-direct.png" "${CLIENTS_DIR}/${cname}-relay.png" \
-          "${CLIENTS_DIR}/${cname}-freeturn.png" "${CLIENTS_DIR}/${cname}-freeturn-vpn.png"
-    [ -f "$CLIENTS_META" ] && sed -i "/^${cname}|/d" "$CLIENTS_META"
+    rm -rf "$(client_dir "$cname")"
+    local tok; tok=$(client_token "$cname" 2>/dev/null || true)
+    [ -n "$tok" ] && rm -f "$WEB_ROOT/$tok"
+    if [ -f "$CLIENTS_META" ]; then
+        local meta_tmp="$CLIENTS_META.tmp"
+        awk -F'|' -v n="$cname" '$1 != n' "$CLIENTS_META" > "$meta_tmp" && mv -f "$meta_tmp" "$CLIENTS_META"
+        chmod 0600 "$CLIENTS_META" 2>/dev/null || true
+    fi
     log_success "Клиент '${cname}' удалён."
 }
 
@@ -2678,7 +2748,7 @@ wizard() {
             [ -z "$OBF_KEY" ] && OBF_KEY="$(openssl rand -hex 32)"
         else OBF_KEY=""; fi
         ui_yesno "Включить авторизацию по Client ID (allowlist)?" "Y" \
-            && CLIENTS_FILE_CONF="${CLIENTS_DIR}/clients.json" || CLIENTS_FILE_CONF=""
+            && CLIENTS_FILE_CONF="${AUTH_DIR}/clients.json" || CLIENTS_FILE_CONF=""
     fi
 
     if [ "$INSTALL_AWG" = "1" ]; then
@@ -2733,7 +2803,8 @@ install_cli_symlink() {
             cp -f "$cur_script" "$script_target" 2>/dev/null || true
         fi
     elif [ ! -f "$script_target" ]; then
-        local repo_raw="https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master/scripts/install.sh"
+        # Сюда попадаем только из `curl | bash`, т.е. текущий скрипт и есть master.
+        local repo_raw="https://raw.githubusercontent.com/${REPO}/master/scripts/install.sh"
         if command -v curl >/dev/null 2>&1; then
             curl -sSL "$repo_raw" -o "$script_target" 2>/dev/null || true
         elif command -v wget >/dev/null 2>&1; then
@@ -2751,24 +2822,23 @@ install_cli_symlink() {
 apply() {
     save_config
     [ "$INSTALL_AWG" = "1" ] && awg_bootstrap
-    [ "$INSTALL_WG" = "1" ] && wireguard_bootstrap
     if [ "$INSTALL_METHOD" = "docker" ]; then
         apply_docker
     else
         apply_systemd
     fi
     [ "$OPEN_FIREWALL" = 1 ] && firewall_open
-    if [ ! -s "$CLIENTS_META" ] && [ "$INSTALL_AWG" = "1" ]; then
+    if [ ! -s "$CLIENTS_META" ]; then
         client_add "client-1" 1
+        NEW_CLIENT="client-1"
     fi
-    ensure_web_server || true
     install_cli_symlink
+    return 0
 }
 
 print_summary() {
     ui_drain_input
-    local ext_ip; ext_ip="$(get_public_ip)"
-    local web_url="http://${ext_ip}:${FT_WEB_PORT:-8080}"
+    local ext_ip; ext_ip="$(get_public_ip)" || ext_ip="?"
     echo
     if [ "$HAS_GUM" = 1 ]; then
         local lines=()
@@ -2782,18 +2852,6 @@ print_summary() {
             local awg_info=""
             [ "$AWG_DIRECT_PORT" = "1" ] && awg_info=" (прямой доступ открыт)"
             lines+=("  • AmneziaWG 3.1:   $(gum style --bold "порт ${BACKEND_PORT}")${awg_info}")
-        fi
-
-        if [ -s "$CLIENTS_META" ]; then
-            local first_cname; first_cname=$(head -n1 "$CLIENTS_META" | cut -d'|' -f1)
-            if [ -n "$first_cname" ]; then
-                lines+=("")
-                lines+=("$(gum style --foreground "$MD_PRIMARY" --bold "Ссылки для клиента '${first_cname}':")")
-                [ -f "${CLIENTS_DIR}/${first_cname}-direct.png" ]       && lines+=("  • AmneziaWG Direct:   ${web_url}/${first_cname}-direct.png")
-                [ -f "${CLIENTS_DIR}/${first_cname}-freeturn-vpn.png" ] && lines+=("  • FreeTurn App (VPN): ${web_url}/${first_cname}-freeturn-vpn.png")
-                [ -f "${CLIENTS_DIR}/${first_cname}-relay.png" ]        && lines+=("  • AmneziaWG Relay:    ${web_url}/${first_cname}-relay.png")
-                lines+=("  • Каталог файлов:     ${web_url}/")
-            fi
         fi
 
         lines+=("")
@@ -2811,20 +2869,17 @@ print_summary() {
         echo "========================================================"
         [ "$INSTALL_FREETURN" = "1" ] && echo "FreeTurn:  ${ext_ip}:${LISTEN_PORT} (${OBF_PROFILE})"
         [ "$INSTALL_AWG" = "1" ]      && echo "AmneziaWG: порт ${BACKEND_PORT}"
-        if [ -s "$CLIENTS_META" ]; then
-            local first_cname; first_cname=$(head -n1 "$CLIENTS_META" | cut -d'|' -f1)
-            if [ -n "$first_cname" ]; then
-                echo
-                echo "Ссылки для клиента '${first_cname}':"
-                [ -f "${CLIENTS_DIR}/${first_cname}-direct.png" ]       && echo "  • AmneziaWG Direct:   ${web_url}/${first_cname}-direct.png"
-                [ -f "${CLIENTS_DIR}/${first_cname}-freeturn-vpn.png" ] && echo "  • FreeTurn App (VPN): ${web_url}/${first_cname}-freeturn-vpn.png"
-                [ -f "${CLIENTS_DIR}/${first_cname}-relay.png" ]        && echo "  • AmneziaWG Relay:    ${web_url}/${first_cname}-relay.png"
-                echo "  • Каталог файлов:     ${web_url}/"
-            fi
-        fi
         echo
         echo "Управление клиентами: freeturn client <add|list|qr|remove>"
         echo "========================================================"
+    fi
+
+    # Только свежесозданный клиент: --update и --reconfigure не должны заново
+    # открывать порт с чужими приватными ключами (для этого есть client qr).
+    if [ -n "$NEW_CLIENT" ]; then
+        show_client_links "$NEW_CLIENT" "Ссылки для клиента '${NEW_CLIENT}'"
+    else
+        log_info "Ссылки на конфиги и QR: freeturn client qr [name]"
     fi
     ui_drain_input
 }
@@ -2874,9 +2929,16 @@ menu_existing() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Модуль: 90-main.sh
-# ─────────────────────────────────────────────────────────────────────────────
 # Точка входа: маршрутизация RPC, CLI управления пирами, non-interactive и TUI мастера.
+
+# Диспетчер цепляется за точные имена: проверка «по форме строки» ловила бы и CLI-флаги (-y, --update).
+RPC_COMMANDS="probe install wg-setup start stop logs share-info share-list peer-add peer-conf peer-remove client-add client-remove uninstall"
+
+is_rpc_command() {
+    local c
+    for c in $RPC_COMMANDS; do [ "$1" = "$c" ] && return 0; done
+    return 1
+}
 
 usage() {
     cat <<EOF
@@ -2903,11 +2965,18 @@ Free Turn Proxy & AmneziaWG - установщик и контроллер се�
   --backend-port N               порт AmneziaWG (default: 51820)
   --listen-port N                внешний порт FreeTurn (default: 56000)
   --web-port N                   порт веб-раздачи QR и файлов (default: 8080)
+  --web-ttl SEC                  сколько секунд живёт веб-раздача (default: 900)
+  --wg-endpoint HOST:PORT        Endpoint в relay-конфиге клиента (default: 127.0.0.1:9000)
+  --version TAG                  версия FreeTurn (default: latest)
   --awg-direct | --no-awg-direct прямой доступ к порту AWG (default: да)
   --obf rtpopus3|rtpopus2|rtpopus|none  обфускация (default: rtpopus3)
   --obf-key HEX64                ключ обфускации (нет -> сгенерируется)
   --clients-auth | --no-clients-auth   авторизация по Client ID
-  --firewall | --no-firewall     открывать порты в файрволе
+  --firewall | --no-firewall     открывать порты FreeTurn и AWG в файрволе
+
+Файлы клиента отдаются по ссылке http://IP:PORT/<токен клиента>/ на --web-port.
+У каждого клиента ссылка своя, живёт --web-ttl секунд и равносильна его конфигу.
+Показать снова - freeturn client qr <name>; сбросить все - rm /opt/free-turn-proxy/web.token.
 
 Действия:
   --reconfigure                  переконфигурировать сервер
@@ -2918,7 +2987,7 @@ Free Turn Proxy & AmneziaWG - установщик и контроллер се�
   -h, --help                     справка
 
 Машиночитаемый JSON RPC v2 (мобильное приложение):
-  freeturn <probe|install|wg-setup|start|stop|logs|share-info|share-list|peer-add|peer-conf|peer-remove|client-add|client-remove|uninstall> [flags]
+  freeturn <$(printf "%s" "${RPC_COMMANDS// /|}")> [flags]
 EOF
 }
 
@@ -2935,11 +3004,12 @@ parse_cli_args() {
             --backend-port)    OVERRIDES+=("BACKEND_PORT=${2:-51820}"); shift ;;
             --listen-port)     OVERRIDES+=("LISTEN_PORT=${2:-56000}"); shift ;;
             --web-port)        OVERRIDES+=("FT_WEB_PORT=${2:-8080}"); shift ;;
+            --web-ttl)         OVERRIDES+=("FT_WEB_TTL=${2:-900}"); shift ;;
             --awg-direct)      OVERRIDES+=("AWG_DIRECT_PORT=1") ;;
             --no-awg-direct)   OVERRIDES+=("AWG_DIRECT_PORT=0") ;;
             --obf)             OVERRIDES+=("OBF_PROFILE=${2:-rtpopus3}"); shift ;;
             --obf-key)         OVERRIDES+=("OBF_KEY=${2:-}"); shift ;;
-            --clients-auth)    OVERRIDES+=("CLIENTS_FILE_CONF=${CLIENTS_DIR}/clients.json") ;;
+            --clients-auth)    OVERRIDES+=("CLIENTS_FILE_CONF=${AUTH_DIR}/clients.json") ;;
             --no-clients-auth) OVERRIDES+=("CLIENTS_FILE_CONF=") ;;
             --wg-endpoint)     OVERRIDES+=("WG_ENDPOINT=${2:-}"); shift ;;
             --version)         OVERRIDES+=("VERSION=${2:-latest}"); shift ;;
@@ -2964,30 +3034,39 @@ main() {
         fi
     done
 
-    # JSON RPC v2 протокол (вызовы без дефисов, кроме 'client')
-    if [ $# -ge 1 ] && [[ "$1" =~ ^[a-z-]+$ ]] && [ "$1" != "client" ]; then
-        case "$1" in
-            probe)         _IS_RPC=1; HAS_GUM=0; cmd_probe; return 0 ;;
-            install)       _IS_RPC=1; HAS_GUM=0; shift; parse_rpc_args "$@"; cmd_install; return 0 ;;
-            wg-setup)      _IS_RPC=1; HAS_GUM=0; shift; parse_rpc_args "$@"; cmd_wg_setup; return 0 ;;
-            start)         _IS_RPC=1; HAS_GUM=0; shift; parse_rpc_args "$@"; cmd_start; return 0 ;;
-            stop)          _IS_RPC=1; HAS_GUM=0; cmd_stop; return 0 ;;
-            logs)          _IS_RPC=1; HAS_GUM=0; shift; parse_rpc_args "$@"; cmd_logs; return 0 ;;
-            share-info)    _IS_RPC=1; HAS_GUM=0; cmd_share_info; return 0 ;;
-            share-list)    _IS_RPC=1; HAS_GUM=0; cmd_share_list; return 0 ;;
-            peer-add)      _IS_RPC=1; HAS_GUM=0; shift; parse_rpc_args "$@"; cmd_peer_add; return 0 ;;
-            peer-conf)     _IS_RPC=1; HAS_GUM=0; shift; parse_rpc_args "$@"; cmd_peer_conf; return 0 ;;
-            peer-remove)   _IS_RPC=1; HAS_GUM=0; shift; parse_rpc_args "$@"; cmd_peer_remove; return 0 ;;
-            client-add)    _IS_RPC=1; HAS_GUM=0; shift; parse_rpc_args "$@"; cmd_client_add; return 0 ;;
-            client-remove) _IS_RPC=1; HAS_GUM=0; shift; parse_rpc_args "$@"; cmd_client_remove; return 0 ;;
-            uninstall)     _IS_RPC=1; HAS_GUM=0; shift; parse_rpc_args "$@"; cmd_uninstall; return 0 ;;
-            *)             _IS_RPC=1; HAS_GUM=0; fail bad_arg "unknown subcommand: $1" ;;
+    local rpc_cmd=""
+    if is_rpc_command "${1:-}"; then
+        rpc_cmd="$1"
+    else
+        case "${1:-}" in
+            ""|-*|client) ;;
+            *) _IS_RPC=1; HAS_GUM=0; fail bad_arg "unknown subcommand: $1" ;;
         esac
+    fi
+    if [ -n "$rpc_cmd" ]; then
+        _IS_RPC=1; HAS_GUM=0; shift
+        parse_rpc_args "$@"
+        case "$rpc_cmd" in
+            probe)         cmd_probe ;;
+            install)       cmd_install ;;
+            wg-setup)      cmd_wg_setup ;;
+            start)         cmd_start ;;
+            stop)          cmd_stop ;;
+            logs)          cmd_logs ;;
+            share-info)    cmd_share_info ;;
+            share-list)    cmd_share_list ;;
+            peer-add)      cmd_peer_add ;;
+            peer-conf)     cmd_peer_conf ;;
+            peer-remove)   cmd_peer_remove ;;
+            client-add)    cmd_client_add ;;
+            client-remove) cmd_client_remove ;;
+            uninstall)     cmd_uninstall ;;
+        esac
+        return 0
     fi
 
     # Проверка прав root
     [ "$(id -u 2>/dev/null || echo -1)" -ne 0 ] && die "Запустите скрипт от root (sudo)."
-    install_cli_symlink
     ensure_base_deps
     detect_arch >/dev/null 2>&1 || true
 

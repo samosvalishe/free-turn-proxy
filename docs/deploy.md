@@ -6,7 +6,7 @@
 
 ## Автоматическая установка (Рекомендуется)
 
-Проще всего использовать официальный скрипт. Он автоматически установит зависимости, настроит **AmneziaWG (AWG 3.1)** или WireGuard, поднимет контейнеры через Docker Compose, сгенерирует ключи обфускации, создаст первого клиента и покажет **QR-код** для мгновенного импорта в приложение AmneziaWG.
+Проще всего использовать официальный скрипт. Он автоматически установит зависимости, настроит **AmneziaWG (AWG 3.1)**, поднимет контейнеры через Docker Compose, сгенерирует ключи обфускации, создаст первого клиента и выдаст **ссылки на QR-коды и конфиги** для импорта в приложение.
 
 **Интерактивный мастер** (задаст вопросы в терминале):
 ```bash
@@ -27,7 +27,7 @@ freeturn client list
 freeturn client qr phone
 
 # Скачивание файлов напрямую на ПК (выполняется в PowerShell / терминале ПК):
-# scp root@<vps_ip>:/opt/free-turn-proxy/clients/phone* .
+# scp -r root@<vps_ip>:/opt/free-turn-proxy/clients/phone .
 
 # Удалить клиента
 freeturn client remove phone
@@ -36,11 +36,13 @@ freeturn client remove phone
 freeturn
 ```
 
+> Ссылки на QR и конфиги временные: живут `--web-ttl` секунд (по умолчанию 15 минут), потом порт закрывается. У каждого клиента ссылка своя и равносильна его конфигу - делитесь осторожно; сбросить все сразу - `rm /opt/free-turn-proxy/web.token`.
+
 **Неинтерактивный режим** (для автоматизации / CI):
 ```bash
 # Установка через Docker с AmneziaWG бэкендом (AWG 3.1, порт 51820)
 curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master/scripts/install.sh | \
-  sudo bash -s -- -y --backend awg --backend-port 51820 --obf rtpopus3
+  sudo bash -s -- -y --backend-port 51820 --obf rtpopus3
 
 # Обновление до конкретной версии
 freeturn -y --update --version v1.2.3
@@ -69,7 +71,7 @@ openssl rand -hex 32
    ```
 2. Создайте директорию и `docker-compose.yml`:
    ```bash
-   mkdir -p /opt/free-turn-proxy/awg /opt/free-turn-proxy/clients && cd /opt/free-turn-proxy
+   mkdir -p /opt/free-turn-proxy/awg /opt/free-turn-proxy/auth && cd /opt/free-turn-proxy
    nano docker-compose.yml
    ```
 3. Вставьте конфигурацию (совместный запуск прокси и AmneziaWG бэкенда):
@@ -86,9 +88,9 @@ openssl rand -hex 32
          - MODE=udp                      # udp (WG/AmneziaWG) или tcp (Xray/VLESS)
          - OBF_PROFILE=rtpopus3          # Рекомендуемая маскировка (RTP/opus + RFC 8285 + ChaCha20)
          - OBF_KEY=<ВАШ_КЛЮЧ>            # 64-hex ключ (openssl rand -hex 32)
-         # - CLIENTS_FILE=/opt/free-turn-proxy/clients/clients.json # Для авторизации
+         # - CLIENTS_FILE=/opt/free-turn-proxy/auth/clients.json # Для авторизации
        # volumes:
-       #   - /opt/free-turn-proxy/clients:/opt/free-turn-proxy/clients
+       #   - /opt/free-turn-proxy/auth:/opt/free-turn-proxy/auth
 
      # Опционально: VPN-бэкенд AmneziaWG (AWG 3.1)
      freeturn-awg:
@@ -97,7 +99,7 @@ openssl rand -hex 32
        network_mode: "host"
        environment:
          - AWG_IFACE=ftawg0
-         - AWG_LOG_LEVEL=verbose
+         - AWG_LOG_LEVEL=error
        cap_add:
          - NET_ADMIN
        devices:
@@ -200,24 +202,27 @@ sudo ufw allow 56000/udp
 # Или iptables: sudo iptables -I INPUT -p udp --dport 56000 -j ACCEPT
 ```
 
+Для прямого AWG нужен ещё `51820/udp` - установщик открывает его при `--firewall`.
+Порт веб-раздачи открывать вручную не нужно, установщик делает это сам.
+
 ---
 
 ## Авторизация по Client ID (Опционально)
 
 По умолчанию доступ открыт всем, кто знает `-obf-key`. Чтобы ограничить доступ:
 
-1. Создайте пустой список: `echo '{"clients":{}}' | sudo tee /opt/free-turn-proxy/clients/clients.json`
+1. Создайте пустой список: `echo '{"clients":{}}' | sudo tee /opt/free-turn-proxy/auth/clients.json`
 2. Включите авторизацию:
    - **Docker:** раскомментируйте `CLIENTS_FILE` и `volumes` в `docker-compose.yml`, затем `docker compose up -d`.
-   - **systemd:** добавьте флаг `-clients-file /opt/free-turn-proxy/clients/clients.json` в `ExecStart` и перезапустите службу.
+   - **systemd:** добавьте флаг `-clients-file /opt/free-turn-proxy/auth/clients.json` в `ExecStart` и перезапустите службу.
 3. Добавляйте клиентов:
    - Через установщик:
      ```bash
-     sudo bash install.sh client add <имя>
+     freeturn client add <имя>
      ```
    - Напрямую через бинарник:
-     - **Docker:** `docker exec -i free-turn-proxy env CLIENTS_FILE=/opt/free-turn-proxy/clients/clients.json /app/server clients add <id> [комментарий]`
-     - **systemd:** `CLIENTS_FILE=/opt/free-turn-proxy/clients/clients.json /opt/free-turn-proxy/server clients add <id> [комментарий]`
+     - **Docker:** `docker exec -i free-turn-proxy env CLIENTS_FILE=/opt/free-turn-proxy/auth/clients.json /app/server clients add <id> [комментарий]`
+     - **systemd:** `CLIENTS_FILE=/opt/free-turn-proxy/auth/clients.json /opt/free-turn-proxy/server clients add <id> [комментарий]`
    
    На клиенте используйте флаг `-client-id <id>` или готовую ссылку `freeturn://`.
 

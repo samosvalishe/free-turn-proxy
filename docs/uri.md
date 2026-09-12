@@ -28,8 +28,8 @@ Payload - JSON-объект, закодированный `base64url` (без pa
 | `mode` | `-mode` | режим туннеля: `udp` \| `tcp`; отсутствует - `udp`. |
 | `obf` | `-obf-profile` | профиль обфускации (`rtpopus` \| `rtpopus2`); `none` опускается. |
 | `key` | `-obf-key` | ключ обфускации (hex), только при заданном `obf`. |
-| `n` | `-n` | число TURN-потоков. |
-| `spc` | `-streams-per-cred` | потоков на один кеш VK-учёток. |
+| `n` | `-n` | число TURN-потоков; отсутствует - дефолт клиента. |
+| `spc` | `-streams-per-cred` | потоков на один кеш VK-учёток; отсутствует - дефолт клиента. |
 | `cid` | `-client-id` | Client ID гостя; owner добавляет его в allowlist (`clients.json`). |
 | `listen` | `-listen` | локальный `ip:port` для WireGuard/Xray. |
 | `dns` | `-dns-mode` | резолвер клиента: `plain` \| `doh` \| `auto`. |
