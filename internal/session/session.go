@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/samosvalishe/free-turn-proxy/internal/client/dnsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
@@ -141,6 +142,11 @@ func New(cfg *config.Client, deps Deps) (*Session, error) {
 	if deps.Logger == nil {
 		deps.Logger = logx.Nop()
 	}
+	id, err := uuid.NewRandom()
+	if err != nil {
+		return nil, fmt.Errorf("session diagnostic ID: %w", err)
+	}
+	deps.Logger = logx.WithPrefix(deps.Logger, "[session="+id.String()+"] ")
 
 	total := cfg.TURN.N * max(len(cfg.VK.Links), 1)
 
@@ -165,6 +171,11 @@ func (s *Session) Run(ctx context.Context) (err error) {
 	if !s.started.CompareAndSwap(false, true) {
 		return ErrAlreadyRun
 	}
+	startedAt := time.Now()
+	s.deps.Logger.Infof("lifecycle start mode=%s streams=%d", s.cfg.Proxy.Mode, s.total)
+	defer func() {
+		s.deps.Logger.Infof("lifecycle stop elapsed=%s error=%v", time.Since(startedAt).Truncate(time.Millisecond), err)
+	}()
 	s.publish(&statusInfo{phase: PhaseConnecting, total: s.total}, true)
 	defer func() {
 		if err != nil {
@@ -243,19 +254,28 @@ func (s *Session) runRelayLoop(ctx context.Context, prov provider.Provider, peer
 
 func (s *Session) relayLoop(ctx context.Context, attempt func(context.Context) error) error {
 	log := s.deps.Logger
-	for {
+	for generation := uint64(1); ; generation++ {
+		startedAt := time.Now()
+		log.Infof("relay start generation=%d", generation)
 		attemptCtx, attemptCancel := context.WithCancel(ctx)
 		done := make(chan error, 1)
 		go func() { done <- safego.Call(log, func() error { return attempt(attemptCtx) }) }()
 
 		var err error
+		reason := "finished"
 		select {
 		case err = <-done:
 		case <-s.reconnectCh:
+			reason = "reconnect"
 			attemptCancel()
 			err = <-done
 		}
 		attemptCancel()
+		if ctx.Err() != nil {
+			reason = "cancelled"
+		}
+		log.Infof("relay stop generation=%d reason=%s elapsed=%s error=%v", generation, reason,
+			time.Since(startedAt).Truncate(time.Millisecond), err)
 
 		if ctx.Err() != nil {
 			return err
