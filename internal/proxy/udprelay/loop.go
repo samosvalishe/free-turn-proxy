@@ -13,6 +13,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/clientsdb"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider"
 	"github.com/samosvalishe/free-turn-proxy/internal/randx"
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/turndial"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/shape"
 )
@@ -20,6 +21,11 @@ import (
 // errPairRecycled - пару свернул TURN-цикл (аллокация мертва), а не сеть: сетевой
 // backoff тут только удлиняет простой.
 var errPairRecycled = errors.New("udprelay: stream pair recycled")
+
+const (
+	quotaBackoff       = 15 * time.Second
+	quotaBackoffJitter = 15 * time.Second
+)
 
 // streamPair связывает DTLS-сессию с аллокацией, поверх которой она поднята. Смерть
 // аллокации обязана ронять DTLS: у новой аллокации другой relayed-адрес, а миграция
@@ -87,6 +93,17 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 					deps.log().Errorf("[STREAM %d] Fatal provider error. Shutting down application.", streamID)
 					deps.fatal(err)
 					return
+				}
+				// Квота может оставаться занятой после deallocate.
+				if errors.Is(err, turndial.ErrAllocQuota) {
+					wait := quotaBackoff + time.Duration(randx.Intn(int(quotaBackoffJitter/time.Second)))*time.Second
+					deps.log().Warnf("[STREAM %d] квота аллокаций занята - пауза %s", streamID, wait)
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(wait):
+					}
+					continue
 				}
 				if errors.Is(err, provider.ErrBackoffActive) {
 					lockoutEnd := deps.Auth.BackoffUntilUnix()
@@ -161,6 +178,9 @@ func dtlsSession(dtlsctx context.Context, dtlscancel context.CancelFunc, deps *D
 	if err := clientsdb.WriteClientID(dtlsConn, params.ClientID, clientsdb.ModeUDP); err != nil {
 		return fmt.Errorf("failed to write client ID: %w", err)
 	}
+	// Аллокация без DTLS ещё не может передавать пользовательский трафик.
+	deps.ConnectedStreams.Add(1)
+	defer deps.ConnectedStreams.Add(-1)
 	if okchan != nil {
 		select {
 		case okchan <- struct{}{}:
@@ -232,7 +252,6 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		deps.log().Debugf("[STREAM %d] obf-timing=%s", streamID, params.ObfTiming)
 	}
 
-	deps.ConnectedStreams.Add(1)
 	deps.Auth.ResetErrors(streamID)
 
 	relayedAddr := relayConn.LocalAddr().String()
@@ -240,7 +259,6 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		streamID, relayedAddr, stream.ServerUDPAddr.IP)
 
 	defer func() {
-		deps.ConnectedStreams.Add(-1)
 		// Освобождение аллокации логируем всегда: недошедший deallocate держит квоту VK
 		// до конца её lifetime, и следующий Allocate ловит 486.
 		cerr := stream.Close()
@@ -275,7 +293,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		select {
 		case <-turnctx.Done():
 		case <-stream.PermDead:
-			deps.log().Warnf("[STREAM %d] TURN channel-bind умер - рецикл allocation", streamID)
+			deps.log().Warnf("[STREAM %d] TURN refresh failed - recycle allocation", streamID)
 			turncancel()
 		}
 		// conn2 молчит, пока приложение не шлёт: без дедлайна его читатель досидел бы

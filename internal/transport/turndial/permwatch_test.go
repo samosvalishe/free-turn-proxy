@@ -64,8 +64,36 @@ func TestPermWatchIgnoresUnrelatedMessages(t *testing.T) {
 	log := f.NewLogger(turncScope)
 	log.Debug("Started refresh permission timer")
 	log.Debug("No permission to refresh")
-	log.Warnf("Failed to refresh allocation: %s", "x")
+	log.Debug("Refresh permissions successful")
 	if fired.Load() != 0 {
 		t.Fatalf("fired on unrelated message: %d", fired.Load())
+	}
+}
+
+// Провал Refresh мимо порога ChannelBind: аллокация уже мертва.
+func TestPermWatchFiresOnAllocRefreshFail(t *testing.T) {
+	f, fired := newTestWatch(2)
+	log := f.NewLogger(turncScope)
+
+	log.Warnf(allocFailMarker+": %s", "all retransmissions failed")
+	if fired.Load() != 1 {
+		t.Fatalf("expected immediate fire, got %d", fired.Load())
+	}
+	log.Warnf(allocFailMarker + ": again")
+	if fired.Load() != 1 {
+		t.Fatalf("fired more than once: %d", fired.Load())
+	}
+}
+
+// Успешный ChannelBind не отменяет мёртвую аллокацию.
+func TestPermWatchAllocFailNotResetByBindOK(t *testing.T) {
+	f, fired := newTestWatch(2)
+	log := f.NewLogger(turncScope)
+
+	log.Warnf(allocFailMarker + ": x")
+	log.Debug(permOKMarker)
+	log.Warnf(allocFailMarker + ": x")
+	if fired.Load() != 1 {
+		t.Fatalf("expected exactly 1 fire, got %d", fired.Load())
 	}
 }

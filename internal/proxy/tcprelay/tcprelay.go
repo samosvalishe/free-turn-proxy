@@ -21,6 +21,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcpmux"
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/turndial"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/shape"
 	"github.com/xtaci/smux"
@@ -324,6 +325,9 @@ func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.
 // retryDelay: пауза провайдера важнее собственной - ретрай в её середине только продлевает
 // локаут и жжёт персону. Джиттер разводит одновременный отказ всех сессий пула.
 func retryDelay(auth AuthHandler, err error) time.Duration {
+	if errors.Is(err, turndial.ErrAllocQuota) {
+		return time.Duration(15+randx.Intn(15)) * time.Second
+	}
 	if errors.Is(err, provider.ErrBackoffActive) {
 		if until := auth.BackoffUntilUnix(); until > 0 {
 			if d := time.Until(time.Unix(until, 0)); d > 0 {

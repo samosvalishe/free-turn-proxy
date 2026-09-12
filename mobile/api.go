@@ -33,7 +33,6 @@ const (
 )
 
 const (
-	connectTimeout     = 15 * time.Second
 	stopTimeout        = 5 * time.Second
 	tunnelCloseTimeout = 3 * time.Second
 )
@@ -304,8 +303,8 @@ func startLocked(configJSON string, tunFD int, withTunnel bool) error {
 		Solver:        solver,
 		CaptchaActive: captchaActive.Load,
 		Options: session.Options{
-			ConnectTimeout: connectTimeout,
-			Traffic:        true,
+			// Сеть и квота TURN восстанавливаются дольше 15 с; остановку решает пользователь.
+			Traffic: true,
 		},
 	}
 	if parts != nil {

@@ -3,17 +3,23 @@ package turndial
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/pion/stun/v3"
 	"github.com/pion/turn/v5"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/netconn"
 	"github.com/samosvalishe/free-turn-proxy/internal/netctl"
 	"github.com/samosvalishe/free-turn-proxy/internal/randx"
 )
+
+// ErrAllocQuota - TURN-код 486: реквизиты валидны, но по ним уже висит предельное число
+// аллокаций. Лечится ожиданием, а не сменой реквизитов (см. IsAuthError в vkauth).
+var ErrAllocQuota = errors.New("turndial: allocation quota reached")
 
 // Config задаёт параметры подключения к TURN-серверу.
 type Config struct {
@@ -32,6 +38,11 @@ type Stream struct {
 	// PermDead закрывается при стойком провале ChannelBind refresh (relay блэкхолит трафик).
 	PermDead <-chan struct{}
 	close    func() error
+}
+
+func isQuotaError(err error) bool {
+	turnErr, ok := errors.AsType[*stun.TurnError](err)
+	return ok && turnErr.ErrorCodeAttr.Code == stun.CodeAllocQuotaReached
 }
 
 // Close освобождает аллокацию, TURN-клиент и транспортное соединение.
@@ -140,6 +151,9 @@ func Open(ctx context.Context, cfg Config, peer *net.UDPAddr, user, pass, rawAdd
 		client.Close()
 		if cerr := closeConn(); cerr != nil {
 			err = fmt.Errorf("%w (close: %v)", err, cerr)
+		}
+		if isQuotaError(err) {
+			return nil, fmt.Errorf("%w: %w", ErrAllocQuota, err)
 		}
 		return nil, fmt.Errorf("TURN allocate: %w", err)
 	}

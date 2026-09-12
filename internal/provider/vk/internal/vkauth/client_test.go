@@ -56,7 +56,8 @@ func TestIsAuthErrorTurnCode(t *testing.T) {
 	t.Parallel()
 
 	codes := map[stun.ErrorCode]bool{
-		stun.CodeAllocQuotaReached:    true,
+		// 486 - занята квота по валидным реквизитам, менять их незачем.
+		stun.CodeAllocQuotaReached:    false,
 		stun.CodeUnauthorized:         true,
 		stun.CodeStaleNonce:           true,
 		stun.CodeWrongCredentials:     true,

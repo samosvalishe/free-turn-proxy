@@ -12,6 +12,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/provider"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/allocpace"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/turndial"
 )
 
 type fakeAuth struct {
@@ -20,6 +21,15 @@ type fakeAuth struct {
 	handled      atomic.Int32
 	reset        atomic.Int32
 	dropped      atomic.Int32
+}
+
+func TestRetryDelayAllocationQuota(t *testing.T) {
+	for range 100 {
+		delay := retryDelay(&fakeAuth{}, errors.Join(errors.New("allocate"), turndial.ErrAllocQuota))
+		if delay < 15*time.Second || delay >= 30*time.Second {
+			t.Fatalf("quota retry delay = %s", delay)
+		}
+	}
 }
 
 func (a *fakeAuth) IsAuthError(err error) bool {

@@ -1,6 +1,7 @@
 .idea
 .claude
 CLAUDE.md
+AGENTS.md
 *.exe
 *.so
 *.tmp

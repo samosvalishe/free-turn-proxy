@@ -2,11 +2,29 @@ package turndial
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pion/stun/v3"
 )
+
+func TestIsQuotaError(t *testing.T) {
+	quota := &stun.TurnError{ErrorCodeAttr: stun.ErrorCodeAttribute{Code: stun.CodeAllocQuotaReached}}
+	if !isQuotaError(fmt.Errorf("allocate: %w", quota)) {
+		t.Fatal("wrapped 486 not recognized")
+	}
+	if isQuotaError(errors.New("486 Allocation Quota Reached")) || isQuotaError(nil) {
+		t.Fatal("untyped error treated as quota")
+	}
+	unauthorized := &stun.TurnError{ErrorCodeAttr: stun.ErrorCodeAttribute{Code: stun.CodeUnauthorized}}
+	if isQuotaError(unauthorized) {
+		t.Fatal("401 treated as quota")
+	}
+}
 
 func TestOpen_BadAddress(t *testing.T) {
 	peer := &net.UDPAddr{IP: net.ParseIP("1.2.3.4"), Port: 1}

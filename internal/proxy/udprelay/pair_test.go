@@ -53,6 +53,9 @@ func TestOneDTLSPairCancelRecycles(t *testing.T) {
 	if pair.pipe == nil || pair.cancel == nil {
 		t.Fatal("incomplete pair")
 	}
+	if got := deps.ConnectedStreams.Load(); got != 0 {
+		t.Fatalf("unfinished handshake counted as connected: %d", got)
+	}
 
 	pair.cancel()
 
