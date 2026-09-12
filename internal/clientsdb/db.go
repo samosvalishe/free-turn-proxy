@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"os"
 	"sync"
@@ -61,16 +62,18 @@ func (db *DB) Add(clientID, comment string) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	db.data.Clients[clientID] = ClientInfo{Comment: comment}
-	return db.save()
+	next := Data{Clients: maps.Clone(db.data.Clients)}
+	next.Clients[clientID] = ClientInfo{Comment: comment}
+	return db.save(next)
 }
 
 func (db *DB) Remove(clientID string) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	delete(db.data.Clients, clientID)
-	return db.save()
+	next := Data{Clients: maps.Clone(db.data.Clients)}
+	delete(next.Clients, clientID)
+	return db.save(next)
 }
 
 func (db *DB) List() map[string]ClientInfo {
@@ -126,8 +129,8 @@ func (db *DB) loadIfModified() {
 	}
 }
 
-func (db *DB) save() error {
-	b, err := json.MarshalIndent(db.data, "", "  ")
+func (db *DB) save(next Data) error {
+	b, err := json.MarshalIndent(next, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -138,6 +141,8 @@ func (db *DB) save() error {
 		err = os.Rename(tmpFile, db.path)
 	}
 	if err == nil {
+		// Авторизация меняется только после успешной замены файла.
+		db.data = next
 		stat, _ := os.Stat(db.path)
 		if stat != nil {
 			db.lastModified = stat.ModTime()

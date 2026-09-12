@@ -2,10 +2,54 @@ package clientsdb
 
 import (
 	"net"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestFailedSavePreservesAuthorization(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clients.json")
+	db, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Add("existing", "original"); err != nil {
+		t.Fatal(err)
+	}
+	// Каталог вместо временного файла воспроизводит отказ записи без прав root.
+	if err := os.Mkdir(path+".tmp", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	operations := []struct {
+		name string
+		run  func() error
+	}{
+		{"add", func() error { return db.Add("new", "new") }},
+		{"update", func() error { return db.Add("existing", "changed") }},
+		{"remove", func() error { return db.Remove("existing") }},
+	}
+	for _, op := range operations {
+		t.Run(op.name, func(t *testing.T) {
+			if err := op.run(); err == nil {
+				t.Fatal("save unexpectedly succeeded")
+			}
+			if !db.IsAuthorized("existing") || db.IsAuthorized("new") {
+				t.Fatal("failed save changed authorization")
+			}
+			if got := db.List(); len(got) != 1 || got["existing"].Comment != "original" {
+				t.Fatalf("failed save changed clients: %+v", got)
+			}
+		})
+	}
+	loaded, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.List(); len(got) != 1 || got["existing"].Comment != "original" {
+		t.Fatalf("disk changed: %+v", got)
+	}
+}
 
 func TestClientsDB(t *testing.T) {
 	tmpDir := t.TempDir()
