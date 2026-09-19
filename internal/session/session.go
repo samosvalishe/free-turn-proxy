@@ -187,9 +187,12 @@ func (s *Session) Run(ctx context.Context) (err error) {
 
 	log := s.deps.Logger
 	dnsdial.SetLogger(log)
-	if s.cfg.DNS.Servers != nil {
+
+	if len(s.cfg.DNS.Servers) > 0 {
 		dnsdial.SetUDPDNSServers(s.cfg.DNS.Servers)
 		log.Infof("[DNS] using custom UDP servers: %v", s.cfg.DNS.Servers)
+	} else {
+		dnsdial.ResetUDPDNSServers()
 	}
 	appDialer := dnsdial.AppDialer(s.cfg.DNS.Mode)
 	dnsdial.InstallGlobalResolver(s.cfg.DNS.Mode)

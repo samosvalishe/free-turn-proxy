@@ -345,7 +345,9 @@ const (
 
 var udpDNSServersPtr atomic.Pointer[[]string]
 
-func init() {
+func init() { ResetUDPDNSServers() }
+
+func ResetUDPDNSServers() {
 	def := []string{
 		"77.88.8.8:53", "77.88.8.1:53",
 		"8.8.8.8:53", "8.8.4.4:53",
