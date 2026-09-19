@@ -3,6 +3,7 @@ package mobile
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 // logBufMax - размер кольцевого буфера логов для DumpLogs.
@@ -35,6 +36,15 @@ func (b *logBuffer) clear() {
 }
 
 var sharedLogBuf = &logBuffer{}
+
+var logBufOff atomic.Bool
+
+func SetLogBuffer(enabled bool) {
+	logBufOff.Store(!enabled)
+	if !enabled {
+		sharedLogBuf.clear()
+	}
+}
 
 func DumpLogs() string { return sharedLogBuf.get() }
 

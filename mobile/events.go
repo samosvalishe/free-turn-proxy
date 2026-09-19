@@ -68,7 +68,9 @@ type sinkLogger struct {
 func (l *sinkLogger) write(level, format string, v ...any) {
 	msg := fmt.Sprintf(format, v...)
 	now := time.Now()
-	l.buf.append(now.Format("15:04:05") + " [" + level + "] " + msg)
+	if !logBufOff.Load() {
+		l.buf.append(now.Format("15:04:05") + " [" + level + "] " + msg)
+	}
 	if s := currentSink(); s != nil {
 		s.OnLog(level, msg, now.UnixMilli())
 	}

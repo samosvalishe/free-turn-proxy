@@ -36,6 +36,7 @@ func ValidateConfig(configJSON string) string       // Валидация JSON
 func ConfigToArgs(configJSON string) (string, error) // Вывод эквивалентной CLI-команды
 func DumpLogs() string
 func ClearLogs()
+func SetLogBuffer(enabled bool)
 func Version() string
 ```
 
