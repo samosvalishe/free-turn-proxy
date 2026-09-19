@@ -21,6 +21,7 @@ func TestRoundTrip(t *testing.T) {
 				Mode:           "tcp",
 				ObfProfile:     "rtpopus",
 				ObfKey:         "d823fa",
+				ObfTimingMs:    20,
 				N:              16,
 				StreamsPerCred: 8,
 				ClientID:       "abc123",
@@ -29,6 +30,7 @@ func TestRoundTrip(t *testing.T) {
 				DNSServers:     "1.1.1.1,8.8.8.8",
 				ManualCaptcha:  true,
 				Comment:        "MyServer",
+				VKLink:         "https://vk.ru/call/join/abc",
 			},
 		},
 		{

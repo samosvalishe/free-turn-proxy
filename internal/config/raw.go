@@ -85,6 +85,14 @@ func (r *raw) applyURI(u *uri.Config) {
 	if u.ObfKey != "" {
 		r.ObfKey = u.ObfKey
 	}
+
+	if u.ObfTimingMs > 0 && u.ObfProfile != "" && u.ObfProfile != string(ObfProfileNone) {
+		r.ObfTiming = time.Duration(u.ObfTimingMs) * time.Millisecond
+	}
+
+	if u.VKLink != "" && r.Links == "" && r.Link == "" {
+		r.Links = u.VKLink
+	}
 	if u.Peer != "" {
 		r.Peer = u.Peer
 	}

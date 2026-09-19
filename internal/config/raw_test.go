@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/uri"
 )
@@ -89,6 +90,34 @@ func TestApplyURIOverridesOnlyPresentFields(t *testing.T) {
 	}
 	if r.ClientID != "flag-id" || r.Links != "https://vk.ru/call/join/FROMFLAG" {
 		t.Errorf("URI wiped fields it does not carry: %+v", r)
+	}
+}
+
+func TestApplyURIVKLinkIsFallback(t *testing.T) {
+	r := defaultRaw()
+	r.applyURI(&uri.Config{VKLink: "https://vk.ru/call/join/OWNER"})
+	if r.Links != "https://vk.ru/call/join/OWNER" {
+		t.Errorf("Links = %q, want owner link", r.Links)
+	}
+
+	r = defaultRaw()
+	r.Links = "https://vk.ru/call/join/MINE"
+	r.applyURI(&uri.Config{VKLink: "https://vk.ru/call/join/OWNER"})
+	if r.Links != "https://vk.ru/call/join/MINE" {
+		t.Errorf("Links = %q, own link must win", r.Links)
+	}
+}
+
+func TestApplyURITimingNeedsObf(t *testing.T) {
+	r := defaultRaw()
+	r.applyURI(&uri.Config{ObfTimingMs: 20})
+	if r.ObfTiming != 0 {
+		t.Errorf("ObfTiming = %s without obf profile, want 0", r.ObfTiming)
+	}
+
+	r.applyURI(&uri.Config{ObfProfile: "rtpopus", ObfKey: "00", ObfTimingMs: 20})
+	if r.ObfTiming != 20*time.Millisecond {
+		t.Errorf("ObfTiming = %s, want 20ms", r.ObfTiming)
 	}
 }
 

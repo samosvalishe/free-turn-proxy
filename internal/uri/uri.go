@@ -20,6 +20,7 @@ type Config struct {
 	Mode           string
 	ObfProfile     string
 	ObfKey         string
+	ObfTimingMs    int
 	N              int
 	StreamsPerCred int
 	ClientID       string
@@ -29,6 +30,7 @@ type Config struct {
 	ManualCaptcha  bool
 	KCP            *KCP
 	Comment        string
+	VKLink         string
 	WGConf         string
 }
 
@@ -41,6 +43,7 @@ type wire struct {
 	Mode           string `json:"mode,omitempty"`
 	Obf            string `json:"obf,omitempty"`
 	Key            string `json:"key,omitempty"`
+	TimingMs       int    `json:"timing,omitempty"`
 	N              int    `json:"n,omitempty"`
 	StreamsPerCred int    `json:"spc,omitempty"`
 	ClientID       string `json:"cid,omitempty"`
@@ -50,6 +53,7 @@ type wire struct {
 	ManualCaptcha  bool   `json:"mcap,omitempty"`
 	KCP            *KCP   `json:"kcp,omitempty"`
 	Name           string `json:"name,omitempty"`
+	VK             string `json:"vk,omitempty"`
 	WGConf         string `json:"wg,omitempty"`
 }
 
@@ -90,6 +94,7 @@ func Parse(s string) (*Config, error) {
 		Mode:           w.Mode,
 		ObfProfile:     w.Obf,
 		ObfKey:         w.Key,
+		ObfTimingMs:    w.TimingMs,
 		N:              w.N,
 		StreamsPerCred: w.StreamsPerCred,
 		ClientID:       w.ClientID,
@@ -99,6 +104,7 @@ func Parse(s string) (*Config, error) {
 		ManualCaptcha:  w.ManualCaptcha,
 		KCP:            w.KCP,
 		Comment:        w.Name,
+		VKLink:         w.VK,
 		WGConf:         w.WGConf,
 	}, nil
 }
@@ -120,11 +126,13 @@ func (c *Config) String() string {
 		ManualCaptcha:  c.ManualCaptcha,
 		KCP:            c.KCP,
 		Name:           c.Comment,
+		VK:             c.VKLink,
 		WGConf:         c.WGConf,
 	}
 	if c.ObfProfile != "" && c.ObfProfile != "none" {
 		w.Obf = c.ObfProfile
 		w.Key = c.ObfKey
+		w.TimingMs = c.ObfTimingMs
 	}
 
 	raw, err := json.Marshal(w)
