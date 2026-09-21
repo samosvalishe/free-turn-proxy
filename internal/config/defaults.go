@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/samosvalishe/free-turn-proxy/internal/client/dnsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcpmux"
 	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
 )
@@ -14,9 +15,9 @@ const (
 )
 
 const (
-	DNSModePlain = "plain"
-	DNSModeDoH   = "doh"
-	DNSModeAuto  = "auto"
+	DNSModePlain = dnsdial.DNSModePlain
+	DNSModeDoH   = dnsdial.DNSModeDoH
+	DNSModeAuto  = dnsdial.DNSModeAuto
 )
 
 const (
