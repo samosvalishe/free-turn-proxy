@@ -384,12 +384,8 @@ func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaU
 		}
 	}()
 
-	fmt.Println("\n==============================================")
-	fmt.Println("ACTION REQUIRED: MANUAL CAPTCHA SOLVING NEEDED")
-	fmt.Println("If your browser didn't open automatically,")
-	fmt.Println("manually open this URL: " + localCaptchaOrigin())
-	fmt.Println("==============================================")
-	fmt.Println()
+	Log().Warnf("%s: ACTION REQUIRED: manual captcha solving needed", logPrefix)
+	Log().Warnf("%s: if the browser did not open, go to %s", logPrefix, localCaptchaOrigin())
 
 	present(captchaURL)
 
