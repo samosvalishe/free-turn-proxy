@@ -3,6 +3,7 @@ package udprelay
 import (
 	"context"
 	"net"
+	"net/netip"
 	"sync"
 	"sync/atomic"
 )
@@ -22,7 +23,7 @@ var packetPool = sync.Pool{
 
 // runListener читает входящие датаграммы и распределяет их в очередь inboundChan.
 func runListener(ctx context.Context, listenConn net.PacketConn, activeLocalPeer *atomic.Value, inboundChan chan<- *Packet) {
-	var lastAddr net.Addr
+	var lastPort netip.AddrPort
 	var lastAddrStr string
 	for {
 		if ctx.Err() != nil {
@@ -35,13 +36,14 @@ func runListener(ctx context.Context, listenConn net.PacketConn, activeLocalPeer
 			return
 		}
 
-		if addr != lastAddr {
-			s := addr.String()
-			if s != lastAddrStr {
+		if ua, ok := addr.(*net.UDPAddr); ok {
+			if ap := ua.AddrPort(); ap != lastPort {
 				activeLocalPeer.Store(addr)
-				lastAddrStr = s
+				lastPort = ap
 			}
-			lastAddr = addr
+		} else if s := addr.String(); s != lastAddrStr {
+			activeLocalPeer.Store(addr)
+			lastAddrStr = s
 		}
 
 		pkt.N = nRead

@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	udpRelayBufSize = 1600
-	udpIdleTimeout  = 30 * time.Minute
+	udpRelayBufSize    = 1600
+	udpIdleTimeout     = 30 * time.Minute
+	udpDeadlineRefresh = time.Minute
 )
 
 // Handle выполняет двунаправленный релей UDP-пакетов между conn и connectAddr.
@@ -54,23 +55,27 @@ func Handle(ctx context.Context, logger logx.Logger, conn net.Conn, connectAddr 
 
 func copyOne(ctx context.Context, logger logx.Logger, src, dst net.Conn) {
 	buf := make([]byte, udpRelayBufSize)
+	var refreshed time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-		if err := src.SetReadDeadline(time.Now().Add(udpIdleTimeout)); err != nil {
-			logger.Errorf("udpserver: set read deadline: %s", err)
-			return
+		if now := time.Now(); now.Sub(refreshed) >= udpDeadlineRefresh {
+			refreshed = now
+			if err := src.SetReadDeadline(now.Add(udpIdleTimeout)); err != nil {
+				logger.Errorf("udpserver: set read deadline: %s", err)
+				return
+			}
+			if err := dst.SetWriteDeadline(now.Add(udpIdleTimeout)); err != nil {
+				logger.Errorf("udpserver: set write deadline: %s", err)
+				return
+			}
 		}
 		n, err := src.Read(buf)
 		if err != nil {
 			logger.Debugf("udpserver: read: %s", err)
-			return
-		}
-		if werr := dst.SetWriteDeadline(time.Now().Add(udpIdleTimeout)); werr != nil {
-			logger.Errorf("udpserver: set write deadline: %s", werr)
 			return
 		}
 		if _, werr := dst.Write(buf[:n]); werr != nil {
