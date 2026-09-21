@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samosvalishe/free-turn-proxy/internal/client/dnsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/uri"
 )
@@ -52,7 +53,12 @@ func Fetch(ctx context.Context, url string) (*Sub, error) {
 		return nil, err
 	}
 
-	client := &http.Client{}
+	dialer := dnsdial.AppDialer(dnsdial.DNSModeAuto)
+	// Клон DefaultTransport, а не пустой: иначе теряются системный прокси и таймауты TLS.
+	tr, _ := http.DefaultTransport.(*http.Transport)
+	tr = tr.Clone()
+	tr.DialContext = dialer.DialContext
+	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
