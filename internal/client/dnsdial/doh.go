@@ -207,16 +207,21 @@ var (
 	dohForwarderOnce sync.Once
 	dohForwarderInst *dohForwarder
 	dohForwarderErr  error
+	// Резолвер подменяется на лету: ядро перезапускается в том же процессе (mobile), а Once держит листенеры.
+	dohForwarderRes atomic.Pointer[DohResolver]
 )
 
 func sharedDohForwarder(r *DohResolver) (*dohForwarder, error) {
+	dohForwarderRes.Store(r)
 	dohForwarderOnce.Do(func() {
-		dohForwarderInst, dohForwarderErr = startDohForwarder(r)
+		dohForwarderInst, dohForwarderErr = startDohForwarder()
 	})
 	return dohForwarderInst, dohForwarderErr
 }
 
-func startDohForwarder(r *DohResolver) (_ *dohForwarder, err error) {
+func currentDohResolver() *DohResolver { return dohForwarderRes.Load() }
+
+func startDohForwarder() (_ *dohForwarder, err error) {
 	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
 	if err != nil {
 		return nil, fmt.Errorf("doh forwarder: listen UDP: %w", err)
@@ -242,12 +247,12 @@ func startDohForwarder(r *DohResolver) (_ *dohForwarder, err error) {
 	}
 	Log().Infof("[DoH] forwarder listening udp=%s tcp=%s", fwd.udpAddr, fwd.tcpAddr)
 
-	go fwd.serveUDP(udpConn, r)
-	go fwd.serveTCP(tcpLn, r)
+	go fwd.serveUDP(udpConn)
+	go fwd.serveTCP(tcpLn)
 	return fwd, nil
 }
 
-func (*dohForwarder) serveUDP(conn *net.UDPConn, r *DohResolver) {
+func (*dohForwarder) serveUDP(conn *net.UDPConn) {
 	defer func() { _ = conn.Close() }()
 	buf := make([]byte, forwarderUDPBufSize)
 	for {
@@ -260,7 +265,7 @@ func (*dohForwarder) serveUDP(conn *net.UDPConn, r *DohResolver) {
 		go func(q []byte, c *net.UDPAddr) {
 			ctx, cancel := context.WithTimeout(context.Background(), dohForwardBudget)
 			defer cancel()
-			resp, err := r.forwardRaw(ctx, q)
+			resp, err := currentDohResolver().forwardRaw(ctx, q)
 			if err != nil {
 				Log().Warnf("[DoH] udp forward failed: %v", err)
 				return
@@ -272,7 +277,7 @@ func (*dohForwarder) serveUDP(conn *net.UDPConn, r *DohResolver) {
 	}
 }
 
-func (*dohForwarder) serveTCP(ln *net.TCPListener, r *DohResolver) {
+func (*dohForwarder) serveTCP(ln *net.TCPListener) {
 	defer func() { _ = ln.Close() }()
 	for {
 		conn, err := ln.Accept()
@@ -280,11 +285,11 @@ func (*dohForwarder) serveTCP(ln *net.TCPListener, r *DohResolver) {
 			Log().Errorf("[DoH] tcp accept: %v", err)
 			return
 		}
-		go handleDohForwarderTCP(conn, r)
+		go handleDohForwarderTCP(conn)
 	}
 }
 
-func handleDohForwarderTCP(conn net.Conn, r *DohResolver) {
+func handleDohForwarderTCP(conn net.Conn) {
 	defer func() { _ = conn.Close() }()
 	for {
 		_ = conn.SetReadDeadline(time.Now().Add(forwarderTCPReadDL)) //nolint:errcheck
@@ -301,8 +306,8 @@ func handleDohForwarderTCP(conn net.Conn, r *DohResolver) {
 			return
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), dohQueryTimeout)
-		resp, err := r.forwardRaw(ctx, query)
+		ctx, cancel := context.WithTimeout(context.Background(), dohForwardBudget)
+		resp, err := currentDohResolver().forwardRaw(ctx, query)
 		cancel()
 		if err != nil {
 			Log().Warnf("[DoH] tcp forward failed: %v", err)
