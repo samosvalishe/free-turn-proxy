@@ -121,22 +121,17 @@ func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) 
 	cache := c.store.Get(streamID)
 	cacheID := c.store.CacheID(streamID)
 
-	cache.mutex.RLock()
-	if cache.creds.Link == link && time.Now().Before(cache.creds.ExpiresAt) && len(cache.creds.ServerAddrs) > 0 {
-		expires := time.Until(cache.creds.ExpiresAt)
-		u, p := cache.creds.Username, cache.creds.Password
-		addrs := orderAddrs(cache.creds.ServerAddrs, streamID)
-		cache.mutex.RUnlock()
-		c.log.Debugf("[STREAM %d] [VK Auth] Using cached credentials (cache=%d, expires in %v, server=%s)", streamID, cacheID, expires, addrs[0])
-		return u, p, addrs, nil
+	if creds, addrs, ok := cache.lookup(link, streamID); ok {
+		c.log.Debugf("[STREAM %d] [VK Auth] Using cached credentials (cache=%d, expires in %v, server=%s)",
+			streamID, cacheID, time.Until(creds.ExpiresAt), addrs[0])
+		return creds.Username, creds.Password, addrs, nil
 	}
-	cache.mutex.RUnlock()
 
-	cache.mutex.Lock()
-	defer cache.mutex.Unlock()
+	cache.fetchMu.Lock()
+	defer cache.fetchMu.Unlock()
 
-	if cache.creds.Link == link && time.Now().Before(cache.creds.ExpiresAt) && len(cache.creds.ServerAddrs) > 0 {
-		return cache.creds.Username, cache.creds.Password, orderAddrs(cache.creds.ServerAddrs, streamID), nil
+	if creds, addrs, ok := cache.lookup(link, streamID); ok {
+		return creds.Username, creds.Password, addrs, nil
 	}
 
 	user, pass, addrs, err := c.fetchSerialized(ctx, link, streamID)
@@ -144,13 +139,13 @@ func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) 
 		return "", "", nil, err
 	}
 
-	cache.creds = TurnCredentials{
+	cache.store(TurnCredentials{
 		Username:    user,
 		Password:    pass,
 		ServerAddrs: addrs,
 		ExpiresAt:   time.Now().Add(CredentialLifetime - CacheSafetyMargin).Round(0),
 		Link:        link,
-	}
+	})
 	return user, pass, orderAddrs(addrs, streamID), nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pion/stun/v3"
 )
@@ -11,8 +12,24 @@ import (
 type StreamCredentialsCache struct {
 	creds         TurnCredentials
 	mutex         sync.RWMutex
+	fetchMu       sync.Mutex
 	errorCount    atomic.Int32
 	lastErrorTime atomic.Int64
+}
+
+func (c *StreamCredentialsCache) lookup(link string, streamID int) (TurnCredentials, []string, bool) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	if c.creds.Link != link || !time.Now().Before(c.creds.ExpiresAt) || len(c.creds.ServerAddrs) == 0 {
+		return TurnCredentials{}, nil, false
+	}
+	return c.creds, orderAddrs(c.creds.ServerAddrs, streamID), true
+}
+
+func (c *StreamCredentialsCache) store(creds TurnCredentials) {
+	c.mutex.Lock()
+	c.creds = creds
+	c.mutex.Unlock()
 }
 
 type Store struct {
