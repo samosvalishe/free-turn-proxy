@@ -74,9 +74,6 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 		case <-ctx.Done():
 			return
 		case pair := <-connchan:
-			if !deps.allocPace.Wait(ctx) {
-				return
-			}
 			c := make(chan error, 1)
 			go deps.guard(func() { oneTURN(ctx, deps, params, peer, pair.pipe, streamID, c) })()
 
@@ -234,7 +231,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		c <- err
 	}()
 
-	stream, derr := DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, streamID, params.GetCreds, deps.log())
+	stream, derr := params.Dial(ctx, streamID)
 	if derr != nil {
 		if deps.Auth.IsAuthError(derr) {
 			deps.Auth.HandleAuthError(streamID)

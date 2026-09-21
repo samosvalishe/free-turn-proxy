@@ -131,6 +131,9 @@ func assemble(r raw) (*Client, error) {
 	n := r.N
 	if n <= 0 {
 		n = DefaultStreams
+		if r.Provider == ProviderDirect {
+			n = DefaultDirectStreams
+		}
 	}
 	platform := Platform(r.Platform)
 	if platform == "" {

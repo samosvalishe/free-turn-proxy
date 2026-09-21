@@ -10,7 +10,6 @@ import (
 
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider"
-	"github.com/samosvalishe/free-turn-proxy/internal/proxy/allocpace"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/turndial"
 )
@@ -56,8 +55,8 @@ func TestMaintainSessionReportsFatal(t *testing.T) {
 	auth := &fakeAuth{}
 	deps := &Deps{Log: logx.Nop(), Auth: auth}
 	params := &Params{
-		GetCreds: func(context.Context, int) (string, string, []string, error) {
-			return "", "", nil, provider.ErrFatalNoStreams
+		Dial: func(context.Context, int) (*turndial.Stream, error) {
+			return nil, provider.ErrFatalNoStreams
 		},
 	}
 
@@ -66,7 +65,7 @@ func TestMaintainSessionReportsFatal(t *testing.T) {
 	go func() {
 		defer close(done)
 		maintainSession(ctx, deps, params, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1},
-			1, newSessionPool(nil), allocpace.New(0), func(err error) { fatalCh <- err })
+			1, newSessionPool(nil), func(err error) { fatalCh <- err })
 	}()
 
 	select {
@@ -98,8 +97,8 @@ func TestMaintainSessionHandlesAuthError(t *testing.T) {
 	auth := &fakeAuth{authErr: authErr}
 	deps := &Deps{Log: logx.Nop(), Auth: auth}
 	params := &Params{
-		GetCreds: func(context.Context, int) (string, string, []string, error) {
-			return "", "", nil, authErr
+		Dial: func(context.Context, int) (*turndial.Stream, error) {
+			return nil, authErr
 		},
 	}
 
@@ -107,7 +106,7 @@ func TestMaintainSessionHandlesAuthError(t *testing.T) {
 	go func() {
 		defer close(done)
 		maintainSession(ctx, deps, params, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1},
-			1, newSessionPool(nil), allocpace.New(0), func(error) {})
+			1, newSessionPool(nil), func(error) {})
 	}()
 
 	deadline := time.Now().Add(15 * time.Second)

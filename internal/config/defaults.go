@@ -23,6 +23,7 @@ const (
 const (
 	DefaultListen         = "127.0.0.1:9000"
 	DefaultStreams        = 12
+	DefaultDirectStreams  = 1
 	DefaultStreamsPerCred = 12
 	DefaultTransport      = TransportTCP
 	DefaultMode           = ModeUDP
@@ -38,7 +39,6 @@ func defaultRaw() raw {
 	return raw{
 		Listen:         DefaultListen,
 		Provider:       DefaultProvider,
-		N:              DefaultStreams,
 		StreamsPerCred: DefaultStreamsPerCred,
 		Transport:      DefaultTransport,
 		Mode:           DefaultMode,

@@ -357,3 +357,18 @@ func TestReconnectRoutesByMode(t *testing.T) {
 		t.Error("udp mode: reconnectCh empty")
 	}
 }
+
+func TestNewDirectIgnoresLinks(t *testing.T) {
+	cfg := &config.Client{
+		TURN:     config.TURNOpts{N: 2},
+		Provider: config.ProviderOpts{Name: config.ProviderDirect},
+		VK:       config.VKOpts{Links: []string{"a", "b"}},
+	}
+	s, err := New(cfg, Deps{})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if got := s.Snapshot().Total; got != 2 {
+		t.Fatalf("Total = %d, want 2", got)
+	}
+}

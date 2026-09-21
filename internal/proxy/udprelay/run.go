@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
-	"github.com/samosvalishe/free-turn-proxy/internal/proxy/allocpace"
 	"github.com/samosvalishe/free-turn-proxy/internal/safego"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
@@ -26,20 +25,25 @@ type AuthHandler interface {
 	BackoffUntilUnix() int64
 }
 
-// Params содержит конфигурацию подключения к TURN и параметры обфускации.
+// Params содержит способ подъёма потока и параметры обфускации.
 type Params struct {
-	Host         string
-	Port         string
-	TransportUDP bool
+	Dial         DialFunc
 	Profile      string
 	ObfKey       []byte
 	ObfTiming    time.Duration
-	GetCreds     GetCredsFunc
 	ClientID     string
 	TrafficStats *stats.Stats
 }
 
 const streamStartBarrier = 20 * time.Second
+
+type NopAuth struct{}
+
+func (NopAuth) IsAuthError(error) bool   { return false }
+func (NopAuth) HandleAuthError(int) bool { return false }
+func (NopAuth) ResetErrors(int)          {}
+func (NopAuth) DropCredentials(int)      {}
+func (NopAuth) BackoffUntilUnix() int64  { return 0 }
 
 // ErrFatal возвращается при фатальных ошибках провайдера, требующих остановки клиента.
 var ErrFatal = errors.New("udprelay: fatal error")
@@ -52,7 +56,6 @@ type Deps struct {
 	ConnectedStreams *atomic.Int32
 	OnTURNServer     func(ip net.IP)
 	fatalCh          chan error
-	allocPace        *allocpace.Pacer
 }
 
 func (d *Deps) log() logx.Logger {
@@ -93,7 +96,6 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		ConnectedStreams: connectedStreams,
 		OnTURNServer:     onTURNServer,
 		fatalCh:          fatalCh,
-		allocPace:        allocpace.New(allocpace.DefaultInterval),
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)

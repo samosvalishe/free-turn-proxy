@@ -10,6 +10,8 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/turndial"
 )
 
+type DialFunc func(ctx context.Context, streamID int) (*turndial.Stream, error)
+
 // GetCredsFunc разрешает TURN-реквизиты для streamID.
 type GetCredsFunc func(ctx context.Context, streamID int) (user, pass string, rawURLs []string, err error)
 

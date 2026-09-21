@@ -407,3 +407,17 @@ func TestParseClient_KCPFlagsRequireTCPMode(t *testing.T) {
 		t.Errorf("expected kcp/mode error, got %v", err)
 	}
 }
+
+func TestParseClient_ProviderDirect(t *testing.T) {
+	c, err := ParseClient([]string{"-peer", "1.2.3.4:5000", "-provider", "direct"}, io.Discard)
+	if err != nil {
+		t.Fatalf("direct without links: %v", err)
+	}
+	if c.TURN.N != DefaultDirectStreams {
+		t.Errorf("TURN.N = %d, want %d", c.TURN.N, DefaultDirectStreams)
+	}
+	c, err = ParseClient([]string{"-peer", "1.2.3.4:5000", "-provider", "direct", "-n", "5"}, io.Discard)
+	if err != nil || c.TURN.N != 5 {
+		t.Fatalf("explicit -n: %v, n=%d", err, c.TURN.N)
+	}
+}

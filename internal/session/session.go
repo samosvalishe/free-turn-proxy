@@ -14,7 +14,6 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/client/dnsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
-	"github.com/samosvalishe/free-turn-proxy/internal/provider"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/tcprelay"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udprelay"
@@ -148,7 +147,10 @@ func New(cfg *config.Client, deps Deps) (*Session, error) {
 	}
 	deps.Logger = logx.WithPrefix(deps.Logger, "[session="+id.String()+"] ")
 
-	total := cfg.TURN.N * max(len(cfg.VK.Links), 1)
+	total := cfg.TURN.N
+	if cfg.Provider.Name != config.ProviderDirect {
+		total *= max(len(cfg.VK.Links), 1)
+	}
 
 	s := &Session{
 		cfg:         cfg,
@@ -197,18 +199,17 @@ func (s *Session) Run(ctx context.Context) (err error) {
 	appDialer := dnsdial.AppDialer(s.cfg.DNS.Mode)
 	dnsdial.InstallGlobalResolver(s.cfg.DNS.Mode)
 
-	prov, err := buildProvider(s.cfg, appDialer, &s.connected, s.deps.Solver, log, s.total)
-	if err != nil {
-		return fmt.Errorf("provider init: %w", err)
-	}
-	log.Infof("provider=%s", prov.Name())
-	if s.cfg.Obf.Enabled() {
-		log.Infof("OBF profile=%s: peer server must use matching -obf-profile and -obf-key", s.cfg.Obf.Profile)
-	}
-
 	peer, err := net.ResolveUDPAddr("udp", s.cfg.Proxy.Peer)
 	if err != nil {
 		return fmt.Errorf("resolve peer addr: %w", err)
+	}
+
+	auth, dial, err := s.link(appDialer, peer)
+	if err != nil {
+		return fmt.Errorf("provider init: %w", err)
+	}
+	if s.cfg.Obf.Enabled() {
+		log.Infof("OBF profile=%s: peer server must use matching -obf-profile and -obf-key", s.cfg.Obf.Profile)
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -237,7 +238,7 @@ func (s *Session) Run(ctx context.Context) (err error) {
 		watchdogErr = s.watch(runCtx, cancel)
 	}))
 
-	relayErr := s.runRelayLoop(runCtx, prov, peer)
+	relayErr := s.relayLoop(runCtx, func(ctx context.Context) error { return s.relay(ctx, auth, dial, peer) })
 	stopped := runCtx.Err() != nil
 	cancel()
 	bg.Wait()
@@ -249,10 +250,6 @@ func (s *Session) Run(ctx context.Context) (err error) {
 		return relayErr
 	}
 	return watchdogErr
-}
-
-func (s *Session) runRelayLoop(ctx context.Context, prov provider.Provider, peer *net.UDPAddr) error {
-	return s.relayLoop(ctx, func(ctx context.Context) error { return s.relay(ctx, prov, peer) })
 }
 
 func (s *Session) relayLoop(ctx context.Context, attempt func(context.Context) error) error {
@@ -424,17 +421,10 @@ func (s *Session) watch(ctx context.Context, cancel context.CancelFunc) error {
 	}
 }
 
-func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.UDPAddr) error {
+func (s *Session) relay(ctx context.Context, auth udprelay.AuthHandler, dial udprelay.DialFunc, peer *net.UDPAddr) error {
 	log := s.deps.Logger
-	getCreds := udprelay.GetCredsFunc(func(ctx context.Context, streamID int) (string, string, []string, error) {
-		c, err := prov.GetCredentials(ctx, streamID)
-		if err != nil {
-			return "", "", nil, err
-		}
-		return c.User, c.Pass, c.ServerAddrs, nil
-	})
 
-	// host-route для IP TURN-серверов в обход VPN-туннеля.
+	// host-route до TURN-серверов (в direct - до peer) в обход VPN-туннеля.
 	var routeCallback func(net.IP)
 	if s.cfg.Routes && !s.cfg.Tunnel.Enabled() {
 		rm, rmErr := routemgr.New(log)
@@ -450,12 +440,12 @@ func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.U
 	}
 
 	if s.cfg.Proxy.Mode == config.ProxyModeTCP {
-		return s.relayTCP(ctx, prov, getCreds, peer, routeCallback)
+		return s.relayTCP(ctx, auth, dial, peer, routeCallback)
 	}
-	return s.relayUDP(ctx, prov, getCreds, peer, routeCallback)
+	return s.relayUDP(ctx, auth, dial, peer, routeCallback)
 }
 
-func (s *Session) relayUDP(ctx context.Context, prov provider.Provider, getCreds udprelay.GetCredsFunc, peer *net.UDPAddr, routeCallback func(net.IP)) error {
+func (s *Session) relayUDP(ctx context.Context, auth udprelay.AuthHandler, dial udprelay.DialFunc, peer *net.UDPAddr, routeCallback func(net.IP)) error {
 	log := s.deps.Logger
 	local, err := s.localConn(ctx)
 	if err != nil {
@@ -470,39 +460,33 @@ func (s *Session) relayUDP(ctx context.Context, prov provider.Provider, getCreds
 		HandshakeSem:     make(chan struct{}, s.opts.HandshakeConcurrency),
 	}
 	params := &udprelay.Params{
-		Host:         s.cfg.TURN.Host,
-		Port:         s.cfg.TURN.Port,
-		TransportUDP: s.cfg.TURN.TransportUDP,
+		Dial:         dial,
 		Profile:      string(s.cfg.Obf.Profile),
 		ObfKey:       s.cfg.Obf.Key,
 		ObfTiming:    s.cfg.Obf.Timing,
-		GetCreds:     getCreds,
 		ClientID:     s.cfg.ClientID,
 		TrafficStats: s.trafficStats(),
 	}
-	return udprelay.Run(ctx, dialer, prov, log, &s.connected, routeCallback, params, peer, local, s.total)
+	return udprelay.Run(ctx, dialer, auth, log, &s.connected, routeCallback, params, peer, local, s.total)
 }
 
-func (s *Session) relayTCP(ctx context.Context, prov provider.Provider, getCreds udprelay.GetCredsFunc, peer *net.UDPAddr, routeCallback func(net.IP)) error {
+func (s *Session) relayTCP(ctx context.Context, auth udprelay.AuthHandler, dial udprelay.DialFunc, peer *net.UDPAddr, routeCallback func(net.IP)) error {
 	deps := &tcprelay.Deps{
 		DTLSDialer: &dtlsdial.Dialer{
 			HandshakeTimeout: s.opts.TCPHandshakeTimeout,
 			HandshakeSem:     make(chan struct{}, s.opts.HandshakeConcurrency),
 		},
-		Auth:             prov,
+		Auth:             auth,
 		Log:              s.deps.Logger,
 		ConnectedStreams: &s.connected,
 		OnTURNServer:     routeCallback,
 		Recycle:          s.recycleCh,
 	}
 	params := &tcprelay.Params{
-		Host:         s.cfg.TURN.Host,
-		Port:         s.cfg.TURN.Port,
-		TransportUDP: s.cfg.TURN.TransportUDP,
+		Dial:         dial,
 		Profile:      string(s.cfg.Obf.Profile),
 		ObfKey:       s.cfg.Obf.Key,
 		ObfTiming:    s.cfg.Obf.Timing,
-		GetCreds:     getCreds,
 		KCPProfile:   s.cfg.KCP.Profile,
 		ClientID:     s.cfg.ClientID,
 		TrafficStats: s.trafficStats(),

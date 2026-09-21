@@ -31,8 +31,9 @@ func Validate(c *Client) error {
 		default:
 			return fmt.Errorf("invalid -platform value %q: must be %s | %s", c.VK.Platform, PlatformDesktop, PlatformMobile)
 		}
+	case ProviderDirect:
 	default:
-		return fmt.Errorf("invalid -provider value %q: must be %s", c.Provider.Name, ProviderVK)
+		return fmt.Errorf("invalid -provider value %q: must be %s | %s", c.Provider.Name, ProviderVK, ProviderDirect)
 	}
 
 	switch c.DNS.Mode {

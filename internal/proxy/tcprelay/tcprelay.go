@@ -14,7 +14,6 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/netconn"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider"
-	"github.com/samosvalishe/free-turn-proxy/internal/proxy/allocpace"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udprelay"
 	"github.com/samosvalishe/free-turn-proxy/internal/randx"
 	"github.com/samosvalishe/free-turn-proxy/internal/safego"
@@ -40,20 +39,17 @@ const (
 // ErrFatal возвращается при фатальных ошибках провайдера, требующих остановки клиента.
 var ErrFatal = errors.New("tcprelay: fatal error")
 
-// GetCredsFunc переиспользуется из udprelay: контракт с провайдером один на оба режима.
-type GetCredsFunc = udprelay.GetCredsFunc
+// DialFunc переиспользуется из udprelay: подъём потока один на оба режима.
+type DialFunc = udprelay.DialFunc
 
 // AuthHandler переиспользуется из udprelay: жизненный цикл реквизитов один на оба режима.
 type AuthHandler = udprelay.AuthHandler
 
 type Params struct {
-	Host         string
-	Port         string
-	TransportUDP bool
+	Dial         DialFunc
 	Profile      string
 	ObfKey       []byte
 	ObfTiming    time.Duration
-	GetCreds     GetCredsFunc
 	KCPProfile   kcpmux.Profile
 	ClientID     string
 	TrafficStats *stats.Stats
@@ -79,18 +75,10 @@ func (d *Deps) log() logx.Logger {
 
 func (d *Deps) auth() AuthHandler {
 	if d.Auth == nil {
-		return nopAuth{}
+		return udprelay.NopAuth{}
 	}
 	return d.Auth
 }
-
-type nopAuth struct{}
-
-func (nopAuth) IsAuthError(error) bool   { return false }
-func (nopAuth) HandleAuthError(int) bool { return false }
-func (nopAuth) ResetErrors(int)          {}
-func (nopAuth) DropCredentials(int)      {}
-func (nopAuth) BackoffUntilUnix() int64  { return 0 }
 
 // Run поднимает пул сессий и блокирует вызывающую горутину до отмены ctx.
 func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenAddr string, numSessions int) error {
@@ -99,7 +87,6 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 	}
 	log := deps.log()
 	pool := newSessionPool(deps.ConnectedStreams)
-	pacer := allocpace.New(allocpace.DefaultInterval)
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -126,7 +113,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 	for i := range numSessions {
 		id := i + 1
 		wgBG.Go(func() {
-			_ = safego.Run(log, func() { maintainSession(runCtx, deps, params, peer, id, pool, pacer, fatal) })
+			_ = safego.Run(log, func() { maintainSession(runCtx, deps, params, peer, id, pool, fatal) })
 		})
 	}
 	if deps.Recycle != nil {
@@ -279,11 +266,11 @@ type session struct {
 	cleanup  func()
 }
 
-func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, id int, pool *sessionPool, pacer *allocpace.Pacer, fatal func(error)) {
+func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, id int, pool *sessionPool, fatal func(error)) {
 	log := deps.log()
 	auth := deps.auth()
 	for ctx.Err() == nil {
-		s, err := createSession(ctx, deps, params, peer, id, pacer)
+		s, err := createSession(ctx, deps, params, peer, id)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -361,7 +348,7 @@ func awaitDead(ctx context.Context, log logx.Logger, s *session, id int) bool {
 }
 
 // createSession поднимает стек TURN -> obf -> DTLS -> KCP -> smux.
-func createSession(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, id int, pacer *allocpace.Pacer) (*session, error) {
+func createSession(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, id int) (*session, error) {
 	log := deps.log()
 	var closers []func()
 	cleanup := func() {
@@ -370,10 +357,7 @@ func createSession(ctx context.Context, deps *Deps, params *Params, peer *net.UD
 		}
 	}
 
-	if !pacer.Wait(ctx) {
-		return nil, ctx.Err()
-	}
-	stream, err := udprelay.DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, id, params.GetCreds, log)
+	stream, err := params.Dial(ctx, id)
 	if err != nil {
 		return nil, err
 	}
