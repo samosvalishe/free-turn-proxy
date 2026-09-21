@@ -61,15 +61,15 @@ tasks:
           powershell -NoProfile -Command '$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"; $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"; gomobile bind {{.GOMOBILE_FLAGS}} -o dist/freeturn.aar ./mobile'
         platforms: [windows]
 
-  docker:awg:
-    desc: Build the AWG service image locally (docker/awg)
-    cmds:
-      - docker build -f docker/awg/Dockerfile -t freeturn-awg:dev .
-
   test:
     desc: Run unit tests with race detector
     cmds:
       - go test -race -count=1 ./...
+
+  test:sh:
+    desc: Run install.sh tests (bats)
+    cmds:
+      - bats scripts/tests
 
   test:cover:
     desc: Run tests with coverage report (cover.html)

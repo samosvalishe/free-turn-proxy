@@ -82,6 +82,18 @@ jobs:
 
       - run: govulncheck ./...
 
+  install-sh:
+    name: install.sh (bats)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Install bats
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq bats
+
+      - name: Run tests
+        run: bats scripts/tests
+
   build-snapshot:
     name: Snapshot build (all targets)
     runs-on: ubuntu-latest
