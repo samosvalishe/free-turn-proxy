@@ -1,8 +1,10 @@
 package clientsdb
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -187,50 +189,125 @@ func syncDir(dir string) {
 	_ = d.Close()
 }
 
-// Тег режима едет хвостом той же записи: клиент до этого поля его не писал, а читатель
-// брал ровно 1+len байт - лишний байт старый сервер молча пропускает.
 const (
 	ModeUnset byte = 0
 	ModeUDP   byte = 1
 	ModeTCP   byte = 2
+
+	// idVersionAck - клиент ждёт подтверждения ID.
+	idVersionAck byte = 2
+	idAck        byte = 0x06
+
+	idReadTimeout = 5 * time.Second
 )
 
-// WriteClientID отправляет Client ID (1 байт длины + строка + 1 байт режима).
-func WriteClientID(conn net.Conn, clientID string, mode byte) error {
+// ErrNoIDAck - сервер не подтвердил Client ID: он старше протокола подтверждения или
+// канал теряет всё подряд.
+var ErrNoIDAck = errors.New("clientsdb: server did not acknowledge client ID (server outdated?)")
+
+// idRetransmit - таймеры повтора ID (RFC 6347 §4.2.4: старт 1 с, удвоение).
+var idRetransmit = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+
+func idRecord(clientID string, mode byte) []byte {
 	b := []byte(clientID)
 	if len(b) > 255 {
 		b = b[:255]
 	}
-	buf := make([]byte, 1+len(b)+1)
-	buf[0] = byte(len(b)) //nolint:gosec // len(b) усечён до ≤255 выше
-	copy(buf[1:], b)
-	buf[1+len(b)] = mode
-	_, err := conn.Write(buf)
-	return err
+	buf := make([]byte, 0, len(b)+3)
+	buf = append(buf, byte(len(b))) //nolint:gosec // len(b) усечён до ≤255 выше
+	buf = append(buf, b...)
+	return append(buf, mode, idVersionAck)
 }
 
-// ReadClientID читает Client ID из первой DTLS-записи. Режим ModeUnset - клиент старше
-// тега, режим у него всегда udp.
-func ReadClientID(conn net.Conn) (string, byte, error) {
-	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+func WriteClientID(ctx context.Context, conn net.Conn, clientID string, mode byte) error {
+	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
+	rec := idRecord(clientID, mode)
+	var buf [16]byte
+	for _, wait := range idRetransmit {
+		if _, err := conn.Write(rec); err != nil {
+			return fmt.Errorf("send client ID: %w", err)
+		}
+		if err := conn.SetReadDeadline(time.Now().Add(wait)); err != nil {
+			return fmt.Errorf("client ID deadline: %w", err)
+		}
+		for {
+			n, err := conn.Read(buf[:])
+			if err == nil && n == 1 && buf[0] == idAck {
+				return nil
+			}
+			if err != nil {
+				var ne net.Error
+				if !errors.As(err, &ne) || !ne.Timeout() {
+					return fmt.Errorf("await client ID ack: %w", err)
+				}
+				break
+			}
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+	return ErrNoIDAck
+}
+
+func readClientID(conn net.Conn) (string, byte, byte, error) {
+	_ = conn.SetReadDeadline(time.Now().Add(idReadTimeout))
 	defer func() { _ = conn.SetReadDeadline(time.Time{}) }()
 
-	buf := make([]byte, 257)
+	buf := make([]byte, 258)
 	n, err := conn.Read(buf)
 	if err != nil {
-		return "", ModeUnset, err
+		return "", ModeUnset, 0, err
 	}
 	if n == 0 {
-		return "", ModeUnset, nil
+		return "", ModeUnset, 0, io.ErrUnexpectedEOF
 	}
-
 	l := int(buf[0])
 	if n < 1+l {
-		return "", ModeUnset, io.ErrUnexpectedEOF
+		return "", ModeUnset, 0, io.ErrUnexpectedEOF
 	}
-	mode := ModeUnset
+	var mode, ver byte
 	if n > 1+l {
 		mode = buf[1+l]
 	}
-	return string(buf[1 : 1+l]), mode, nil
+	if n > 2+l {
+		ver = buf[2+l]
+	}
+	return string(buf[1 : 1+l]), mode, ver, nil
+}
+
+func AcceptClientID(conn net.Conn, authorize func(id string, mode byte) error) (string, net.Conn, error) {
+	id, mode, ver, err := readClientID(conn)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := authorize(id, mode); err != nil {
+		return id, nil, err
+	}
+	if ver < idVersionAck {
+		return id, conn, nil
+	}
+	if _, err := conn.Write([]byte{idAck}); err != nil {
+		return id, nil, fmt.Errorf("ack client ID: %w", err)
+	}
+	return id, &ackedConn{Conn: conn, rec: idRecord(id, mode)}, nil
+}
+
+type ackedConn struct {
+	net.Conn
+	rec  []byte
+	data bool
+}
+
+func (c *ackedConn) Read(b []byte) (int, error) {
+	for {
+		n, err := c.Conn.Read(b)
+		if err != nil || c.data || !bytes.Equal(b[:n], c.rec) {
+			c.data = c.data || err == nil
+			return n, err
+		}
+		if _, err := c.Write([]byte{idAck}); err != nil {
+			return 0, err
+		}
+	}
 }

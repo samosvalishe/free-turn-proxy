@@ -202,38 +202,36 @@ func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, c
 	}
 	logger.Debugf("Handshake done")
 
-	// Wire-контракт: клиент всегда передаёт Client ID первой app-record.
-	clientID, clientMode, err := clientsdb.ReadClientID(dtlsConn)
+	clientID, data, err := clientsdb.AcceptClientID(dtlsConn, func(id string, mode byte) error {
+		return admitClient(cfg, db, id, mode)
+	})
 	if err != nil {
-		logger.Warnf("Read Client ID failed: %v", err)
+		logger.Warnf("Client ID from %s rejected: %v", conn.RemoteAddr(), err)
 		return
-	}
-	if want := wireMode(cfg.Proxy.Mode); clientMode != clientsdb.ModeUnset && clientMode != want {
-		logger.Warnf("Mode mismatch from %s: клиент %s, сервер %s - трафик не пойдёт, приведите -mode к одному значению",
-			conn.RemoteAddr(), modeName(clientMode), cfg.Proxy.Mode)
-		return
-	}
-	if clientMode == clientsdb.ModeUnset && cfg.Proxy.Mode == config.ProxyModeTCP {
-		logger.Warnf("Mode mismatch from %s: клиент без тега режима (udp), сервер tcp", conn.RemoteAddr())
-		return
-	}
-	if db != nil {
-		if !db.IsAuthorized(clientID) {
-			logger.Warnf("Unauthorized Client ID: %s. Dropping connection.", clientID)
-			return
-		}
-		logger.Debugf("Client %s authorized", clientID)
-	} else {
-		logger.Debugf("Client ID received (no allowlist): %s", clientID)
 	}
 
 	logger.Infof("Session up: client=%s from=%s", clientID, conn.RemoteAddr())
 	if cfg.Proxy.Mode == config.ProxyModeTCP {
-		tcpserver.Handle(ctx, logger, dtlsConn, cfg.Proxy.Connect, cfg.KCP.Profile)
+		tcpserver.Handle(ctx, logger, data, cfg.Proxy.Connect, cfg.KCP.Profile)
 	} else {
-		udpserver.Handle(ctx, logger, conn, cfg.Proxy.Connect)
+		udpserver.Handle(ctx, logger, data, cfg.Proxy.Connect)
 	}
 	logger.Infof("Session down: client=%s from=%s", clientID, conn.RemoteAddr())
+}
+
+// admitClient: режим клиента обязан совпасть с сервером, ID - быть в allowlist (если он есть).
+func admitClient(cfg *config.Server, db *clientsdb.DB, id string, mode byte) error {
+	if want := wireMode(cfg.Proxy.Mode); mode != clientsdb.ModeUnset && mode != want {
+		return fmt.Errorf("mode mismatch: клиент %s, сервер %s - приведите -mode к одному значению",
+			modeName(mode), cfg.Proxy.Mode)
+	}
+	if mode == clientsdb.ModeUnset && cfg.Proxy.Mode == config.ProxyModeTCP {
+		return errors.New("mode mismatch: клиент без тега режима (udp), сервер tcp")
+	}
+	if db != nil && !db.IsAuthorized(id) {
+		return fmt.Errorf("unauthorized client ID %s", id)
+	}
+	return nil
 }
 
 func handleClientsCommand(args []string) {
