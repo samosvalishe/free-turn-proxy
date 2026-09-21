@@ -1,27 +1,24 @@
 # Быстрый Старт
 
 ## Требования
-- **VPS с публичным IP** (скрипт установки сам развернет Docker и VPN-бэкенд AmneziaWG 3.1 / WireGuard).
-- **Активная ссылка VK Calls**: `https://vk.ru/call/join/...` (создайте сами, звонок не завершайте).
+- **VPS с публичным IP** (скрипт установки сам развернёт FreeTurn и, по желанию, WireGuard).
+- **Активная ссылка на звонок** (создайте сами, звонок не завершайте).
 
 ---
 
 ## Шаг 1: Запуск Сервера (VPS)
 
-Интерактивный скрипт поднимет Docker Compose со службами `free-turn-proxy` и `freeturn-awg` (AmneziaWG 3.1), сгенерирует ключи обфускации, создаст первого клиента и выдаст **ссылку на его QR-код**:
+Интерактивный скрипт поднимет FreeTurn (Docker или systemd) и WireGuard `ft-wg0` либо подключит FreeTurn к вашему VPN, сгенерирует ключи, создаст клиента `owner` и выдаст **ссылку `freeturn://` и ссылку на QR-код**:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master/scripts/install.sh | sudo bash
 ```
 
 > [!TIP]
-> **Прямое подключение (Direct AWG):** Откройте выданную ссылку `-direct.png` и отсканируйте QR в официальном приложении **AmneziaWG/AmneziaVPN** на телефоне (или скачайте `.conf` из того же каталога на ПК) - туннель готов к работе сразу!
-> Ссылка равносильна конфигу - делитесь осторожно. Живёт 15 минут, показать снова: `freeturn client qr <имя>`.
-> 
-> **Добавление новых клиентов:** Выполните на сервере:
-> ```bash
-> freeturn client add myphone
-> ```
+> Отсканируйте QR ссылки `freeturn://` в приложении FreeTurn: в ней уже есть ключ, Client ID и WireGuard-конфиг.
+> Ссылка равносильна ключам - делитесь осторожно. Показать снова: `freeturn client qr <имя>`.
+>
+> **Новый клиент:** `freeturn client add myphone`. Подробнее - [deploy.md](deploy.md).
 
 ---
 
@@ -33,27 +30,27 @@ curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master
 ```bash
 curl -L -o client https://github.com/samosvalishe/free-turn-proxy/releases/latest/download/client-linux-amd64
 chmod +x client
-sudo ./client -listen 127.0.0.1:9000 -peer <vps_ip>:56000 -link "<vk-link>" -obf-profile rtpopus3 -obf-key <ВАШ_КЛЮЧ> -client-id <ВАШ_CLIENT_ID> -routes
+sudo ./client -listen 127.0.0.1:9000 -peer <vps_ip>:56000 -link "<call-link>" -obf-profile rtpopus3 -obf-key <ВАШ_КЛЮЧ> -client-id <ВАШ_CLIENT_ID> -routes
 ```
 
 **Windows (PowerShell от администратора):**
 ```powershell
 Invoke-WebRequest -Uri https://github.com/samosvalishe/free-turn-proxy/releases/latest/download/client-windows-amd64.exe -OutFile client.exe
-.\client.exe -peer <vps_ip>:56000 -provider vk -link "<vk-link>" -listen 127.0.0.1:9000 -n 12 -streams-per-cred 12 -obf-profile rtpopus3 -obf-key <ВАШ_КЛЮЧ> -dns-servers 192.168.31.1 -dns-mode doh -client-id <ВАШ_CLIENT_ID> -routes
+.\client.exe -peer <vps_ip>:56000 -provider vk -link "<call-link>" -listen 127.0.0.1:9000 -n 12 -streams-per-cred 12 -obf-profile rtpopus3 -obf-key <ВАШ_КЛЮЧ> -dns-servers 192.168.31.1 -dns-mode doh -client-id <ВАШ_CLIENT_ID> -routes
 ```
 
 **macOS:**
 ```bash
 # Apple Silicon (M1/M2/M3): client-darwin-arm64 | Intel: client-darwin-amd64
-sudo ./client -listen 127.0.0.1:9000 -peer <vps_ip>:56000 -link "<vk-link>" -obf-profile rtpopus3 -obf-key <ВАШ_КЛЮЧ> -client-id <ВАШ_CLIENT_ID> -routes
+sudo ./client -listen 127.0.0.1:9000 -peer <vps_ip>:56000 -link "<call-link>" -obf-profile rtpopus3 -obf-key <ВАШ_КЛЮЧ> -client-id <ВАШ_CLIENT_ID> -routes
 ```
 
-> **Важно:** В настройках вашего VPN-клиента (AmneziaWG или WireGuard) при работе через прокси используйте релейный конфиг (`client-1-relay.conf`, где `Endpoint = 127.0.0.1:9000` и `MTU = 1280`). Включайте VPN *только после того*, как клиент выведет `Ensuring route to ...`.
+> **Важно:** В настройках вашего VPN-клиента (AmneziaWG или WireGuard) при работе через прокси используйте конфиг клиента (`<имя>.conf` из `freeturn client qr`, `Endpoint = 127.0.0.1:9000`, `MTU = 1280`). Включайте VPN *только после того*, как клиент выведет `Ensuring route to ...`.
 
 > [!TIP]
 > **Упрощение:** Вместо длинных флагов можно передать ссылку `freeturn://` (генерируется установщиком) или подписку (`-sub`):
 > ```bash
-> sudo ./client "freeturn://eyJ2Ijox..." -link "<vk-link>" -routes
+> sudo ./client "freeturn://eyJ2Ijox..." -link "<call-link>" -routes
 > ```
 > Подробнее в [uri.md](uri.md) и [sub.md](sub.md).
 
@@ -68,7 +65,7 @@ termux-wake-lock
 # Скачивание: curl -L -o client https://github.com/samosvalishe/free-turn-proxy/releases/latest/download/client-android-arm64 && chmod +x client
 
 # Обязательно укажите ваш ключ и DNS оператора (можно узнать в настройках APN)
-./client -listen 127.0.0.1:9000 -peer <vps_ip>:56000 -link "<vk-link>" -obf-profile rtpopus3 -obf-key <ВАШ_КЛЮЧ> -dns-servers <ip_dns_оператора> -client-id <ВАШ_CLIENT_ID>
+./client -listen 127.0.0.1:9000 -peer <vps_ip>:56000 -link "<call-link>" -obf-profile rtpopus3 -obf-key <ВАШ_КЛЮЧ> -dns-servers <ip_dns_оператора> -client-id <ВАШ_CLIENT_ID>
 ```
 
 > Обязательно добавьте приложение Termux в исключения вашего VPN-клиента. Подробнее в [mobile.md](mobile.md).

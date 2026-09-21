@@ -1,17 +1,21 @@
-﻿# Providers
+# Провайдеры
 
-Источник TURN-реквизитов выбирается флагом `-provider` (default `vk`). Реализации удовлетворяют интерфейс `internal/provider.Provider` и подключаются в `cmd/client/main.go` через `buildProvider`.
+Флаг `-provider` выбирает, как клиент доходит до сервера: через TURN-реле сервиса звонков (`vk`, по умолчанию) или напрямую (`direct`).
 
-## Доступные провайдеры
+## `vk` (по умолчанию)
 
-### `vk` (default)
+Трафик идёт через TURN-серверы VK Calls. Нужна активная ссылка на звонок:
 
-VK Calls API. Перебирает встроенные `app_id/app_secret`, получает короткоживущие (≈10 мин) TURN-creds через 4-шаговый token chain. Solver captcha auto+manual.
+- `-link` - ссылка вида `https://vk.ru/call/join/<code>`.
 
-**Обязательные флаги:**
-- `-link` - VK callroom URL вида `https://vk.ru/call/join/<code>` (нормализуется до join-кода).
+Необязательные:
 
-**Опциональные:**
-- `-streams-per-cred` (default 10) - сколько TURN-стримов делят один кеш креденшалов.
-- `-manual-captcha` - пропустить auto-solver, сразу открыть браузер.
-- `-platform` (default `desktop`) - класс устройства персоны auth (UA + TLS JA3 + client hints + device; семейство всегда Chrome): `desktop` \| `mobile`.
+- `-streams-per-cred` (по умолчанию 12) - сколько потоков делят одни учётные данные.
+- `-manual-captcha` - сразу открывать captcha в браузере.
+- `-platform` (`desktop` \| `mobile`, по умолчанию `desktop`) - каким устройством представляться при авторизации.
+
+## `direct`
+
+Без реле: трафик идёт прямо на `-peer`, сервер тот же. Флаги звонков и TURN (`-links`, `-turn`, `-port`, `-transport`) игнорируются, `-n` по умолчанию 1.
+
+Не работает, если IP сервера недоступен (белые списки операторов) - там только `vk`. Подробнее - [modes.md](modes.md).

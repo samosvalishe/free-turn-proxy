@@ -52,7 +52,7 @@ func Version() string
   "provider": "vk",
   "turn":  {"n": 12, "transport": "tcp", "host": "", "port": ""},
   "proxy": {"mode": "udp", "listen": "127.0.0.1:9000"},
-  "vk":    {"links": ["https://vk.ru/call/join/..."], "streamsPerCred": 12,
+  "vk":    {"links": ["<call-link>"], "streamsPerCred": 12,
             "manualCaptcha": false, "platform": "mobile"},
   "obf":   {"profile": "rtpopus3", "key": "<64 hex>", "timingMs": 0},
   "dns":   {"mode": "auto", "servers": ["8.8.8.8"]},
@@ -63,6 +63,7 @@ func Version() string
 ```
 
 *   `clientId` - обязателен. Ядро на мобиле не пишет файлы, ID должен храниться в приложении.
+*   `provider`: `vk` или `direct` (без реле, прямо на `peer`; блок `vk` игнорируется). `turn.n` = 0 - дефолт провайдера (12 / 1).
 
 ### Режим туннеля
 

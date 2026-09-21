@@ -2,30 +2,30 @@
 
 ## Клиент
 
-| Флаг | По умолчанию | Описание |
-| --- | --- | --- |
-| `-listen` | `127.0.0.1:9000` | локальный адрес `ip:port`, куда подключается WireGuard (UDP) или Xray/sing-box (TCP) клиент |
-| `-peer` | **обязательный** | адрес сервера на VPS, `host:port` |
-| `-provider` | `vk` | источник TURN-creds: `vk` (см. `docs/providers.md`) |
-| `-link` | пусто | (устарел) одна ссылка VK Calls `https://vk.ru/call/join/...`; используйте `-links`. Игнорируется, если задан `-links` |
-| `-links` | **обязательный для `-provider vk`** (или `-link`) | ссылки VK Calls через запятую `https://vk.ru/call/join/A,https://vk.ru/call/join/B`; каждая даёт свой пул из `-n` стримов |
-| `-n` | `10` | параллельных TURN-потоков; в `-mode tcp` это число сессий пула, по которым round-robin раскладываются локальные TCP-соединения |
-| `-transport` | `tcp` | транспорт до TURN-реле: `tcp` (TCP/TLS) \| `udp` |
-| `-mode` | `udp` | режим туннеля: `udp` (UDP-релей для WireGuard) \| `tcp` (TCP-форвардер для Xray/sing-box) |
-| `-turn` | из creds | переопределить IP TURN-сервера |
-| `-port` | из creds | переопределить порт TURN-сервера |
-| `-obf-profile` | `none` | wire-профиль обфускации payload: `none` \| `rtpopus` (RTP/opus + ChaCha20-Poly1305 AEAD) \| `rtpopus2` (+ RTP header extension, ближе к WebRTC) \| `rtpopus3` (+ abs-send-time, VAD, имитация потерь, вариативный timestamp); должен совпадать с сервером |
-| `-obf-key` | пусто | общий ключ для `-obf-profile != none`, 32 байта hex (64 символа) |
-| `-obf-timing` | `0` | межпакетная задержка для RTP-мимикрии (напр. `20ms`); только с `-obf-profile != none`; `0` = выкл. В `-mode tcp` особенно уместна: KCP гонит бёрсты полноразмерных пакетов, без выравнивания профиль на Opus не похож |
-| `-gen-obf-key` | `false` | напечатать новый ключ и выйти |
-| `-manual-captcha` | `false` | сразу ручной режим captcha (только `-provider vk`) |
-| `-streams-per-cred` | `10` | потоков на один кеш VK-учёток (только `-provider vk`) |
-| `-platform` | `desktop` | класс устройства персоны VK-auth (мобильность UA/device/client hints): `desktop` \| `mobile` (только `-provider vk`) |
-| `-dns-mode` | `auto` | `plain` (UDP/53) \| `doh` \| `auto` |
-| `-dns-servers` | пусто | свои UDP/53 резолверы, `ip[:port][,ip[:port]...]` |
-| `-client-id` | авто | уникальный ID клиента (автогенерация если не задан) |
-| `-sub` | пусто | URL подписки (sub.md) для получения списка серверов |
-| `-debug` | `false` | debug-логи |
+| Флаг                | По умолчанию                                      | Описание                                                                                                                                                                                                                                                  |
+|---------------------|---------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-listen`           | `127.0.0.1:9000`                                  | локальный адрес `ip:port`, куда подключается WireGuard (UDP) или Xray/sing-box (TCP) клиент                                                                                                                                                               |
+| `-peer`             | **обязательный**                                  | адрес сервера на VPS, `host:port`                                                                                                                                                                                                                         |
+| `-provider`         | `vk`                                              | источник потоков: `vk` (TURN-реле сервиса звонков) \| `direct` (напрямую на `-peer`), см. `docs/providers.md`                                                                                                                                                    |
+| `-link`             | пусто                                             | (устарел) одна ссылка на звонок; используйте `-links`. Игнорируется, если задан `-links`                                                                                                                                     |
+| `-links`            | **обязательный для `-provider vk`** (или `-link`) | ссылки на звонки через запятую; каждая даёт свой пул из `-n` стримов                                                                                                                                 |
+| `-n`                | `12` (`direct`: `1`)                              | параллельных потоков; в `-mode tcp` это число сессий пула, по которым round-robin раскладываются локальные TCP-соединения                                                                                                                                 |
+| `-transport`        | `tcp`                                             | транспорт до TURN-реле: `tcp` (TCP/TLS) \| `udp`                                                                                                                                                                                                          |
+| `-mode`             | `udp`                                             | режим туннеля: `udp` (UDP-релей для WireGuard) \| `tcp` (TCP-форвардер для Xray/sing-box)                                                                                                                                                                 |
+| `-turn`             | из creds                                          | переопределить IP TURN-сервера                                                                                                                                                                                                                            |
+| `-port`             | из creds                                          | переопределить порт TURN-сервера                                                                                                                                                                                                                          |
+| `-obf-profile`      | `none`                                            | wire-профиль обфускации payload: `none` \| `rtpopus` (RTP/opus + ChaCha20-Poly1305 AEAD) \| `rtpopus2` (+ RTP header extension, ближе к WebRTC) \| `rtpopus3` (+ abs-send-time, VAD, имитация потерь, вариативный timestamp); должен совпадать с сервером |
+| `-obf-key`          | пусто                                             | общий ключ для `-obf-profile != none`, 32 байта hex (64 символа)                                                                                                                                                                                          |
+| `-obf-timing`       | `0`                                               | межпакетная задержка для RTP-мимикрии (напр. `20ms`); только с `-obf-profile != none`; `0` = выкл. В `-mode tcp` особенно уместна: KCP гонит бёрсты полноразмерных пакетов, без выравнивания профиль на Opus не похож                                     |
+| `-gen-obf-key`      | `false`                                           | напечатать новый ключ и выйти                                                                                                                                                                                                                             |
+| `-manual-captcha`   | `false`                                           | сразу ручной режим captcha (только `-provider vk`)                                                                                                                                                                                                        |
+| `-streams-per-cred` | `12`                                              | потоков на один кеш учёток (только `-provider vk`)                                                                                                                                                                                                     |
+| `-platform`         | `desktop`                                         | класс устройства персоны авторизации (мобильность UA/device/client hints): `desktop` \| `mobile` (только `-provider vk`)                                                                                                                                      |
+| `-dns-mode`         | `auto`                                            | `plain` (UDP/53) \| `doh` \| `auto`                                                                                                                                                                                                                       |
+| `-dns-servers`      | пусто                                             | свои UDP/53 резолверы, `ip[:port][,ip[:port]...]`                                                                                                                                                                                                         |
+| `-client-id`        | авто                                              | уникальный ID клиента (автогенерация если не задан)                                                                                                                                                                                                       |
+| `-sub`              | пусто                                             | URL подписки (sub.md) для получения списка серверов                                                                                                                                                                                                       |
+| `-debug`            | `false`                                           | debug-логи                                                                                                                                                                                                                                                |
 
 ## KCP (только `-mode tcp`, клиент и сервер)
 
