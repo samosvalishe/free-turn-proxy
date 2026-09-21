@@ -1,50 +1,37 @@
 package wake
 
 import (
+	"context"
 	"testing"
 	"time"
 )
 
-func TestFireWakesAllListeners(t *testing.T) {
-	n := New()
-	a, b := n.Chan(), n.Chan()
-	n.Fire()
+func TestWatchStopsOnContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		Watch(ctx, time.Millisecond, time.Hour, nil)
+		close(done)
+	}()
 
-	for i, ch := range []<-chan struct{}{a, b} {
-		select {
-		case <-ch:
-		case <-time.After(time.Second):
-			t.Fatalf("listener %d did not wake", i)
-		}
-	}
-}
-
-func TestChanIsRenewedAfterFire(t *testing.T) {
-	n := New()
-	n.Fire()
-
-	next := n.Chan()
+	cancel()
 	select {
-	case <-next:
-		t.Fatal("fresh channel is already closed")
-	default:
-	}
-
-	n.Fire()
-	select {
-	case <-next:
+	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("second Fire did not reach the fresh channel")
+		t.Fatal("Watch did not return after context cancel")
 	}
 }
 
-func TestNilNotifierBlocksForever(t *testing.T) {
-	var n *Notifier
-	n.Fire()
+func TestWatchIgnoresGapsBelowThreshold(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	fired := make(chan time.Duration, 1)
+	Watch(ctx, time.Millisecond, time.Hour, func(gap time.Duration) { fired <- gap })
 
 	select {
-	case <-n.Chan():
-		t.Fatal("nil notifier produced a ready channel")
-	case <-time.After(10 * time.Millisecond):
+	case gap := <-fired:
+		t.Fatalf("onGap fired without a sleep gap: %s", gap)
+	default:
 	}
 }

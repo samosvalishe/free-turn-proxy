@@ -225,7 +225,7 @@ func (s *Session) Run(ctx context.Context) (err error) {
 		}
 	}
 	bg.Go(guard(func() {
-		wake.New().Watch(runCtx, wakeTick, wakeThreshold, func(gap time.Duration) {
+		wake.Watch(runCtx, wakeTick, wakeThreshold, func(gap time.Duration) {
 			log.Warnf("device slept for %s - checking TURN allocations", gap.Truncate(time.Second))
 			s.Wake()
 		})
