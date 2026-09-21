@@ -8,9 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/pion/dtls/v3"
@@ -19,6 +17,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/tcpserver"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udpserver"
+	"github.com/samosvalishe/free-turn-proxy/internal/shutdown"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
@@ -53,22 +52,8 @@ func main() {
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGTERM, syscall.SIGINT)
-	go func() {
-		<-signalChan
-		logger.Infof("Terminating...")
-		cancel()
-		select {
-		case <-signalChan:
-		case <-time.After(5 * time.Second):
-		}
-		logger.Warnf("Forced exit after shutdown timeout")
-		cancel()
-		os.Exit(1)
-	}()
+	ctx, stop := shutdown.Watch(context.Background(), logger)
+	defer stop()
 
 	addr, err := net.ResolveUDPAddr("udp", cfg.Proxy.Listen)
 	if err != nil {
