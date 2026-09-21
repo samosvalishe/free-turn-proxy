@@ -16,6 +16,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/session"
 	"github.com/samosvalishe/free-turn-proxy/internal/shutdown"
 	"github.com/samosvalishe/free-turn-proxy/internal/sub"
+	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
 )
 
@@ -69,6 +70,11 @@ func main() {
 	}
 	cfg.ClientID = id
 	logger.Infof("Client ID: %s", cfg.ClientID)
+
+	if cfg.Tunnel.Enabled() {
+		logger.Warnf("ссылка содержит конфиг %s: CLI встроенный туннель не поднимает, запустите WireGuard/AmneziaWG отдельно", cfg.Tunnel.Mode)
+		cfg.Tunnel.Mode = tunnel.ModeNone
+	}
 
 	ctx, stop := shutdown.Watch(context.Background(), logger)
 	defer stop()
