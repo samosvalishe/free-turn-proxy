@@ -4,12 +4,14 @@ package tcpserver
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/netconn"
+	"github.com/samosvalishe/free-turn-proxy/internal/safego"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcpmux"
 	"github.com/xtaci/smux"
 )
@@ -54,14 +56,16 @@ func Handle(ctx context.Context, logger logx.Logger, dtlsConn net.Conn, connectA
 			}
 			break
 		}
-		wg.Go(func() { handleStream(ctx, logger, stream, connectAddr) })
+		wg.Go(func() {
+			_ = safego.Run(logger, func() { handleStream(ctx, logger, stream, connectAddr) })
+		})
 	}
 	wg.Wait()
 }
 
 func handleStream(ctx context.Context, logger logx.Logger, s *smux.Stream, connectAddr string) {
 	defer func() {
-		if err := s.Close(); err != nil && err != smux.ErrGoAway {
+		if err := s.Close(); err != nil && !errors.Is(err, smux.ErrGoAway) {
 			logger.Warnf("tcpserver: close smux stream: %v", err)
 		}
 	}()

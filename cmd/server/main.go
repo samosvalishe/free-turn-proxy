@@ -17,6 +17,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/tcpserver"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udpserver"
+	"github.com/samosvalishe/free-turn-proxy/internal/safego"
 	"github.com/samosvalishe/free-turn-proxy/internal/shutdown"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire"
@@ -142,7 +143,7 @@ func main() {
 		}
 		backoff = 0
 		wg.Go(func() {
-			handleAccepted(ctx, logger, db, conn, cfg)
+			_ = safego.Run(logger, func() { handleAccepted(ctx, logger, db, conn, cfg) })
 		})
 	}
 }
