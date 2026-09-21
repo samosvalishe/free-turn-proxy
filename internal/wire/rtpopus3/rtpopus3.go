@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	mrand "math/rand/v2"
 	"sync"
 	"time"
 
@@ -80,6 +81,7 @@ type Conn struct {
 	startTime time.Time
 
 	mu        sync.Mutex
+	rng       *mrand.Rand
 	counter   uint64
 	seq       uint16
 	timestamp uint32
@@ -104,14 +106,20 @@ func NewConnFromState(state *State, isServer bool) (*Conn, error) {
 	if state == nil {
 		return nil, errors.New("rtpopus3:nil state")
 	}
-	c := &Conn{
-		state:           state,
-		startTime:       time.Now(),
-		audioState:      stateSpeech,
-		nextStateSwitch: speechMinPkts + randRange(speechMaxPkts-speechMinPkts+1),
-		nextGapAt:       gapIntervalMin + randRange(gapIntervalMax-gapIntervalMin+1),
-		gapSize:         gapSizeMin + randRange(gapSizeMax-gapSizeMin+1),
+	var seed [32]byte
+	if _, err := rand.Read(seed[:]); err != nil {
+		return nil, fmt.Errorf("rtpopus3:rng seed: %w", err)
 	}
+	c := &Conn{
+		state:      state,
+		startTime:  time.Now(),
+		audioState: stateSpeech,
+		rng:        mrand.New(mrand.NewChaCha8(seed)), //nolint:gosec // ChaCha8 с сидом из crypto/rand: нужен поток, а не разовое значение
+	}
+	c.nextStateSwitch = speechMinPkts + c.rng.IntN(speechMaxPkts-speechMinPkts+1)
+	c.nextGapAt = gapIntervalMin + c.rng.IntN(gapIntervalMax-gapIntervalMin+1)
+	c.gapSize = gapSizeMin + c.rng.IntN(gapSizeMax-gapSizeMin+1)
+
 	var rnd [16]byte
 	if _, err := rand.Read(rnd[:]); err != nil {
 		return nil, fmt.Errorf("rtpopus3:rand init: %w", err)
@@ -139,19 +147,8 @@ func (*Conn) HeaderLen() int    { return headerLen }
 func (*Conn) Overhead() int     { return overhead }
 func (*Conn) MaxWire(n int) int { return overhead + n }
 
-func randRange(n int) int {
-	if n <= 0 {
-		return 0
-	}
-	var b [1]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic("rtpopus3:rand: " + err.Error())
-	}
-	return int(b[0]) % n
-}
-
-func pickTsStep() uint32 {
-	r := randRange(256)
+func (c *Conn) pickTsStep() uint32 {
+	r := c.rng.IntN(256)
 	switch {
 	case r < 10:
 		return tsStep10ms
@@ -170,19 +167,19 @@ func (c *Conn) updateAudioState() bool {
 	c.pktsInState = 0
 	if c.audioState == stateSilence {
 		c.audioState = stateSpeech
-		c.nextStateSwitch = speechMinPkts + randRange(speechMaxPkts-speechMinPkts+1)
+		c.nextStateSwitch = speechMinPkts + c.rng.IntN(speechMaxPkts-speechMinPkts+1)
 		return true
 	}
 	c.audioState = stateSilence
-	c.nextStateSwitch = silenceMinPkts + randRange(silenceMaxPkts-silenceMinPkts+1)
+	c.nextStateSwitch = silenceMinPkts + c.rng.IntN(silenceMaxPkts-silenceMinPkts+1)
 	return false
 }
 
 func (c *Conn) audioLevel() byte {
 	if c.audioState == stateSpeech {
-		return 0x80 | byte(20+randRange(31)) //nolint:gosec // level 20..50, fits byte
+		return 0x80 | byte(20+c.rng.IntN(31)) //nolint:gosec // level 20..50, fits byte
 	}
-	return byte(100 + randRange(28)) //nolint:gosec // level 100..127, fits byte
+	return byte(100 + c.rng.IntN(28)) //nolint:gosec // level 100..127, fits byte
 }
 
 func (c *Conn) computeSeq() uint16 {
@@ -193,8 +190,8 @@ func (c *Conn) computeSeq() uint16 {
 		return seq
 	}
 	c.seq += uint16(c.gapSize) //nolint:gosec // gapSize 1..3
-	c.nextGapAt = gapIntervalMin + randRange(gapIntervalMax-gapIntervalMin+1)
-	c.gapSize = gapSizeMin + randRange(gapSizeMax-gapSizeMin+1)
+	c.nextGapAt = gapIntervalMin + c.rng.IntN(gapIntervalMax-gapIntervalMin+1)
+	c.gapSize = gapSizeMin + c.rng.IntN(gapSizeMax-gapSizeMin+1)
 	return seq
 }
 
@@ -225,7 +222,7 @@ func (c *Conn) WrapInPlace(buf []byte, plainLen int) (int, error) {
 	level := c.audioLevel()
 	seq := c.computeSeq()
 	ts := c.timestamp
-	c.timestamp += pickTsStep()
+	c.timestamp += c.pickTsStep()
 	tcc := c.tcc
 	c.tcc++
 	ctr := c.counter
