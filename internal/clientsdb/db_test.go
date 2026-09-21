@@ -14,11 +14,11 @@ func TestFailedSavePreservesAuthorization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Add("existing", "original"); err != nil {
+	if err = db.Add("existing", "original"); err != nil {
 		t.Fatal(err)
 	}
 	// Каталог вместо временного файла воспроизводит отказ записи без прав root.
-	if err := os.Mkdir(path+".tmp", 0o700); err != nil {
+	if err = os.Mkdir(path+".tmp", 0o700); err != nil {
 		t.Fatal(err)
 	}
 	operations := []struct {
@@ -31,7 +31,7 @@ func TestFailedSavePreservesAuthorization(t *testing.T) {
 	}
 	for _, op := range operations {
 		t.Run(op.name, func(t *testing.T) {
-			if err := op.run(); err == nil {
+			if runErr := op.run(); runErr == nil {
 				t.Fatal("save unexpectedly succeeded")
 			}
 			if !db.IsAuthorized("existing") || db.IsAuthorized("new") {

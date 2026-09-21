@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -142,9 +143,12 @@ func (db *DB) save(next Data) error {
 	}
 
 	tmpFile := db.path + ".tmp"
-	err = os.WriteFile(tmpFile, b, 0o600) // 0o600: файл содержит Client ID токены авторизации
+	err = writeSync(tmpFile, b)
 	if err == nil {
 		err = os.Rename(tmpFile, db.path)
+	}
+	if err == nil {
+		syncDir(filepath.Dir(db.path))
 	}
 	if err == nil {
 		// Авторизация меняется только после успешной замены файла.
@@ -155,6 +159,32 @@ func (db *DB) save(next Data) error {
 		}
 	}
 	return err
+}
+
+func writeSync(path string, b []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // 0o600: файл содержит Client ID токены авторизации
+	if err != nil {
+		return err
+	}
+	if _, err = f.Write(b); err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(path)
+	}
+	return err
+}
+
+func syncDir(dir string) {
+	d, err := os.Open(dir)
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
 }
 
 // Тег режима едет хвостом той же записи: клиент до этого поля его не писал, а читатель
