@@ -25,6 +25,8 @@ var errPairRecycled = errors.New("udprelay: stream pair recycled")
 const (
 	quotaBackoff       = 15 * time.Second
 	quotaBackoffJitter = 15 * time.Second
+
+	pipeBufLimit = 256 << 10
 )
 
 // streamPair связывает DTLS-сессию с аллокацией, поверх которой она поднята. Смерть
@@ -151,7 +153,7 @@ func dtlsSession(dtlsctx context.Context, dtlscancel context.CancelFunc, deps *D
 		return dtlsctx.Err()
 	}
 
-	conn1, conn2 := connutil.AsyncPacketPipe()
+	conn1, conn2 := connutil.LimitedAsyncPacketPipe(pipeBufLimit)
 	defer func() { _ = conn1.Close() }()
 	defer func() { _ = conn2.Close() }()
 	// Ровно один раз: пара строго 1:1, иначе следующая аллокация села бы на DTLS, который
