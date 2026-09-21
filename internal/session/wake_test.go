@@ -8,10 +8,10 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 )
 
-func newWakeSession(t *testing.T) *Session {
+func newWakeSession(t *testing.T, window time.Duration) *Session {
 	t.Helper()
 	s, err := New(&config.Client{}, Deps{
-		Options: Options{Traffic: true, WakeProbeWindow: 50 * time.Millisecond},
+		Options: Options{Traffic: true, WakeProbeWindow: window},
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -23,14 +23,16 @@ func newWakeSession(t *testing.T) *Session {
 // пересоздание тянет за собой поход в VK и капчу.
 func TestWakeSkipsRecycleWhenTrafficFlows(t *testing.T) {
 	t.Parallel()
-	s := newWakeSession(t)
+	// Окно с запасом: пакет обязан лечь между снимком счётчика и концом окна, а не
+	// проиграть гранулярности таймера.
+	s := newWakeSession(t, 2*time.Second)
 	s.connected.Store(1)
 
 	done := make(chan bool, 1)
 	go func() { done <- s.wakeNeedsRecycle(context.Background()) }()
 
 	// Имитируем keepalive туннеля, идущий через relay.
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	s.traffic.stats.AddRx(64)
 
 	select {
@@ -38,14 +40,14 @@ func TestWakeSkipsRecycleWhenTrafficFlows(t *testing.T) {
 		if need {
 			t.Fatal("recycle requested while traffic was flowing")
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("wakeNeedsRecycle did not finish")
 	}
 }
 
 func TestWakeRecyclesOnSilence(t *testing.T) {
 	t.Parallel()
-	s := newWakeSession(t)
+	s := newWakeSession(t, 50*time.Millisecond)
 	s.connected.Store(1)
 
 	if !s.wakeNeedsRecycle(context.Background()) {
@@ -56,7 +58,7 @@ func TestWakeRecyclesOnSilence(t *testing.T) {
 // Пробуждение во время подъёма сессии отменило бы перебор реквизитов и решение капчи.
 func TestWakeSkipsRecycleWhileConnecting(t *testing.T) {
 	t.Parallel()
-	s := newWakeSession(t)
+	s := newWakeSession(t, 50*time.Millisecond)
 
 	start := time.Now()
 	if s.wakeNeedsRecycle(context.Background()) {
@@ -71,7 +73,7 @@ func TestWakeSkipsRecycleWhileConnecting(t *testing.T) {
 // про тот же сон не должен давать второй рецикл.
 func TestWakeCollapsesBurst(t *testing.T) {
 	t.Parallel()
-	s := newWakeSession(t)
+	s := newWakeSession(t, 50*time.Millisecond)
 	s.connected.Store(1)
 
 	go s.watchWake(t.Context())

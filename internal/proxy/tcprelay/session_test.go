@@ -288,7 +288,13 @@ func TestProxyConnCountsApplicationBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tx, rx := traffic.Counters()
+	var tx, rx uint64
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		if tx, rx = traffic.Counters(); tx == uint64(len(payload)) || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
 	if tx != uint64(len(payload)) {
 		t.Errorf("tx = %d, want %d", tx, len(payload))
 	}
