@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
-	"math/big"
 )
 
 // IntN возвращает равномерное случайное число из [0, n).
@@ -13,11 +12,18 @@ func IntN(n int) int {
 	if n <= 0 {
 		return 0
 	}
-	v, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
-	if err != nil {
-		return 0
+	un := uint64(n) //nolint:gosec // n > 0 проверено выше
+	limit := ^uint64(0) / un * un
+	var b [8]byte
+	for {
+		if _, err := rand.Read(b[:]); err != nil {
+			return 0
+		}
+		v := binary.LittleEndian.Uint64(b[:])
+		if v < limit {
+			return int(v % un) //nolint:gosec // v%un < n
+		}
 	}
-	return int(v.Int64())
 }
 
 func Intn(n int) int { return IntN(n) }
