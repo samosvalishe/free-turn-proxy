@@ -1,4 +1,3 @@
-// Package dtlsdial настраивает DTLS-клиент с self-signed сертификатами и ограничением параллельных handshake.
 package dtlsdial
 
 import (
