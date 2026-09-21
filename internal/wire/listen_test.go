@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// Серверная обвязка общая для всех профилей - проверяем каждый через реальный UDP.
 func TestListenCodecRoundTrip(t *testing.T) {
 	t.Parallel()
 

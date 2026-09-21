@@ -20,6 +20,13 @@ type RelayPacketConn struct {
 	Codec Codec
 }
 
+func (r *RelayPacketConn) dst(addr net.Addr) net.Addr {
+	if r.Peer != nil {
+		return r.Peer
+	}
+	return addr
+}
+
 func (r *RelayPacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	if r.Codec == nil {
 		return r.Relay.ReadFrom(b)
@@ -44,9 +51,10 @@ func (r *RelayPacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
 	return m, addr, nil
 }
 
-func (r *RelayPacketConn) WriteTo(b []byte, _ net.Addr) (int, error) {
+func (r *RelayPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
+	peer := r.dst(addr)
 	if r.Codec == nil {
-		return r.Relay.WriteTo(b, r.Peer)
+		return r.Relay.WriteTo(b, peer)
 	}
 	wireLen := r.Codec.MaxWire(len(b))
 
@@ -63,7 +71,7 @@ func (r *RelayPacketConn) WriteTo(b []byte, _ net.Addr) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	if _, err = r.Relay.WriteTo(out[:n], r.Peer); err != nil {
+	if _, err = r.Relay.WriteTo(out[:n], peer); err != nil {
 		return 0, err
 	}
 	return len(b), nil

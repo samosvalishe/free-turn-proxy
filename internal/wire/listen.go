@@ -8,12 +8,8 @@ import (
 	pionudp "github.com/pion/transport/v4/udp"
 )
 
-// NewServerCodec создаёт кодек для очередного принятого соединения: состояние RTP-сессии
-// у каждого клиента своё, общий у профиля только ключ.
 type NewServerCodec func() (Codec, error)
 
-// ListenCodec - единственная серверная обвязка на все профили: они отличались только
-// именем пакета в текстах ошибок.
 func ListenCodec(addr *net.UDPAddr, newCodec NewServerCodec) (dtlsnet.PacketListener, error) {
 	inner, err := pionudp.Listen("udp", addr)
 	if err != nil {

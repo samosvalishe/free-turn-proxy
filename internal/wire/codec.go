@@ -55,20 +55,38 @@ func Listen(profile string, addr *net.UDPAddr, key []byte, serverTiming ...time.
 		timing = serverTiming[0]
 	}
 
-	var listener dtlsnet.PacketListener
-	var err error
-	switch profile {
-	case ProfileRTPOpus:
-		listener, err = rtpopus.Listen(addr, key)
-	case ProfileRTPOpus2:
-		listener, err = rtpopus2.Listen(addr, key)
-	case ProfileRTPOpus3:
-		listener, err = rtpopus3.Listen(addr, key)
-	default:
-		return nil, fmt.Errorf("wire: profile %q has no server listener", profile)
+	newCodec, err := serverCodecFactory(profile, key)
+	if err != nil {
+		return nil, err
 	}
+	listener, err := ListenCodec(addr, newCodec)
 	if err != nil {
 		return nil, err
 	}
 	return shape.WrapPacketListener(listener, timing), nil
+}
+
+func serverCodecFactory(profile string, key []byte) (NewServerCodec, error) {
+	switch profile {
+	case ProfileRTPOpus:
+		st, err := rtpopus.NewState(key)
+		if err != nil {
+			return nil, err
+		}
+		return func() (Codec, error) { return rtpopus.NewConnFromState(st, true) }, nil
+	case ProfileRTPOpus2:
+		st, err := rtpopus2.NewState(key)
+		if err != nil {
+			return nil, err
+		}
+		return func() (Codec, error) { return rtpopus2.NewConnFromState(st, true) }, nil
+	case ProfileRTPOpus3:
+		st, err := rtpopus3.NewState(key)
+		if err != nil {
+			return nil, err
+		}
+		return func() (Codec, error) { return rtpopus3.NewConnFromState(st, true) }, nil
+	default:
+		return nil, fmt.Errorf("wire: profile %q has no server listener", profile)
+	}
 }
