@@ -313,7 +313,7 @@ func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.
 // локаут и жжёт персону. Джиттер разводит одновременный отказ всех сессий пула.
 func retryDelay(auth AuthHandler, err error) time.Duration {
 	if errors.Is(err, turndial.ErrAllocQuota) {
-		return time.Duration(15+randx.Intn(15)) * time.Second
+		return turndial.QuotaBackoff()
 	}
 	if errors.Is(err, provider.ErrBackoffActive) {
 		if until := auth.BackoffUntilUnix(); until > 0 {

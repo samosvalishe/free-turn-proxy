@@ -21,6 +21,10 @@ import (
 // аллокаций. Лечится ожиданием, а не сменой реквизитов (см. IsAuthError в vkauth).
 var ErrAllocQuota = errors.New("turndial: allocation quota reached")
 
+func QuotaBackoff() time.Duration {
+	return time.Duration(15+randx.Intn(15)) * time.Second
+}
+
 // Config задаёт параметры подключения к TURN-серверу.
 type Config struct {
 	HostOverride string

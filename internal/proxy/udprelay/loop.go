@@ -23,9 +23,6 @@ import (
 var errPairRecycled = errors.New("udprelay: stream pair recycled")
 
 const (
-	quotaBackoff       = 15 * time.Second
-	quotaBackoffJitter = 15 * time.Second
-
 	pipeBufLimit = 256 << 10
 )
 
@@ -95,9 +92,8 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 					deps.fatal(err)
 					return
 				}
-				// Квота может оставаться занятой после deallocate.
 				if errors.Is(err, turndial.ErrAllocQuota) {
-					wait := quotaBackoff + time.Duration(randx.Intn(int(quotaBackoffJitter/time.Second)))*time.Second
+					wait := turndial.QuotaBackoff()
 					deps.log().Warnf("[STREAM %d] квота аллокаций занята - пауза %s", streamID, wait)
 					select {
 					case <-ctx.Done():

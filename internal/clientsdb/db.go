@@ -295,15 +295,13 @@ func AcceptClientID(conn net.Conn, authorize func(id string, mode byte) error) (
 
 type ackedConn struct {
 	net.Conn
-	rec  []byte
-	data bool
+	rec []byte
 }
 
 func (c *ackedConn) Read(b []byte) (int, error) {
 	for {
 		n, err := c.Conn.Read(b)
-		if err != nil || c.data || !bytes.Equal(b[:n], c.rec) {
-			c.data = c.data || err == nil
+		if err != nil || !bytes.Equal(b[:n], c.rec) {
 			return n, err
 		}
 		if _, err := c.Write([]byte{idAck}); err != nil {

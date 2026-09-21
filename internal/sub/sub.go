@@ -55,8 +55,10 @@ func Fetch(ctx context.Context, url string) (*Sub, error) {
 
 	dialer := dnsdial.AppDialer(dnsdial.DNSModeAuto)
 	// Клон DefaultTransport, а не пустой: иначе теряются системный прокси и таймауты TLS.
-	tr, _ := http.DefaultTransport.(*http.Transport)
-	tr = tr.Clone()
+	tr := &http.Transport{}
+	if dt, ok := http.DefaultTransport.(*http.Transport); ok {
+		tr = dt.Clone()
+	}
 	tr.DialContext = dialer.DialContext
 	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)
