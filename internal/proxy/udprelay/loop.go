@@ -59,10 +59,12 @@ func DTLSLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 				continue
 			}
 			if err != nil {
+				wait := time.Duration(10+randx.Intn(20)) * time.Second
+				deps.log().Warnf("[STREAM %d] DTLS: %v - повтор через %s", streamID, err, wait)
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(time.Duration(10+randx.Intn(20)) * time.Second):
+				case <-time.After(wait):
 				}
 			}
 		}
