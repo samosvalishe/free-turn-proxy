@@ -5,13 +5,19 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/uri"
 )
+
+var logHolder logx.Holder
+
+func SetLogger(l logx.Logger) { logHolder.Set(l) }
+
+func log() logx.Logger { return logHolder.Get() }
 
 // Sub представляет структуру подписки на серверы.
 type Sub struct {
@@ -132,7 +138,7 @@ func Parse(r io.Reader) (*Sub, error) {
 				s.Nodes = append(s.Nodes, node)
 				lastNode = &s.Nodes[len(s.Nodes)-1]
 			} else {
-				log.Printf("warning: skipped invalid freeturn URI in subscription: %v", err)
+				log().Warnf("[Sub] skipped invalid freeturn URI: %v", err)
 			}
 			continue
 		}

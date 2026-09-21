@@ -23,9 +23,11 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/randx"
 )
 
-var Log logx.Logger = logx.Nop()
+var logHolder logx.Holder
 
-func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
+func SetLogger(l logx.Logger) { logHolder.Set(l) }
+
+func Log() logx.Logger { return logHolder.Get() }
 
 const (
 	captchaAPIVersion = "5.131"
@@ -119,7 +121,7 @@ func (s *captchaSession) logger() logx.Logger {
 	if s.log != nil {
 		return s.log
 	}
-	return Log
+	return Log()
 }
 
 // Solve запускает авторешение captcha против VK captchaNotRobot API.
@@ -441,7 +443,7 @@ func parseCaptchaDebugInfo(html string) string {
 		return ""
 	}
 	if len(found) > 1 {
-		Log.Warnf("[Captcha] window.vk holds %d uuid values, debug_info may be the wrong one", len(found))
+		Log().Warnf("[Captcha] window.vk holds %d uuid values, debug_info may be the wrong one", len(found))
 	}
 	return found[0][1]
 }

@@ -43,7 +43,7 @@ func New(cfg Config, solver ManualSolverFunc) (*Provider, error) {
 	}
 	captcha.SetLogger(cfg.Log)
 	manualcaptcha.SetLogger(cfg.Log)
-	manualcaptcha.Debug = cfg.Debug
+	manualcaptcha.SetDebug(cfg.Debug)
 	auth := vkauth.New(vkauth.Config{
 		Credentials:     cfg.Credentials,
 		Dialer:          cfg.Dialer,

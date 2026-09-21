@@ -17,7 +17,7 @@ func (*Client) defaultAutoSolve(
 	client tlsclient.HttpClient,
 	profile browserprofile.Profile,
 ) (string, error) {
-	log := captcha.Log
+	log := captcha.Log()
 	log.Infof("[STREAM %d] [Captcha] Solving captcha (platform=%s)...", streamID, profile.Platform)
 
 	if captchaErr.SessionToken == "" {

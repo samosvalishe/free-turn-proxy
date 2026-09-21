@@ -176,9 +176,9 @@ func splitSliderSteps(steps []int) (int, []int, int, error) {
 		// Штатный формат: [size, ...пары свапов, attempts].
 		attempts = tail[len(tail)-1]
 		tail = tail[:len(tail)-1]
-		Log.Debugf("[Captcha] slider attempts from payload=%d", attempts)
+		Log().Debugf("[Captcha] slider attempts from payload=%d", attempts)
 	} else {
-		Log.Debugf("[Captcha] slider payload without attempts counter; default=%d", attempts)
+		Log().Debugf("[Captcha] slider payload without attempts counter; default=%d", attempts)
 	}
 	if attempts <= 0 {
 		attempts = 4

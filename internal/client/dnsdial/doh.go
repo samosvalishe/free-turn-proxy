@@ -25,9 +25,11 @@ import (
 	_ "golang.org/x/crypto/x509roots/fallback"
 )
 
-var Log logx.Logger = logx.Nop()
+var logHolder logx.Holder
 
-func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
+func SetLogger(l logx.Logger) { logHolder.Set(l) }
+
+func Log() logx.Logger { return logHolder.Get() }
 
 const (
 	dohQueryTimeout = 6 * time.Second
@@ -161,7 +163,7 @@ func (r *DohResolver) forwardRaw(ctx context.Context, query []byte) ([]byte, err
 		body, err := r.postWire(epCtx, ep, query)
 		cancel()
 		if err != nil {
-			Log.Warnf("[DoH] %s: %v", ep.Hostname, err)
+			Log().Warnf("[DoH] %s: %v", ep.Hostname, err)
 			lastErr = err
 			continue
 		}
@@ -238,7 +240,7 @@ func startDohForwarder(r *DohResolver) (_ *dohForwarder, err error) {
 		udpAddr: udpConn.LocalAddr().String(),
 		tcpAddr: tcpLn.Addr().String(),
 	}
-	Log.Infof("[DoH] forwarder listening udp=%s tcp=%s", fwd.udpAddr, fwd.tcpAddr)
+	Log().Infof("[DoH] forwarder listening udp=%s tcp=%s", fwd.udpAddr, fwd.tcpAddr)
 
 	go fwd.serveUDP(udpConn, r)
 	go fwd.serveTCP(tcpLn, r)
@@ -251,7 +253,7 @@ func (*dohForwarder) serveUDP(conn *net.UDPConn, r *DohResolver) {
 	for {
 		n, client, err := conn.ReadFromUDP(buf)
 		if err != nil {
-			Log.Errorf("[DoH] udp read: %v", err)
+			Log().Errorf("[DoH] udp read: %v", err)
 			return
 		}
 		query := append([]byte(nil), buf[:n]...)
@@ -260,11 +262,11 @@ func (*dohForwarder) serveUDP(conn *net.UDPConn, r *DohResolver) {
 			defer cancel()
 			resp, err := r.forwardRaw(ctx, q)
 			if err != nil {
-				Log.Warnf("[DoH] udp forward failed: %v", err)
+				Log().Warnf("[DoH] udp forward failed: %v", err)
 				return
 			}
 			if _, err := conn.WriteToUDP(resp, c); err != nil {
-				Log.Warnf("[DoH] udp write: %v", err)
+				Log().Warnf("[DoH] udp write: %v", err)
 			}
 		}(query, client)
 	}
@@ -275,7 +277,7 @@ func (*dohForwarder) serveTCP(ln *net.TCPListener, r *DohResolver) {
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			Log.Errorf("[DoH] tcp accept: %v", err)
+			Log().Errorf("[DoH] tcp accept: %v", err)
 			return
 		}
 		go handleDohForwarderTCP(conn, r)
@@ -303,11 +305,11 @@ func handleDohForwarderTCP(conn net.Conn, r *DohResolver) {
 		resp, err := r.forwardRaw(ctx, query)
 		cancel()
 		if err != nil {
-			Log.Warnf("[DoH] tcp forward failed: %v", err)
+			Log().Warnf("[DoH] tcp forward failed: %v", err)
 			return
 		}
 		if len(resp) > 0xFFFF {
-			Log.Warnf("[DoH] response too large for TCP framing: %d", len(resp))
+			Log().Warnf("[DoH] response too large for TCP framing: %d", len(resp))
 			return
 		}
 		out := make([]byte, 2+len(resp))
@@ -432,9 +434,9 @@ func autoDial(r *DohResolver) dialFunc {
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		probed.Do(func() {
 			if udpProbe(autoUDPBudget) {
-				Log.Infof("[DNS] UDP/53 probe OK, using UDP")
+				Log().Infof("[DNS] UDP/53 probe OK, using UDP")
 			} else {
-				Log.Warnf("[DNS] UDP/53 unreachable; sticky-switching to DoH")
+				Log().Warnf("[DNS] UDP/53 unreachable; sticky-switching to DoH")
 				useDoH.Store(true)
 			}
 		})

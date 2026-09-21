@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/client/ish"
@@ -26,12 +27,16 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/personanet"
 )
 
-// Debug включает логирование проксируемого браузерного трафика.
-var Debug bool
+// debugFlag включает логирование проксируемого браузерного трафика.
+var debugFlag atomic.Bool
 
-var Log logx.Logger = logx.Nop()
+func SetDebug(v bool) { debugFlag.Store(v) }
 
-func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
+var logHolder logx.Holder
+
+func SetLogger(l logx.Logger) { logHolder.Set(l) }
+
+func Log() logx.Logger { return logHolder.Get() }
 
 const captchaListenPort = "8765"
 
@@ -343,12 +348,12 @@ func startCaptchaServer(srv *http.Server, logPrefix string) error {
 		listening = true
 		wrappedListener, err := ish.WrapListener(listener)
 		if err != nil {
-			Log.Warnf("%s: failed to wrap listener for iSH: %v", logPrefix, err)
+			Log().Warnf("%s: failed to wrap listener for iSH: %v", logPrefix, err)
 			wrappedListener = listener
 		}
 		go func(listener net.Listener) {
 			if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				Log.Errorf("%s: %s", logPrefix, err)
+				Log().Errorf("%s: %s", logPrefix, err)
 			}
 		}(wrappedListener)
 	}
@@ -375,7 +380,7 @@ func runCaptchaServerAndWait(ctx context.Context, handler http.Handler, captchaU
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer shutCancel()
 		if err := srv.Shutdown(shutCtx); err != nil {
-			Log.Warnf("%s: shutdown warning: %v", logPrefix, err)
+			Log().Warnf("%s: shutdown warning: %v", logPrefix, err)
 		}
 	}()
 
@@ -435,18 +440,18 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	if isCaptchaRequest {
 		b, err := io.ReadAll(req.Body)
 		if err != nil {
-			Log.Warnf("[Captcha Proxy] failed to read request body: %v", err)
+			Log().Warnf("[Captcha Proxy] failed to read request body: %v", err)
 			b = nil
 		}
 		req.Body = io.NopCloser(bytes.NewReader(b))
 
-		if Debug {
-			Log.Debugf("[Captcha Proxy] real browser sent %s data: %s", req.URL.Path, string(b))
+		if debugFlag.Load() {
+			Log().Debugf("[Captcha Proxy] real browser sent %s data: %s", req.URL.Path, string(b))
 			if env := browserPowEnvelope(b); env != "" {
-				Log.Debugf("[Captcha Proxy] real browser pow: %s", env)
+				Log().Debugf("[Captcha Proxy] real browser pow: %s", env)
 			}
 			for k, v := range req.Header {
-				Log.Debugf("[Captcha Proxy] header (%s): %s = %s", req.URL.Path, k, strings.Join(v, ", "))
+				Log().Debugf("[Captcha Proxy] header (%s): %s = %s", req.URL.Path, k, strings.Join(v, ", "))
 			}
 		}
 	}
@@ -456,11 +461,11 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	// Весь трафик виджета, а не только check/componentDone: иначе не видно, зовёт
 	// ли живой браузер то, чего не зовём мы, и с какими паузами.
 	if err != nil {
-		Log.Debugf("[Captcha Proxy] http %s %s failed t=%s after=%s %s err=%v",
+		Log().Debugf("[Captcha Proxy] http %s %s failed t=%s after=%s %s err=%v",
 			req.Method, captcha.SafeURL(req.URL.String()), t.elapsed(), time.Since(start).Truncate(time.Millisecond), navSummary(req), err)
 		return nil, err
 	}
-	Log.Debugf("[Captcha Proxy] http %s %s status=%d t=%s after=%s %s",
+	Log().Debugf("[Captcha Proxy] http %s %s status=%d t=%s after=%s %s",
 		req.Method, captcha.SafeURL(req.URL.String()), resp.StatusCode, t.elapsed(), time.Since(start).Truncate(time.Millisecond), navSummary(req))
 	return resp, nil
 }
@@ -509,7 +514,7 @@ func solveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer, p
 			rewriteProxyRequest(req.Out, targetURL)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			Log.Errorf("[Captcha Proxy] %s %s: %v", r.Method, r.URL.String(), err)
+			Log().Errorf("[Captcha Proxy] %s %s: %v", r.Method, r.URL.String(), err)
 			http.Error(w, "ошибка прокси капчи, детали в консоли клиента", http.StatusBadGateway)
 		},
 		ModifyResponse: func(res *http.Response) error {
@@ -528,8 +533,8 @@ func solveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer, p
 
 			contentType := res.Header.Get("Content-Type")
 			contentEncoding := res.Header.Get("Content-Encoding")
-			if Debug {
-				Log.Debugf("[Captcha Proxy] %s %d | Content-Type: %q, Encoding: %q", res.Request.Method, res.StatusCode, contentType, contentEncoding)
+			if debugFlag.Load() {
+				Log().Debugf("[Captcha Proxy] %s %d | Content-Type: %q, Encoding: %q", res.Request.Method, res.StatusCode, contentType, contentEncoding)
 			}
 
 			shouldInspectBody := strings.Contains(contentType, "text/html") ||
@@ -547,7 +552,7 @@ func solveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer, p
 					reader = gzReader
 					defer func() {
 						if err := gzReader.Close(); err != nil {
-							Log.Warnf("[Captcha Proxy] close gzip reader: %v", err)
+							Log().Warnf("[Captcha Proxy] close gzip reader: %v", err)
 						}
 					}()
 				}
@@ -599,10 +604,10 @@ func solveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer, p
 	mux.HandleFunc("/local-captcha-result", func(w http.ResponseWriter, r *http.Request) {
 		token := r.FormValue("token")
 		if token != "" {
-			Log.Infof("[Captcha] received success token from browser (%d bytes)", len(token))
+			Log().Infof("[Captcha] received success token from browser (%d bytes)", len(token))
 			notifyKey(keyCh, token)
 		} else {
-			Log.Warnf("[Captcha] received empty token from browser")
+			Log().Warnf("[Captcha] received empty token from browser")
 		}
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "text/plain")
@@ -665,7 +670,7 @@ func solveViaProxy(ctx context.Context, redirectURI string, dialer net.Dialer, p
 	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		Log.Debugf("[Captcha Proxy] HTTP %s %s", r.Method, r.URL.Path)
+		Log().Debugf("[Captcha Proxy] HTTP %s %s", r.Method, r.URL.Path)
 		if r.URL.Path == "/" && targetURL.Path != "" && targetURL.Path != "/" && r.URL.RawQuery == "" {
 			// не логируем полный redirect URL - шум в консоли
 			http.Redirect(w, r, localCaptchaURLForTarget(targetURL), http.StatusTemporaryRedirect)

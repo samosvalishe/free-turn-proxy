@@ -23,14 +23,14 @@ type Error struct {
 func ParseError(errData map[string]any) *Error {
 	codeFloat, ok := errData["error_code"].(float64)
 	if !ok {
-		Log.Warnf("[Captcha] missing error_code in error data")
+		Log().Warnf("[Captcha] missing error_code in error data")
 		return nil
 	}
 	code := int(codeFloat)
 
 	redirectURI, ok := errData["redirect_uri"].(string)
 	if !ok {
-		Log.Warnf("[Captcha] missing redirect_uri in error data")
+		Log().Warnf("[Captcha] missing redirect_uri in error data")
 		return nil
 	}
 
@@ -43,7 +43,7 @@ func ParseError(errData map[string]any) *Error {
 
 	errorMsg, ok := errData["error_msg"].(string)
 	if !ok {
-		Log.Warnf("[Captcha] missing error_msg in error data")
+		Log().Warnf("[Captcha] missing error_msg in error data")
 		return nil
 	}
 
@@ -52,7 +52,7 @@ func ParseError(errData map[string]any) *Error {
 		if parsed, err := neturl.Parse(redirectURI); err == nil {
 			sessionToken = parsed.Query().Get("session_token")
 		} else {
-			Log.Warnf("[Captcha] failed to parse redirect_uri: %v", err)
+			Log().Warnf("[Captcha] failed to parse redirect_uri: %v", err)
 			return nil
 		}
 	}

@@ -1,7 +1,10 @@
 // Package logx предоставляет уровневый логгер поверх stdlib log.
 package logx
 
-import "log"
+import (
+	"log"
+	"sync/atomic"
+)
 
 // Logger - интерфейс уровневого логирования.
 type Logger interface {
@@ -48,3 +51,21 @@ func (nopLogger) Infof(string, ...any)  {}
 func (nopLogger) Warnf(string, ...any)  {}
 func (nopLogger) Errorf(string, ...any) {}
 func (nopLogger) DebugEnabled() bool    { return false }
+
+// Holder хранит пакетный логгер, подменяемый на лету: ядро перезапускается в том же
+// процессе (mobile), поэтому Set гонится с пишущими горутинами.
+type Holder struct {
+	ptr atomic.Pointer[Logger]
+}
+
+func (h *Holder) Set(l Logger) {
+	v := OrNop(l)
+	h.ptr.Store(&v)
+}
+
+func (h *Holder) Get() Logger {
+	if p := h.ptr.Load(); p != nil {
+		return *p
+	}
+	return Nop()
+}

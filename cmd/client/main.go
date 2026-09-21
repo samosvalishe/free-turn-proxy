@@ -29,6 +29,7 @@ func main() {
 
 	// Резолв подписки до парсинга даёт обязательный peer для валидации.
 	if subURL := config.PeekSubURL(args); subURL != "" {
+		sub.SetLogger(logx.New(false))
 		s, ferr := sub.Fetch(context.Background(), subURL)
 		if ferr != nil {
 			log.Fatalf("failed to fetch subscription: %v", ferr)

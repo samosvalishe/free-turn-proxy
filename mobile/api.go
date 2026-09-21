@@ -250,6 +250,7 @@ func startLocked(configJSON string, tunFD int, withTunnel bool) error {
 	// Резолв подписки до парсинга даёт обязательный peer.
 	overlayURI := ""
 	if subURL := config.PeekSubURLJSON(raw); subURL != "" {
+		sub.SetLogger(coreLog())
 		s, err := sub.Fetch(context.Background(), subURL)
 		if err != nil {
 			return fmt.Errorf("failed to fetch subscription: %w", err)
