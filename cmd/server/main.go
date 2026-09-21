@@ -110,7 +110,7 @@ func main() {
 			logger.Errorf("Failed to open clients-file: %v", err)
 			os.Exit(1)
 		}
-		d.StartHotReload(10 * time.Second)
+		d.StartHotReload(ctx, 10*time.Second)
 		db = d
 		logger.Infof("Client ID authorization enabled via %s", cfg.ClientsFile)
 	}

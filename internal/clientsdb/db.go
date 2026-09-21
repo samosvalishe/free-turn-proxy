@@ -1,6 +1,7 @@
 package clientsdb
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,12 +42,17 @@ func New(path string) (*DB, error) {
 	return db, nil
 }
 
-func (db *DB) StartHotReload(interval time.Duration) {
+func (db *DB) StartHotReload(ctx context.Context, interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		for range ticker.C {
-			db.loadIfModified()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				db.loadIfModified()
+			}
 		}
 	}()
 }
