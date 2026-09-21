@@ -26,7 +26,7 @@ Payload - JSON-объект, закодированный `base64url` (без pa
 | `peer` | `-peer` | адрес сервера на VPS (`ip:port`). |
 | `transport` | `-transport` | транспорт до TURN-реле: `tcp` \| `udp`. |
 | `mode` | `-mode` | режим туннеля: `udp` \| `tcp`; отсутствует - `udp`. |
-| `obf` | `-obf-profile` | профиль обфускации (`rtpopus` \| `rtpopus2`); `none` опускается. |
+| `obf` | `-obf-profile` | профиль обфускации (`rtpopus` \| `rtpopus2` \| `rtpopus3`); `none` опускается. |
 | `key` | `-obf-key` | ключ обфускации (hex), только при заданном `obf`. |
 | `n` | `-n` | число TURN-потоков; отсутствует - дефолт клиента. |
 | `spc` | `-streams-per-cred` | потоков на один кеш VK-учёток; отсутствует - дефолт клиента. |
@@ -48,7 +48,7 @@ Payload - JSON-объект, закодированный `base64url` (без pa
 
 ```json
 {"v":1,"provider":"vk","peer":"1.2.3.4:56000","transport":"tcp","mode":"udp",
- "obf":"rtpopus","key":"d823fa...","n":10,"cid":"a1b2c3...","name":"RU-Server"}
+ "obf":"rtpopus3","key":"d823fa...","n":10,"cid":"a1b2c3...","name":"RU-Server"}
 ```
 
 ## Пример использования
