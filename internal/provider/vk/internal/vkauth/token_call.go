@@ -46,6 +46,9 @@ func (c *Client) fetchCallToken(
 				c.log.Errorf("[STREAM %d] [VK Auth] terminal link error: %v", streamID, termErr)
 				return "", termErr
 			}
+			if sentinel := apiErrSentinel(errObj); sentinel != nil {
+				return "", fmt.Errorf("%w: %v", sentinel, errObj)
+			}
 			return "", fmt.Errorf("VK API error: %v", errObj)
 		}
 
@@ -61,11 +64,25 @@ func (c *Client) fetchCallToken(
 	}
 }
 
-func classifyLinkError(errObj map[string]any) error {
-	code := 0
+func apiErrCode(errObj map[string]any) int {
 	if f, ok := errObj["error_code"].(float64); ok {
-		code = int(f)
+		return int(f)
 	}
+	return 0
+}
+
+func apiErrSentinel(errObj map[string]any) error {
+	switch apiErrCode(errObj) {
+	case 5:
+		return ErrVKAuthFailed
+	case 29:
+		return ErrVKRateLimit
+	}
+	return nil
+}
+
+func classifyLinkError(errObj map[string]any) error {
+	code := apiErrCode(errObj)
 
 	if code == 9000 || code == 9008 {
 		return ErrInvalidJoinLink

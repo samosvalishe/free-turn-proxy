@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -280,8 +279,7 @@ func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, 
 			errors.Is(err, ErrCallFull) || errors.Is(err, captcha.ErrUnavailable) {
 			return "", "", nil, err
 		}
-		es := err.Error()
-		if strings.Contains(es, "error_code:29") || strings.Contains(es, "error_code: 29") || strings.Contains(es, "Rate limit") {
+		if errors.Is(err, ErrVKRateLimit) {
 			c.log.Warnf("[STREAM %d] [VK Auth] Rate limit detected, trying next credentials", streamID)
 		}
 	}

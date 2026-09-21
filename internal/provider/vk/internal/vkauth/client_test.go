@@ -31,20 +31,17 @@ func newTestClient(t *testing.T, fake tokenChainFn, opts ...func(*Client)) *Clie
 func TestIsAuthError(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]bool{
-		"401 Unauthorized":                     true,
-		"alloc failed: 401":                    true,
-		"stale nonce":                          true,
-		"invalid credential":                   true,
-		"authentication required":              true,
-		"connection refused":                   false,
-		"dial tcp 10.0.0.1:48612: i/o timeout": false,
-		"":                                     false,
+	cases := map[error]bool{
+		fmt.Errorf("%w: map[error_code:5]", ErrVKAuthFailed): true,
+		fmt.Errorf("%w: map[error_code:29]", ErrVKRateLimit): false,
+		// Порт с "401" внутри не делает сетевую ошибку ошибкой авторизации.
+		errors.New("dial udp 77.88.8.8:10401: i/o timeout"): false,
+		errors.New("401 Unauthorized"):                      false,
+		errors.New("connection refused"):                    false,
 	}
-	for msg, want := range cases {
-		got := IsAuthError(errors.New(msg))
-		if got != want {
-			t.Errorf("IsAuthError(%q) = %v, want %v", msg, got, want)
+	for err, want := range cases {
+		if got := IsAuthError(err); got != want {
+			t.Errorf("IsAuthError(%v) = %v, want %v", err, got, want)
 		}
 	}
 	if IsAuthError(nil) {

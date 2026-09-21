@@ -2,7 +2,6 @@ package vkauth
 
 import (
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -88,11 +87,6 @@ func IsAuthError(err error) bool {
 			return false
 		}
 	}
-	// Ошибки не от TURN-сервера (получение кредов у провайдера) типа не несут.
-	s := err.Error()
-	return strings.Contains(s, "401") ||
-		strings.Contains(s, "Unauthorized") ||
-		strings.Contains(s, "authentication") ||
-		strings.Contains(s, "invalid credential") ||
-		strings.Contains(s, "stale nonce")
+
+	return errors.Is(err, ErrVKAuthFailed)
 }

@@ -50,4 +50,6 @@ var (
 	ErrInvalidJoinLink       = errors.Join(provider.ErrFatalNoStreams, errors.New("INVALID_JOIN_LINK"))
 	ErrAnonymousBlocked      = errors.Join(provider.ErrFatalNoStreams, errors.New("ANON_BLOCKED"))
 	ErrCallFull              = errors.Join(provider.ErrFatalNoStreams, errors.New("CALL_FULL"))
+	ErrVKAuthFailed          = errors.New("VK authorization failed")
+	ErrVKRateLimit           = errors.New("VK rate limit")
 )
