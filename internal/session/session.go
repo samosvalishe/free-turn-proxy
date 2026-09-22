@@ -483,6 +483,7 @@ func (s *Session) relayTCP(ctx context.Context, auth udprelay.AuthHandler, dial 
 		Recycle:          s.recycleCh,
 	}
 	params := &tcprelay.Params{
+		Bond:         s.cfg.Proxy.Bond,
 		Dial:         dial,
 		Profile:      string(s.cfg.Obf.Profile),
 		ObfKey:       s.cfg.Obf.Key,

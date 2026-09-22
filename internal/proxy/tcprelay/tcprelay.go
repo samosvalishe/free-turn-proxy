@@ -45,6 +45,7 @@ type DialFunc = udprelay.DialFunc
 type AuthHandler = udprelay.AuthHandler
 
 type Params struct {
+	Bond         bool
 	Dial         DialFunc
 	Profile      string
 	ObfKey       []byte
@@ -86,6 +87,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 	}
 	log := deps.log()
 	pool := newSessionPool(deps.ConnectedStreams)
+	pool.bond = params.Bond
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -98,7 +100,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 	}
 	stopCloser := context.AfterFunc(runCtx, func() { _ = listener.Close() })
 	defer stopCloser()
-	log.Infof("TCP mode: listening on %s (round-robin across %d sessions)", listenAddr, numSessions)
+	log.Infof("TCP mode: listening on %s (sessions=%d bond=%t)", listenAddr, numSessions, params.Bond)
 
 	fatalCh := make(chan error, 1)
 	fatal := func(err error) {
@@ -201,6 +203,12 @@ func acceptLoop(ctx context.Context, deps *Deps, listener net.Listener, pool *se
 			continue
 		}
 		backoff = 0
+		if pool.bond {
+			wg.Go(func() {
+				_ = safego.Run(log, func() { proxyBond(ctx, log, conn, pool) })
+			})
+			continue
+		}
 
 		ps := pool.Pick()
 		if ps == nil {
@@ -387,7 +395,11 @@ func createSession(ctx context.Context, deps *Deps, params *Params, peer *net.UD
 	closers = append(closers, func() { _ = dtlsConn.Close() })
 
 	// Wire-контракт: Client ID первой app-record, до KCP.
-	if err = clientsdb.WriteClientID(ctx, dtlsConn, params.ClientID, clientsdb.ModeTCP); err != nil {
+	mode := clientsdb.ModeTCP
+	if params.Bond {
+		mode = clientsdb.ModeTCPBond
+	}
+	if err = clientsdb.WriteClientID(ctx, dtlsConn, params.ClientID, mode); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("send client ID: %w", err)
 	}

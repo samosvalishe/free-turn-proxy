@@ -26,6 +26,7 @@ type raw struct {
 	StreamsPerCred int
 	Transport      string
 	Mode           string
+	Bond           bool
 
 	ObfProfile string
 	ObfKey     string
@@ -55,6 +56,7 @@ func (r *raw) applyURI(u *uri.Config) {
 	override(&r.Provider, u.Provider)
 	override(&r.Transport, u.Transport)
 	override(&r.Mode, u.Mode)
+	r.Bond = r.Bond || u.Bond
 	if u.KCP != nil {
 		r.KCP = kcpmux.Profile{
 			NoDelay:    u.KCP.NoDelay,
@@ -142,6 +144,7 @@ func assemble(r raw) (*Client, error) {
 			Timing:  r.ObfTiming,
 		},
 		Proxy: ProxyOpts{
+			Bond:   r.Bond,
 			Mode:   ProxyMode(r.Mode),
 			Listen: r.Listen,
 			Peer:   r.Peer,

@@ -190,9 +190,10 @@ func syncDir(dir string) {
 }
 
 const (
-	ModeUnset byte = 0
-	ModeUDP   byte = 1
-	ModeTCP   byte = 2
+	ModeUnset   byte = 0
+	ModeUDP     byte = 1
+	ModeTCP     byte = 2
+	ModeTCPBond byte = 3
 
 	// idVersionAck - клиент ждёт подтверждения ID.
 	idVersionAck byte = 2

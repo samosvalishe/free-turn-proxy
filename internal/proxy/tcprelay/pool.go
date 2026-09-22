@@ -21,6 +21,7 @@ type pooledSession struct {
 
 // sessionPool - конкурентно-безопасный round-robin пул живых сессий.
 type sessionPool struct {
+	bond     bool
 	mu       sync.RWMutex
 	sessions []*pooledSession
 	counter  atomic.Uint64

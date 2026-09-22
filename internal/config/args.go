@@ -30,6 +30,7 @@ func ClientArgs(c *Client) []string {
 	addIf(c.VK.StreamsPerCred != def.VK.StreamsPerCred, "-streams-per-cred", strconv.Itoa(c.VK.StreamsPerCred))
 	addIf(c.TURN.TransportUDP != def.TURN.TransportUDP, "-transport", TransportUDP)
 	addIf(c.Proxy.Mode != def.Proxy.Mode, "-mode", string(c.Proxy.Mode))
+	addIf(c.Proxy.Bond, "-bond")
 	args = append(args, kcpArgs(c.KCP.Profile, def.KCP.Profile)...)
 	addIf(c.Obf.Enabled(), "-obf-profile", string(c.Obf.Profile))
 	addIf(c.Obf.Enabled(), "-obf-key", hex.EncodeToString(c.Obf.Key))

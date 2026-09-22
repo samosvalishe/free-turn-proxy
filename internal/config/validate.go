@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/bond"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcpmux"
 	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
 )
@@ -30,6 +31,9 @@ func Validate(c *Client) error {
 	if err := validateProxyMode(c.Proxy.Mode); err != nil {
 		return err
 	}
+	if err := validateBond(c); err != nil {
+		return err
+	}
 	if err := validateTunnel(c.Tunnel, c.Proxy.Mode); err != nil {
 		return err
 	}
@@ -37,6 +41,22 @@ func Validate(c *Client) error {
 		return err
 	}
 	return validateObfTiming(c.Obf)
+}
+
+var ErrBondConfig = errors.New("invalid bond configuration")
+
+func validateBond(c *Client) error {
+	if !c.Proxy.Bond {
+		return nil
+	}
+	groups := 1
+	if c.Provider.Name == ProviderVK {
+		groups = max(len(c.VK.Links), 1)
+	}
+	if c.Proxy.Mode != ProxyModeTCP || c.TURN.N > bond.MaxLanes/groups {
+		return fmt.Errorf("%w: -bond requires -mode tcp and at most %d sessions in total", ErrBondConfig, bond.MaxLanes)
+	}
+	return nil
 }
 
 func validateProvider(c *Client) error {

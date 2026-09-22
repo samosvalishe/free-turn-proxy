@@ -15,6 +15,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/clientsdb"
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/bond"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/tcpserver"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udpserver"
 	"github.com/samosvalishe/free-turn-proxy/internal/safego"
@@ -124,6 +125,7 @@ func listen(cfg *config.Server, addr *net.UDPAddr, logger logx.Logger) (net.List
 }
 
 func serve(ctx context.Context, logger logx.Logger, listener net.Listener, db *clientsdb.DB, cfg *config.Server) {
+	bonds := &bond.Server{}
 	var wg sync.WaitGroup
 	var backoff time.Duration
 	for {
@@ -152,7 +154,7 @@ func serve(ctx context.Context, logger logx.Logger, listener net.Listener, db *c
 		}
 		backoff = 0
 		wg.Go(func() {
-			_ = safego.Run(logger, func() { handleAccepted(ctx, logger, db, conn, cfg) })
+			_ = safego.Run(logger, func() { handleAccepted(ctx, logger, db, conn, cfg, bonds) })
 		})
 	}
 }
@@ -180,13 +182,16 @@ func wireMode(m config.ProxyMode) byte {
 }
 
 func modeName(b byte) string {
+	if b == clientsdb.ModeTCPBond {
+		return "tcp-bond"
+	}
 	if b == clientsdb.ModeTCP {
 		return string(config.ProxyModeTCP)
 	}
 	return string(config.ProxyModeUDP)
 }
 
-func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, conn net.Conn, cfg *config.Server) {
+func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, conn net.Conn, cfg *config.Server, bonds *bond.Server) {
 	defer func() {
 		if closeErr := conn.Close(); closeErr != nil {
 			logger.Warnf("failed to close incoming connection: %s", closeErr)
@@ -211,7 +216,9 @@ func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, c
 	}
 	logger.Debugf("Handshake done")
 
+	var clientMode byte
 	clientID, data, err := clientsdb.AcceptClientID(dtlsConn, func(id string, mode byte) error {
+		clientMode = mode
 		return admitClient(cfg, db, id, mode)
 	})
 	if err != nil {
@@ -220,9 +227,12 @@ func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, c
 	}
 
 	logger.Infof("Session up: client=%s from=%s", clientID, conn.RemoteAddr())
-	if cfg.Proxy.Mode == config.ProxyModeTCP {
+	switch {
+	case clientMode == clientsdb.ModeTCPBond:
+		tcpserver.HandleBond(ctx, logger, data, cfg.Proxy.Connect, cfg.KCP.Profile, bonds, clientID)
+	case cfg.Proxy.Mode == config.ProxyModeTCP:
 		tcpserver.Handle(ctx, logger, data, cfg.Proxy.Connect, cfg.KCP.Profile)
-	} else {
+	default:
 		udpserver.Handle(ctx, logger, data, cfg.Proxy.Connect)
 	}
 	logger.Infof("Session down: client=%s from=%s", clientID, conn.RemoteAddr())
@@ -230,6 +240,9 @@ func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, c
 
 // admitClient: режим клиента обязан совпасть с сервером, ID - быть в allowlist (если он есть).
 func admitClient(cfg *config.Server, db *clientsdb.DB, id string, mode byte) error {
+	if mode == clientsdb.ModeTCPBond {
+		mode = clientsdb.ModeTCP
+	}
 	if want := wireMode(cfg.Proxy.Mode); mode != clientsdb.ModeUnset && mode != want {
 		return fmt.Errorf("mode mismatch: клиент %s, сервер %s - приведите -mode к одному значению",
 			modeName(mode), cfg.Proxy.Mode)

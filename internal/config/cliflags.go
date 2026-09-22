@@ -47,6 +47,7 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	fs.IntVar(&r.N, "n", r.N, "число параллельных потоков; 0 - по провайдеру (vk 12, direct 1)")
 	fs.StringVar(&r.Transport, "transport", r.Transport, "транспорт до TURN-реле: tcp | udp")
 	fs.StringVar(&r.Mode, "mode", r.Mode, "режим туннеля: udp (WireGuard) | tcp (Xray/sing-box)")
+	fs.BoolVar(&r.Bond, "bond", r.Bond, "объединять сессии для одного TCP-соединения; только -mode tcp")
 	fs.StringVar(&r.ObfProfile, "obf-profile", r.ObfProfile, "wire-профиль обфускации: none | rtpopus | rtpopus2 | rtpopus3; должен совпадать с сервером")
 	fs.StringVar(&r.ObfKey, "obf-key", r.ObfKey, "ключ для -obf-profile != none: 32 байта hex (64 символа)")
 	fs.BoolVar(&r.GenObfKey, "gen-obf-key", r.GenObfKey, "напечатать новый -obf-key и выйти")

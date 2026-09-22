@@ -11,6 +11,7 @@ import (
 
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/netconn"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/bond"
 	"github.com/samosvalishe/free-turn-proxy/internal/safego"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcpmux"
 	"github.com/xtaci/smux"
@@ -20,6 +21,22 @@ const backendDialTimeout = 10 * time.Second
 
 // Handle блокирует вызывающую горутину до закрытия сессии клиентом или ctx.
 func Handle(ctx context.Context, logger logx.Logger, dtlsConn net.Conn, connectAddr string, profile kcpmux.Profile) {
+	handle(ctx, logger, dtlsConn, profile, func(ctx context.Context, stream *smux.Stream) {
+		handleStream(ctx, logger, stream, connectAddr)
+	})
+}
+
+func HandleBond(ctx context.Context, logger logx.Logger, dtlsConn net.Conn, connectAddr string, profile kcpmux.Profile, server *bond.Server, clientID string) {
+	handle(ctx, logger, dtlsConn, profile, func(ctx context.Context, stream *smux.Stream) {
+		if err := server.Handle(ctx, stream, clientID, connectAddr); err != nil && ctx.Err() == nil {
+			logger.Debugf("tcpserver bond: %v", err)
+		}
+	})
+}
+
+func handle(ctx context.Context, logger logx.Logger, dtlsConn net.Conn, profile kcpmux.Profile, streamHandler func(context.Context, *smux.Stream)) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	kcpSess, err := kcpmux.Accept(dtlsConn, profile)
 	if err != nil {
 		logger.Errorf("tcpserver: %s", err)
@@ -57,9 +74,10 @@ func Handle(ctx context.Context, logger logx.Logger, dtlsConn net.Conn, connectA
 			break
 		}
 		wg.Go(func() {
-			_ = safego.Run(logger, func() { handleStream(ctx, logger, stream, connectAddr) })
+			_ = safego.Run(logger, func() { streamHandler(ctx, stream) })
 		})
 	}
+	cancel()
 	wg.Wait()
 }
 

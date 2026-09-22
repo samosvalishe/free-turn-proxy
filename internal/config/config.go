@@ -42,6 +42,7 @@ const (
 )
 
 type ProxyOpts struct {
+	Bond    bool
 	Mode    ProxyMode
 	Listen  string
 	Connect string
