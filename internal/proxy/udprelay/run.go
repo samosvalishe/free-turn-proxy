@@ -125,7 +125,9 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	inboundChan := make(chan *Packet, inboundQueueCap)
 	wg := sync.WaitGroup{}
 	wg.Go(deps.guard(func() {
-		runListener(runCtx, listenConn, &activeLocalPeer, inboundChan)
+		if err := runListener(runCtx, listenConn, &activeLocalPeer, inboundChan); err != nil && runCtx.Err() == nil {
+			deps.fatal(err)
+		}
 	}))
 
 	// Стрим 1 стартует первым для прогрева кэша учетных данных.

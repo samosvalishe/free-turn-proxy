@@ -24,6 +24,25 @@ type deadlineRecorder struct {
 	set  bool
 }
 
+func TestRunStopsOnLocalReadFailure(t *testing.T) {
+	dialer, params, peer, local := runFatalDeps(t)
+	params.Dial = func(ctx context.Context, _ int) (*turndial.Stream, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	_ = local.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	var connected atomic.Int32
+	err := Run(ctx, dialer, NopAuth{}, logx.Nop(), &connected, nil, params, peer, local, 1)
+	if !errors.Is(err, ErrLocalRead) || !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("Run = %v, want local read failure wrapping closed connection", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("Run waited for outer cancellation")
+	}
+}
+
 func (d *deadlineRecorder) SetReadDeadline(t time.Time) error {
 	d.mu.Lock()
 	d.last, d.set = t, true

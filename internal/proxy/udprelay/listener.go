@@ -2,6 +2,8 @@ package udprelay
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"sync"
@@ -9,6 +11,8 @@ import (
 )
 
 const inboundQueueCap = 2000
+
+var ErrLocalRead = errors.New("udprelay: local read failed") //nolint:gochecknoglobals // sentinel для errors.Is
 
 // Packet представляет буферизованную датаграмму для передачи воркерам.
 type Packet struct {
@@ -21,19 +25,19 @@ var packetPool = sync.Pool{
 	New: func() any { return &Packet{Data: make([]byte, 2048)} },
 }
 
-// runListener читает входящие датаграммы и распределяет их в очередь inboundChan.
-func runListener(ctx context.Context, listenConn net.PacketConn, activeLocalPeer *atomic.Value, inboundChan chan<- *Packet) {
+func runListener(ctx context.Context, listenConn net.PacketConn, activeLocalPeer *atomic.Value, inboundChan chan<- *Packet) error {
 	var lastPort netip.AddrPort
 	var lastAddrStr string
 	for {
 		if ctx.Err() != nil {
-			return
+			return ctx.Err()
 		}
 		pktIface := packetPool.Get()
 		pkt := pktIface.(*Packet) //nolint:errcheck // pool New always returns *Packet
 		nRead, addr, err := listenConn.ReadFrom(pkt.Data)
 		if err != nil {
-			return
+			packetPool.Put(pkt)
+			return fmt.Errorf("%w: %w", ErrLocalRead, err)
 		}
 
 		if ua, ok := addr.(*net.UDPAddr); ok {
