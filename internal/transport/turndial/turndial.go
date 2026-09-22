@@ -86,7 +86,7 @@ func Open(ctx context.Context, cfg Config, peer *net.UDPAddr, user, pass, rawAdd
 		closeConn func() error
 	)
 	if cfg.TransportUDP {
-		raw, derr := (&net.Dialer{Control: netctl.Apply}).Dial("udp", turnServerUDPAddr.String())
+		raw, derr := (&net.Dialer{Control: netctl.Apply}).DialContext(ctx, "udp", turnServerUDPAddr.String())
 		if derr != nil {
 			return nil, fmt.Errorf("dial TURN (udp): %w", derr)
 		}
@@ -150,7 +150,18 @@ func Open(ctx context.Context, cfg Config, peer *net.UDPAddr, user, pass, rawAdd
 		}
 		return nil, fmt.Errorf("TURN listen: %w", err)
 	}
+	// Allocate не принимает ctx: отмену доставляет закрытие клиента и транспорта.
+	stopCancel := context.AfterFunc(ctx, func() {
+		client.Close()
+		_ = closeConn()
+	})
 	relay, err := client.Allocate()
+	if !stopCancel() {
+		if err == nil {
+			_ = relay.Close()
+		}
+		return nil, fmt.Errorf("TURN allocate: %w", ctx.Err())
+	}
 	if err != nil {
 		client.Close()
 		if cerr := closeConn(); cerr != nil {
