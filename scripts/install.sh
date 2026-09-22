@@ -74,6 +74,7 @@ HAS_GUM=0
 NONINTERACTIVE=0
 ACTION=""
 FORCE_UPDATE=0
+LOCAL_BIN=""
 PURGE=0
 TARGET="all"
 TAIL=80
@@ -99,7 +100,7 @@ valid_hostport() {
     [[ "$1" =~ ^(\[[0-9a-fA-F:]{2,39}\]|[a-zA-Z0-9.-]{1,253}):([0-9]{1,5})$ ]] && valid_port "${BASH_REMATCH[2]}"
 }
 valid_kcp()    { [[ "$1" =~ ^((-kcp-(nodelay|interval|resend|nc|sndwnd|rcvwnd|mtu)\ [0-9]{1,6}|-kcp-acknodelay=(true|false))( |$))*$ ]]; }
-valid_version() { [[ "$1" =~ ^(latest|v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?)$ ]]; }
+valid_version() { [[ "$1" =~ ^(latest|local|v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?)$ ]]; }
 
 # Подсеть WG: сетевой адрес, префикс /16../29 (сервер .1, клиенты с .2).
 valid_net() {
@@ -535,7 +536,14 @@ validate_config() {
     [[ "$BACKEND" =~ ^(new|external)$ ]]          || fail bad_arg "backend: new | external"
     [[ "$PROXY_MODE" =~ ^(udp|tcp)$ ]]            || fail bad_arg "mode: udp | tcp"
     valid_port "$LISTEN_PORT"                     || fail bad_arg "listen-port: 1-65535"
-    valid_version "$VERSION"                      || fail bad_arg "version: latest | vX.Y.Z"
+    valid_version "$VERSION"                      || fail bad_arg "version: latest | local | vX.Y.Z"
+    # local держится в install.conf: обычный apply оставляет залитый бинарь, --update без --bin
+    # возвращает на релиз.
+    if [ "$VERSION" = local ] && [ -z "$LOCAL_BIN" ]; then
+        if [ "$FORCE_UPDATE" = 1 ]; then VERSION=latest
+        else [ -x "$BIN" ] || fail bad_arg "version=local: нет $BIN - залейте его через --bin"; fi
+    fi
+    [ -z "$LOCAL_BIN" ] || [ -f "$LOCAL_BIN" ] || fail bad_arg "bin: нет файла $LOCAL_BIN"
     valid_kcp "$KCP_ARGS"                         || fail bad_arg "kcp: неверные параметры"
     valid_port "$FT_WEB_PORT"                     || fail bad_arg "web-port: 1-65535"
     [[ "$FT_WEB_TTL" =~ ^[0-9]{2,6}$ ]] && [ "$FT_WEB_TTL" -ge 60 ] || fail bad_arg "web-ttl: от 60 секунд"
@@ -578,7 +586,8 @@ server_argv() {
     if [ "$PROXY_MODE" = tcp ] && [ -n "$KCP_ARGS" ]; then printf '%s\n' $KCP_ARGS; fi
 }
 
-image_tag() { if [ "$VERSION" = latest ]; then echo latest; else echo "${VERSION#v}"; fi; }
+# local - свой бинарь поверх образа latest (рантайм из образа, /app/server подменён).
+image_tag() { case "$VERSION" in latest|local) echo latest ;; *) echo "${VERSION#v}" ;; esac; }
 
 ft_installed() {
     [ -f "$UNIT_FILE" ] && return 0
@@ -594,7 +603,8 @@ ft_running() {
 }
 
 ft_version() {
-    if [ "$INSTALL_METHOD" = systemd ]; then cat "$VERFILE" 2>/dev/null || true; else image_tag; fi
+    if [ "$INSTALL_METHOD" = systemd ] || [ "$VERSION" = local ]; then cat "$VERFILE" 2>/dev/null || true
+    else image_tag; fi
 }
 
 ft_logs() {
@@ -653,18 +663,33 @@ ensure_docker() {
 
 docker_apply() {
     ensure_docker
-    local ref="$IMAGE:$(image_tag)" argv
+    local ref="$IMAGE:$(image_tag)" argv mount=()
     step "Загрузка образа $ref" docker pull "$ref" \
         || docker image inspect "$ref" >/dev/null 2>&1 || fail docker_failed "docker pull $ref"
+    if [ "$VERSION" = local ]; then
+        binary_ensure
+        mount=(-v "$BIN:/app/server:ro")
+    fi
     mapfile -t argv < <(server_argv)
     docker run -d --name "$CONTAINER" --network host --restart unless-stopped \
-        -v "$AUTH_DIR:$AUTH_DIR:ro" --entrypoint /app/server "$ref" "${argv[@]}" >/dev/null \
+        -v "$AUTH_DIR:$AUTH_DIR:ro" ${mount[@]+"${mount[@]}"} --entrypoint /app/server "$ref" "${argv[@]}" >/dev/null \
         || fail docker_failed "docker run $ref"
 }
 
 _dl() { curl -fsSL --connect-timeout 15 --max-time 300 -o "$2" "$1"; }
 
+# Свой бинарь (отладка ядра из приложения): без сети и checksums, ставится как есть.
+binary_local() {
+    [ "$(head -c4 "$LOCAL_BIN" | od -An -c | tr -d ' \n')" = '177ELF' ] || fail bad_arg "bin: не ELF"
+    mkdir -p "$PREFIX"
+    { install -m 0755 "$LOCAL_BIN" "$BIN.tmp" && mv -f "$BIN.tmp" "$BIN"; } \
+        || fail internal "не удалось поставить $LOCAL_BIN"
+    rm -f "$LOCAL_BIN"
+    echo local > "$VERFILE"
+}
+
 binary_ensure() {
+    if [ -n "$LOCAL_BIN" ]; then binary_local; return 0; fi
     if [ -x "$BIN" ] && [ "$FORCE_UPDATE" != 1 ] && [ "$(cat "$VERFILE" 2>/dev/null || true)" = "$VERSION" ]; then
         return 0
     fi
@@ -1257,6 +1282,7 @@ parse_opts() {
             --obf-profile=*) OBF_PROFILE=$v ;;
             --obf-key=*)     OBF_KEY=$v; valid_hex64 "$v" || fail bad_arg "obf-key: 64 hex-символа" ;;
             --version=*)     VERSION=$v ;;
+            --bin=*)         LOCAL_BIN=$v; VERSION=local ;;
             --web-port=*)    FT_WEB_PORT=$v ;;
             --web-ttl=*)     FT_WEB_TTL=$v ;;
             --kcp-nodelay=*|--kcp-interval=*|--kcp-resend=*|--kcp-nc=*|--kcp-sndwnd=*|--kcp-rcvwnd=*|--kcp-mtu=*)
@@ -1646,6 +1672,7 @@ Free Turn Proxy - установщик и контроллер сервера.
   --obf-key=HEX64          ключ обфускации (нет - сгенерируется)
   --host=HOST              адрес сервера в ссылках (нет - внешний IP)
   --version=TAG            версия FreeTurn (default latest)
+  --bin=PATH               свой бинарь сервера вместо релиза (version=local)
   --kcp-*=N                параметры KCP сервера для --mode=tcp
   --web-port=N --web-ttl=S веб-раздача файлов клиентов (default 8080, 900 c)
 

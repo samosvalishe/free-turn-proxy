@@ -299,6 +299,31 @@ need_jq() { command -v jq >/dev/null 2>&1 || skip "нет jq"; }
     [[ "$output" == *'"code":"bad_arg"'* ]]
 }
 
+@test "version=local: держится без --bin, --update возвращает на релиз, не-ELF отбит" {
+    _IS_RPC=1
+    BACKEND=external CONNECT=127.0.0.1:443 VERSION=local
+    run validate_config
+    [[ "$output" == *'"code":"bad_arg"'* ]]
+    printf '#!/bin/sh\n' > "$BIN"; chmod +x "$BIN"
+    validate_config
+    [ "$VERSION" = local ]
+    FORCE_UPDATE=1
+    validate_config
+    [ "$VERSION" = latest ]
+
+    parse_opts --bin="$BATS_TEST_TMPDIR/up"
+    [ "$VERSION" = local ]
+    run validate_config
+    [[ "$output" == *'"code":"bad_arg"'* ]]
+    echo junk > "$LOCAL_BIN"
+    run binary_local
+    [[ "$output" == *'не ELF'* ]]
+    printf '\177ELF....' > "$LOCAL_BIN"
+    binary_local
+    [ "$(cat "$VERFILE")" = local ] && [ -x "$BIN" ] && [ ! -e "$LOCAL_BIN" ]
+    [ "$(image_tag)" = latest ]
+}
+
 @test "диспетчер: CLI-флаги не RPC, все RPC-команды опознаются" {
     for f in -y --yes --update --uninstall --reconfigure --purge client ""; do
         ! is_rpc_command "$f"
