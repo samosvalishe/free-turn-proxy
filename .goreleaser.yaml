@@ -98,9 +98,9 @@ checksum:
   # Mobile artifacts and install.sh ship via release.extra_files and are not build outputs;
   # list them here so hosts (Android Gradle fetch) can verify what they download.
   extra_files:
-    - glob: mobile-dist/freeturn.aar
-    - glob: mobile-dist/freeturn-sources.jar
-    - glob: mobile-dist/Mobile.xcframework.zip
+    - glob: '{{ if not .IsSnapshot }}mobile-dist/freeturn.aar{{ end }}'
+    - glob: '{{ if not .IsSnapshot }}mobile-dist/freeturn-sources.jar{{ end }}'
+    - glob: '{{ if not .IsSnapshot }}mobile-dist/Mobile.xcframework.zip{{ end }}'
     - glob: scripts/install.sh
 
 sboms:
@@ -146,9 +146,9 @@ release:
   draft: false
   name_template: "{{ .ProjectName }} {{ .Version }}"
   extra_files:
-    - glob: mobile-dist/freeturn.aar
-    - glob: mobile-dist/freeturn-sources.jar
-    - glob: mobile-dist/Mobile.xcframework.zip
+    - glob: '{{ if not .IsSnapshot }}mobile-dist/freeturn.aar{{ end }}'
+    - glob: '{{ if not .IsSnapshot }}mobile-dist/freeturn-sources.jar{{ end }}'
+    - glob: '{{ if not .IsSnapshot }}mobile-dist/Mobile.xcframework.zip{{ end }}'
     # Android-приложение стримит этот скрипт по SSH: версия RPC = версия релиза.
     - glob: scripts/install.sh
 
