@@ -429,23 +429,27 @@ func udpDNSDial(ctx context.Context, _ string, _ string) (net.Conn, error) {
 	return nil, lastErr
 }
 
-// autoDial выполняет DNS probe по UDP/53 и при недоступности переключается на DoH.
 func autoDial(r *DohResolver) dialFunc {
 	var (
-		probed sync.Once
-		useDoH atomic.Bool
+		mu     sync.Mutex
+		probed *[]string
+		useDoH bool
 		doh    = dohForwarderDial(r)
 	)
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		probed.Do(func() {
-			if udpProbe(autoUDPBudget) {
-				Log().Infof("[DNS] UDP/53 probe OK, using UDP")
+		mu.Lock()
+		if servers := udpDNSServersPtr.Load(); servers != probed {
+			probed = servers
+			useDoH = !udpProbe(autoUDPBudget)
+			if useDoH {
+				Log().Warnf("[DNS] UDP/53 unreachable; switching to DoH until network change")
 			} else {
-				Log().Warnf("[DNS] UDP/53 unreachable; sticky-switching to DoH")
-				useDoH.Store(true)
+				Log().Infof("[DNS] UDP/53 probe OK, using UDP")
 			}
-		})
-		if useDoH.Load() {
+		}
+		viaDoH := useDoH
+		mu.Unlock()
+		if viaDoH {
 			return doh(ctx, network, addr)
 		}
 		return udpDNSDial(ctx, network, addr)
@@ -466,24 +470,31 @@ func udpProbe(timeout time.Duration) bool {
 	buf := make([]byte, 512)
 	servers := udpDNSServers()
 	limit := min(len(servers), 2)
-	for _, server := range servers[:limit] {
+	for i, server := range servers[:limit] {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			break
 		}
+		// Остаток бюджета делится поровну: молчащий сервер не съедает попытку следующего.
+		attempt := remaining / time.Duration(limit-i)
 		// netctl.Apply обязателен для исключения сокета пробы из VPN-туннеля.
-		d := net.Dialer{Timeout: remaining, Control: netctl.Apply}
+		d := net.Dialer{Timeout: attempt, Control: netctl.Apply}
 		conn, err := d.Dial("udp", server) //nolint:noctx
 		if err != nil {
 			continue
 		}
-		_ = conn.SetDeadline(deadline) //nolint:errcheck
+		_ = conn.SetDeadline(time.Now().Add(attempt)) //nolint:errcheck
 		_, _ = conn.Write(wire)
 		n, err := conn.Read(buf)
 		_ = conn.Close()
-		if err == nil && n > 12 {
+		if err == nil && isReply(m, buf[:n]) {
 			return true
 		}
 	}
 	return false
+}
+
+func isReply(query *dns.Msg, raw []byte) bool {
+	var resp dns.Msg
+	return resp.Unpack(raw) == nil && resp.Response && resp.Id == query.Id
 }

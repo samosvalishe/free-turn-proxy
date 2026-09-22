@@ -12,35 +12,22 @@ import (
 	"github.com/miekg/dns"
 )
 
-// dohAnswer builds a wire-format DNS reply for a single question with one
-// answer of the matching type (A or AAAA). TTL is returned as-is.
-func dohAnswer(t *testing.T, query []byte, ip net.IP, ttl uint32) []byte {
+func dnsAnswer(t *testing.T, query []byte) []byte {
 	t.Helper()
 	req := new(dns.Msg)
 	if err := req.Unpack(query); err != nil {
 		t.Fatalf("unpack query: %v", err)
 	}
-	reply := new(dns.Msg)
-	reply.SetReply(req)
 	if len(req.Question) != 1 {
 		t.Fatalf("expected 1 question, got %d", len(req.Question))
 	}
-	q := req.Question[0]
-	switch q.Qtype {
-	case dns.TypeA:
-		if v4 := ip.To4(); v4 != nil {
-			reply.Answer = append(reply.Answer, &dns.A{
-				Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: ttl},
-				A:   v4,
-			})
-		}
-	case dns.TypeAAAA:
-		if ip.To4() == nil {
-			reply.Answer = append(reply.Answer, &dns.AAAA{
-				Hdr:  dns.RR_Header{Name: q.Name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: ttl},
-				AAAA: ip,
-			})
-		}
+	reply := new(dns.Msg)
+	reply.SetReply(req)
+	if q := req.Question[0]; q.Qtype == dns.TypeA {
+		reply.Answer = append(reply.Answer, &dns.A{
+			Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 300},
+			A:   net.IPv4(9, 9, 9, 9),
+		})
 	}
 	out, err := reply.Pack()
 	if err != nil {
@@ -49,55 +36,97 @@ func dohAnswer(t *testing.T, query []byte, ip net.IP, ttl uint32) []byte {
 	return out
 }
 
-func readWire(t *testing.T, r io.Reader) []byte {
+func mockDoH(t *testing.T) *DohResolver {
 	t.Helper()
-	b, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read body: %v", err)
-	}
-	return b
-}
-
-func TestAutoDial_StickyAfterUDPFailure(t *testing.T) {
-	// DoH backend: always responds with a valid wire-format reply.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body := readWire(t, r.Body)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+			return
+		}
 		w.Header().Set("Content-Type", "application/dns-message")
-		_, _ = w.Write(dohAnswer(t, body, net.ParseIP("9.9.9.9"), 300)) //nolint:errcheck
+		_, _ = w.Write(dnsAnswer(t, body))
 	}))
-	defer srv.Close()
-
-	resolver := newDohResolverWithClient(
+	t.Cleanup(srv.Close)
+	return newDohResolverWithClient(
 		[]DohEndpoint{{URL: srv.URL, Hostname: "mock", BootstrapIPs: []string{"127.0.0.1"}}},
 		srv.Client(),
 	)
+}
 
-	dial := autoDial(resolver)
+// udpDNSServer поднимает UDP/53-стенд; reply == nil - сервер молчит.
+func udpDNSServer(t *testing.T, reply func(query []byte) []byte) string {
+	t.Helper()
+	pc, err := (&net.ListenConfig{}).ListenPacket(t.Context(), "udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pc.Close() })
+	go func() {
+		buf := make([]byte, 512)
+		for {
+			n, addr, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			if reply != nil {
+				_, _ = pc.WriteTo(reply(buf[:n]), addr)
+			}
+		}
+	}()
+	return pc.LocalAddr().String()
+}
 
-	// Poison udpDNSServers so that udpProbe (real DNS round-trip) fails
-	// immediately — net.DialTimeout rejects the malformed address.
+func useUDPServers(t *testing.T, servers []string) {
+	t.Helper()
 	old := udpDNSServersPtr.Load()
-	bad := []string{"not-a-valid-host-port"}
-	udpDNSServersPtr.Store(&bad)
-	defer func() { udpDNSServersPtr.Store(old) }()
+	udpDNSServersPtr.Store(&servers)
+	t.Cleanup(func() { udpDNSServersPtr.Store(old) })
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func TestAutoDial_DoHStickyUntilServersChange(t *testing.T) {
+	dial := autoDial(mockDoH(t))
+	// Невалидный адрес валит UDP-пробу сразу.
+	servers := []string{"not-a-valid-host-port"}
+	useUDPServers(t, servers)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-
-	conn1, err := dial(ctx, "udp", "unused")
-	if err != nil {
-		t.Fatalf("first dial: %v", err)
+	dialTo := func() string {
+		t.Helper()
+		conn, err := dial(ctx, "udp", "unused")
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		defer func() { _ = conn.Close() }()
+		return conn.RemoteAddr().String()
 	}
-	_ = conn1.Close()
+	dialTo()
 
-	// Second call must skip UDP entirely. We assert this by poisoning
-	// udpDNSServers with a value that would fail parsing — if the dialer
-	// touches UDP again the call errors loudly.
-	bad2 := []string{"still-not-a-valid-host-port"}
-	udpDNSServersPtr.Store(&bad2)
-	conn2, err := dial(ctx, "udp", "unused")
-	if err != nil {
-		t.Fatalf("second dial: %v", err)
+	good := udpDNSServer(t, func(q []byte) []byte { return dnsAnswer(t, q) })
+	servers[0] = good
+	if dialTo() == good {
+		t.Fatal("re-probed UDP without servers change")
 	}
-	_ = conn2.Close()
+
+	SetUDPDNSServers([]string{good})
+	if got := dialTo(); got != good {
+		t.Fatalf("after servers change dial went to %s, want UDP %s", got, good)
+	}
+}
+
+// Молчащий первый сервер не должен съедать бюджет второго.
+func TestUDPProbe_SilentFirstServer(t *testing.T) {
+	useUDPServers(t, []string{udpDNSServer(t, nil), udpDNSServer(t, func(q []byte) []byte { return dnsAnswer(t, q) })})
+	if !udpProbe(300 * time.Millisecond) {
+		t.Fatal("udpProbe = false, want true via second server")
+	}
+}
+
+// Эхо запроса - не DNS-ответ, UDP/53 такой сервер не обслуживает.
+func TestUDPProbe_RejectsNonResponse(t *testing.T) {
+	useUDPServers(t, []string{udpDNSServer(t, func(q []byte) []byte { return append([]byte(nil), q...) })})
+	if udpProbe(300 * time.Millisecond) {
+		t.Fatal("udpProbe = true on echoed query, want false")
+	}
 }
