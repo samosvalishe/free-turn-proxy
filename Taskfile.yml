@@ -29,7 +29,7 @@ tasks:
       # checksum.extra_files глобит mobile-dist, а снапшот идёт без mobile-таргетов
       - cmd: mkdir -p mobile-dist && touch mobile-dist/freeturn.aar mobile-dist/freeturn-sources.jar mobile-dist/Mobile.xcframework.zip
         platforms: [linux, darwin]
-      - cmd: powershell -Command "New-Item -ItemType Directory -Force mobile-dist > $null; @('freeturn.aar','freeturn-sources.jar','Mobile.xcframework.zip') | ForEach-Object { if (-not (Test-Path \"mobile-dist/$_\")) { New-Item -ItemType File \"mobile-dist/$_\" > $null } }"
+      - cmd: powershell -NoProfile -Command 'New-Item -ItemType Directory -Force mobile-dist | Out-Null; "freeturn.aar","freeturn-sources.jar","Mobile.xcframework.zip" | ForEach-Object { $p = "mobile-dist/$_"; if (-not (Test-Path $p)) { New-Item -ItemType File $p | Out-Null } }'
         platforms: [windows]
       - goreleaser release --snapshot --clean --skip=publish,sign
 
