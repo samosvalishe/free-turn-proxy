@@ -235,6 +235,12 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		c <- err
 	}()
 
+	// До Allocate: отказ кодека не должен стоить аллокации.
+	obfConn, obfErr := wire.NewClientCodec(params.Profile, params.ObfKey)
+	if obfErr != nil {
+		err = fmt.Errorf("OBF init: %w", obfErr)
+		return
+	}
 	stream, derr := params.Dial(ctx, streamID)
 	if derr != nil {
 		if deps.Auth.IsAuthError(derr) {
@@ -282,11 +288,6 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	})
 
 	var internalPipeAddr atomic.Value
-	obfConn, obfErr := wire.NewClientCodec(params.Profile, params.ObfKey)
-	if obfErr != nil {
-		deps.log().Errorf("[STREAM %d] OBF init failed: %v", streamID, obfErr)
-		return
-	}
 
 	wg.Go(func() {
 		select {
