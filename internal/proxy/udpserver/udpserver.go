@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	udpRelayBufSize    = 1600
+	udpRelayBufSize    = 2048
 	udpIdleTimeout     = 30 * time.Minute
 	udpDeadlineRefresh = time.Minute
 )

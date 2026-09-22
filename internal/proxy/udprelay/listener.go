@@ -22,7 +22,7 @@ type Packet struct {
 
 // packetPool переиспользует буферы датаграмм.
 var packetPool = sync.Pool{
-	New: func() any { return &Packet{Data: make([]byte, 2048)} },
+	New: func() any { return &Packet{Data: make([]byte, maxDatagramLen)} },
 }
 
 func runListener(ctx context.Context, listenConn net.PacketConn, activeLocalPeer *atomic.Value, inboundChan chan<- *Packet) error {

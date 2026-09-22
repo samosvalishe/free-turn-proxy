@@ -24,6 +24,10 @@ var errPairRecycled = errors.New("udprelay: stream pair recycled")
 
 const (
 	pipeBufLimit = 256 << 10
+	// maxDatagramLen - бюджет локальной датаграммы (WG/AWG) по всей цепочке, как у сервера.
+	maxDatagramLen = 2048
+	// maxRecordLen - та же датаграмма в DTLS-записи: заголовок с CID, явный nonce, тег GCM.
+	maxRecordLen = maxDatagramLen + 64
 )
 
 // streamPair связывает DTLS-сессию с аллокацией, поверх которой она поднята. Смерть
@@ -188,7 +192,7 @@ func dtlsSession(dtlsctx context.Context, dtlscancel context.CancelFunc, deps *D
 	forwardDone := make(chan struct{})
 	go func() {
 		defer close(forwardDone)
-		var buf [2048]byte
+		var buf [maxDatagramLen]byte
 		for {
 			n, err := dtlsConn.Read(buf[:])
 			if err != nil {
@@ -284,8 +288,6 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		return
 	}
 
-	const maxPayload = 1600
-
 	wg.Go(func() {
 		select {
 		case <-turnctx.Done():
@@ -304,10 +306,10 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		defer turncancel()
 		var buf, readSlot []byte
 		if obfConn != nil {
-			buf = make([]byte, obfConn.MaxWire(maxPayload))
-			readSlot = buf[obfConn.HeaderLen() : obfConn.HeaderLen()+maxPayload]
+			buf = make([]byte, obfConn.MaxWire(maxRecordLen))
+			readSlot = buf[obfConn.HeaderLen() : obfConn.HeaderLen()+maxRecordLen]
 		} else {
-			buf = make([]byte, maxPayload)
+			buf = make([]byte, maxRecordLen)
 			readSlot = buf
 		}
 		addrStored := false
@@ -350,9 +352,9 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 
 	wg.Go(func() {
 		defer turncancel()
-		readBufLen := maxPayload
+		readBufLen := maxRecordLen
 		if obfConn != nil {
-			readBufLen = obfConn.MaxWire(maxPayload)
+			readBufLen = obfConn.MaxWire(maxRecordLen)
 		}
 		buf := make([]byte, readBufLen)
 		for {
