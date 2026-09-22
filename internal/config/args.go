@@ -13,67 +13,33 @@ func ClientArgs(c *Client) []string {
 	}
 	def := Defaults()
 	var args []string
-	add := func(flag string, value ...string) {
-		args = append(args, flag)
-		args = append(args, value...)
+	addIf := func(cond bool, flag string, value ...string) {
+		if cond {
+			args = append(args, flag)
+			args = append(args, value...)
+		}
 	}
 
-	add("-peer", c.Proxy.Peer)
-	if len(c.VK.Links) > 0 {
-		add("-links", strings.Join(c.VK.Links, ","))
-	}
-	if c.Provider.Name != def.Provider.Name {
-		add("-provider", c.Provider.Name)
-	}
-	if c.Proxy.Listen != def.Proxy.Listen {
-		add("-listen", c.Proxy.Listen)
-	}
-	if c.TURN.Host != "" {
-		add("-turn", c.TURN.Host)
-	}
-	if c.TURN.Port != "" {
-		add("-port", c.TURN.Port)
-	}
-	if c.TURN.N != def.TURN.N {
-		add("-n", strconv.Itoa(c.TURN.N))
-	}
-	if c.VK.StreamsPerCred != def.VK.StreamsPerCred {
-		add("-streams-per-cred", strconv.Itoa(c.VK.StreamsPerCred))
-	}
-	if c.TURN.TransportUDP != def.TURN.TransportUDP {
-		add("-transport", TransportUDP)
-	}
-	if c.Proxy.Mode != def.Proxy.Mode {
-		add("-mode", string(c.Proxy.Mode))
-	}
+	args = append(args, "-peer", c.Proxy.Peer)
+	addIf(len(c.VK.Links) > 0, "-links", strings.Join(c.VK.Links, ","))
+	addIf(c.Provider.Name != def.Provider.Name, "-provider", c.Provider.Name)
+	addIf(c.Proxy.Listen != def.Proxy.Listen, "-listen", c.Proxy.Listen)
+	addIf(c.TURN.Host != "", "-turn", c.TURN.Host)
+	addIf(c.TURN.Port != "", "-port", c.TURN.Port)
+	addIf(c.TURN.N != def.TURN.N, "-n", strconv.Itoa(c.TURN.N))
+	addIf(c.VK.StreamsPerCred != def.VK.StreamsPerCred, "-streams-per-cred", strconv.Itoa(c.VK.StreamsPerCred))
+	addIf(c.TURN.TransportUDP != def.TURN.TransportUDP, "-transport", TransportUDP)
+	addIf(c.Proxy.Mode != def.Proxy.Mode, "-mode", string(c.Proxy.Mode))
 	args = append(args, kcpArgs(c.KCP.Profile, def.KCP.Profile)...)
-	if c.Obf.Enabled() {
-		add("-obf-profile", string(c.Obf.Profile))
-		add("-obf-key", hex.EncodeToString(c.Obf.Key))
-	}
-	if c.Obf.Timing > 0 {
-		add("-obf-timing", c.Obf.Timing.String())
-	}
-	if c.VK.ManualCaptcha {
-		args = append(args, "-manual-captcha")
-	}
-	if c.VK.Platform != def.VK.Platform {
-		add("-platform", string(c.VK.Platform))
-	}
-	if c.DNS.Mode != def.DNS.Mode {
-		add("-dns-mode", c.DNS.Mode)
-	}
-	if len(c.DNS.Servers) > 0 {
-		add("-dns-servers", strings.Join(c.DNS.Servers, ","))
-	}
-	if c.ClientID != "" {
-		add("-client-id", c.ClientID)
-	}
-	if c.SubURL != "" {
-		add("-sub", c.SubURL)
-	}
-	if c.Log.Debug {
-		args = append(args, "-debug")
-	}
+	addIf(c.Obf.Enabled(), "-obf-profile", string(c.Obf.Profile))
+	addIf(c.Obf.Enabled(), "-obf-key", hex.EncodeToString(c.Obf.Key))
+	addIf(c.Obf.Timing > 0, "-obf-timing", c.Obf.Timing.String())
+	addIf(c.VK.ManualCaptcha, "-manual-captcha")
+	addIf(c.VK.Platform != def.VK.Platform, "-platform", string(c.VK.Platform))
+	addIf(c.DNS.Mode != def.DNS.Mode, "-dns-mode", c.DNS.Mode)
+	addIf(len(c.DNS.Servers) > 0, "-dns-servers", strings.Join(c.DNS.Servers, ","))
+	addIf(c.ClientID != "", "-client-id", c.ClientID)
+	addIf(c.SubURL != "", "-sub", c.SubURL)
+	addIf(c.Log.Debug, "-debug")
 	return args
 }

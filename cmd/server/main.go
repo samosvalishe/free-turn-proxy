@@ -67,32 +67,9 @@ func main() {
 		logger.Warnf("running with -obf-profile=none: any client reaching %s can relay to %s (no shared-key auth)", cfg.Proxy.Listen, cfg.Proxy.Connect)
 	}
 
-	certificate, genErr := dtlsdial.GenerateSelfSignedCert()
-	if genErr != nil {
-		logger.Errorf("self-signed cert: %v", genErr)
-		os.Exit(1)
-	}
-
-	dtlsOpts := []dtls.ServerOption{
-		dtls.WithCertificates(certificate),
-		dtls.WithExtendedMasterSecret(dtls.RequireExtendedMasterSecret),
-		dtls.WithCipherSuites(dtls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256),
-		dtls.WithConnectionIDGenerator(dtls.RandomCIDGenerator(8)),
-	}
-	var listener net.Listener
-	if cfg.Obf.Enabled() {
-		logger.Infof("OBF profile=%s: listener only accepts clients with matching -obf-profile and -obf-key", cfg.Obf.Profile)
-		obfListener, oerr := wire.Listen(string(cfg.Obf.Profile), addr, cfg.Obf.Key, cfg.Obf.Timing)
-		if oerr != nil {
-			logger.Errorf("obf listen: %v", oerr)
-			os.Exit(1)
-		}
-		listener, err = dtls.NewListenerWithOptions(obfListener, dtlsOpts...)
-	} else {
-		listener, err = dtls.ListenWithOptions("udp", addr, dtlsOpts...)
-	}
+	listener, err := listen(cfg, addr, logger)
 	if err != nil {
-		logger.Errorf("dtls listen: %v", err)
+		logger.Errorf("%v", err)
 		os.Exit(1)
 	}
 	context.AfterFunc(ctx, func() {
@@ -115,6 +92,38 @@ func main() {
 		logger.Infof("Client ID authorization enabled via %s", cfg.ClientsFile)
 	}
 
+	serve(ctx, logger, listener, db, cfg)
+}
+
+func listen(cfg *config.Server, addr *net.UDPAddr, logger logx.Logger) (net.Listener, error) {
+	certificate, err := dtlsdial.GenerateSelfSignedCert()
+	if err != nil {
+		return nil, fmt.Errorf("self-signed cert: %w", err)
+	}
+	dtlsOpts := []dtls.ServerOption{
+		dtls.WithCertificates(certificate),
+		dtls.WithExtendedMasterSecret(dtls.RequireExtendedMasterSecret),
+		dtls.WithCipherSuites(dtls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256),
+		dtls.WithConnectionIDGenerator(dtls.RandomCIDGenerator(8)),
+	}
+	var listener net.Listener
+	if cfg.Obf.Enabled() {
+		logger.Infof("OBF profile=%s: listener only accepts clients with matching -obf-profile and -obf-key", cfg.Obf.Profile)
+		obfListener, oerr := wire.Listen(string(cfg.Obf.Profile), addr, cfg.Obf.Key, cfg.Obf.Timing)
+		if oerr != nil {
+			return nil, fmt.Errorf("obf listen: %w", oerr)
+		}
+		listener, err = dtls.NewListenerWithOptions(obfListener, dtlsOpts...)
+	} else {
+		listener, err = dtls.ListenWithOptions("udp", addr, dtlsOpts...)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("dtls listen: %w", err)
+	}
+	return listener, nil
+}
+
+func serve(ctx context.Context, logger logx.Logger, listener net.Listener, db *clientsdb.DB, cfg *config.Server) {
 	var wg sync.WaitGroup
 	var backoff time.Duration
 	for {

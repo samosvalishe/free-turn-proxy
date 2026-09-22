@@ -41,33 +41,21 @@ type streamPair struct {
 
 // DTLSLoop поддерживает и перезапускает DTLS-соединение для указанного streamID.
 func DTLSLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- streamPair, okchan chan<- struct{}, streamID int) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-			err := oneDTLS(ctx, deps, params, peer, listenConn, inboundChan, connchan, okchan, streamID)
+	for ctx.Err() == nil {
+		err := oneDTLS(ctx, deps, params, peer, listenConn, inboundChan, connchan, okchan, streamID)
+		var wait time.Duration
+		switch {
+		case err == nil, errors.Is(err, errPairRecycled):
 			// Пара пересоздаётся под новую аллокацию - TURN-цикл уже держит свою паузу.
-			if errors.Is(err, errPairRecycled) {
-				continue
-			}
-			if err != nil && time.Now().Unix() < deps.Auth.BackoffUntilUnix() && errors.Is(err, context.DeadlineExceeded) {
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(time.Duration(1+randx.Intn(2)) * time.Second):
-				}
-				continue
-			}
-			if err != nil {
-				wait := time.Duration(10+randx.Intn(20)) * time.Second
-				deps.log().Warnf("[STREAM %d] DTLS: %v - повтор через %s", streamID, err, wait)
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(wait):
-				}
-			}
+			continue
+		case time.Now().Unix() < deps.Auth.BackoffUntilUnix() && errors.Is(err, context.DeadlineExceeded):
+			wait = time.Duration(1+randx.Intn(2)) * time.Second
+		default:
+			wait = time.Duration(10+randx.Intn(20)) * time.Second
+			deps.log().Warnf("[STREAM %d] DTLS: %v - повтор через %s", streamID, err, wait)
+		}
+		if !sleepCtx(ctx, wait) {
+			return
 		}
 	}
 }
@@ -75,64 +63,70 @@ func DTLSLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 // TURNLoop управляет жизненным циклом одной TURN-аллокации.
 func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, connchan <-chan streamPair, streamID int) {
 	for {
+		var pair streamPair
 		select {
 		case <-ctx.Done():
 			return
-		case pair := <-connchan:
-			c := make(chan error, 1)
-			go deps.guard(func() { oneTURN(ctx, deps, params, peer, pair.pipe, streamID, c) })()
-
-			var err error
-			select {
-			case err = <-c:
-			case <-ctx.Done():
-				return
-			}
-			// Аллокация кончилась - DTLS поверх неё сервер больше не адресует (см. streamPair).
-			pair.cancel()
-			if err != nil {
-				if errors.Is(err, provider.ErrFatalNoStreams) {
-					deps.log().Errorf("[STREAM %d] Fatal provider error. Shutting down application.", streamID)
-					deps.fatal(err)
-					return
-				}
-				if errors.Is(err, turndial.ErrAllocQuota) {
-					wait := turndial.QuotaBackoff()
-					deps.log().Warnf("[STREAM %d] квота аллокаций занята - пауза %s", streamID, wait)
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(wait):
-					}
-					continue
-				}
-				if errors.Is(err, provider.ErrBackoffActive) {
-					lockoutEnd := deps.Auth.BackoffUntilUnix()
-					var sleepDuration time.Duration
-					if lockoutEnd > 0 {
-						sleepDuration = time.Until(time.Unix(lockoutEnd, 0))
-						if sleepDuration < 0 {
-							sleepDuration = 5 * time.Second
-						}
-					} else {
-						sleepDuration = 60 * time.Second
-						deps.log().Warnf("[STREAM %d] Backing off for 60 seconds (provider requests wait)", streamID)
-					}
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(sleepDuration):
-					}
-				} else {
-					deps.log().Errorf("[STREAM %d] %s", streamID, err)
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(2 * time.Second):
-					}
-				}
-			}
+		case pair = <-connchan:
 		}
+		c := make(chan error, 1)
+		go deps.guard(func() { oneTURN(ctx, deps, params, peer, pair.pipe, streamID, c) })()
+
+		var err error
+		select {
+		case err = <-c:
+		case <-ctx.Done():
+			return
+		}
+		// Аллокация кончилась - DTLS поверх неё сервер больше не адресует (см. streamPair).
+		pair.cancel()
+		if err == nil {
+			continue
+		}
+		if errors.Is(err, provider.ErrFatalNoStreams) {
+			deps.log().Errorf("[STREAM %d] Fatal provider error. Shutting down application.", streamID)
+			deps.fatal(err)
+			return
+		}
+		if !sleepCtx(ctx, turnRetryDelay(deps, streamID, err)) {
+			return
+		}
+	}
+}
+
+// turnRetryDelay: пауза провайдера важнее собственной - ретрай в её середине только
+// продлевает локаут. Задержки свои, не tcprelay: UDP-пара дешевле TCP-стека.
+func turnRetryDelay(deps *Deps, streamID int, err error) time.Duration {
+	switch {
+	case errors.Is(err, turndial.ErrAllocQuota):
+		wait := turndial.QuotaBackoff()
+		deps.log().Warnf("[STREAM %d] квота аллокаций занята - пауза %s", streamID, wait)
+		return wait
+	case errors.Is(err, provider.ErrBackoffActive):
+		lockoutEnd := deps.Auth.BackoffUntilUnix()
+		if lockoutEnd <= 0 {
+			deps.log().Warnf("[STREAM %d] Backing off for 60 seconds (provider requests wait)", streamID)
+			return 60 * time.Second
+		}
+		if d := time.Until(time.Unix(lockoutEnd, 0)); d > 0 {
+			return d
+		}
+		return 5 * time.Second
+	default:
+		deps.log().Errorf("[STREAM %d] %s", streamID, err)
+		return 2 * time.Second
+	}
+}
+
+// sleepCtx: false - ctx отменён раньше.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }
 
@@ -149,9 +143,7 @@ func oneDTLS(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 }
 
 func dtlsSession(dtlsctx context.Context, dtlscancel context.CancelFunc, deps *Deps, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- streamPair, okchan chan<- struct{}, streamID int) error {
-	select {
-	case <-time.After(time.Duration(randx.Intn(400)+100) * time.Millisecond):
-	case <-dtlsctx.Done():
+	if !sleepCtx(dtlsctx, time.Duration(randx.Intn(400)+100)*time.Millisecond) {
 		return dtlsctx.Err()
 	}
 
@@ -165,11 +157,10 @@ func dtlsSession(dtlsctx context.Context, dtlscancel context.CancelFunc, deps *D
 	case <-dtlsctx.Done():
 		return dtlsctx.Err()
 	}
-	dtlsRaw, err1 := deps.DTLSDialer.Dial(dtlsctx, conn1, peer)
-	if err1 != nil {
-		return fmt.Errorf("failed to connect DTLS: %w", err1)
+	dtlsConn, err := deps.DTLSDialer.Dial(dtlsctx, conn1, peer)
+	if err != nil {
+		return fmt.Errorf("failed to connect DTLS: %w", err)
 	}
-	var dtlsConn net.Conn = dtlsRaw
 	defer func() {
 		_ = dtlsConn.Close()
 		deps.log().Debugf("[STREAM %d] Closed DTLS connection", streamID)
@@ -192,25 +183,7 @@ func dtlsSession(dtlsctx context.Context, dtlscancel context.CancelFunc, deps *D
 	forwardDone := make(chan struct{})
 	go func() {
 		defer close(forwardDone)
-		var buf [maxDatagramLen]byte
-		for {
-			n, err := dtlsConn.Read(buf[:])
-			if err != nil {
-				return
-			}
-			addr := deps.ActiveLocalPeer.Load()
-			if addr == nil {
-				continue
-			}
-			netAddr, ok := addr.(net.Addr)
-			if !ok {
-				continue
-			}
-			_, writeErr := listenConn.WriteTo(buf[:n], netAddr)
-			if writeErr != nil {
-				return
-			}
-		}
+		forwardToLocal(dtlsConn, listenConn, deps.ActiveLocalPeer)
 	}()
 
 	for {
@@ -229,16 +202,32 @@ func dtlsSession(dtlsctx context.Context, dtlscancel context.CancelFunc, deps *D
 	}
 }
 
+func forwardToLocal(dtlsConn net.Conn, listenConn net.PacketConn, activeLocalPeer *atomic.Value) {
+	var buf [maxDatagramLen]byte
+	for {
+		n, err := dtlsConn.Read(buf[:])
+		if err != nil {
+			return
+		}
+		addr, ok := activeLocalPeer.Load().(net.Addr)
+		if !ok {
+			continue
+		}
+		if _, err := listenConn.WriteTo(buf[:n], addr); err != nil {
+			return
+		}
+	}
+}
+
 func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, conn2 net.PacketConn, streamID int, c chan<- error) {
 	var err error
 	defer func() {
 		c <- err
 	}()
 
-	// До Allocate: отказ кодека не должен стоить аллокации.
-	obfConn, obfErr := wire.NewClientCodec(params.Profile, params.ObfKey)
-	if obfErr != nil {
-		err = fmt.Errorf("OBF init: %w", obfErr)
+	codec, err := wire.NewClientCodec(params.Profile, params.ObfKey)
+	if err != nil {
+		err = fmt.Errorf("OBF init: %w", err)
 		return
 	}
 	stream, derr := params.Dial(ctx, streamID)
@@ -253,7 +242,6 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	if deps.OnTURNServer != nil {
 		deps.OnTURNServer(stream.ServerUDPAddr.IP)
 	}
-
 	if params.ObfTiming > 0 {
 		relayConn = shape.WrapPacketConn(relayConn, params.ObfTiming)
 		deps.log().Debugf("[STREAM %d] obf-timing=%s", streamID, params.ObfTiming)
@@ -264,22 +252,10 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	relayedAddr := relayConn.LocalAddr().String()
 	deps.log().Infof("[STREAM %d] TURN allocation up: relayed=%s server=%s",
 		streamID, relayedAddr, stream.ServerUDPAddr.IP)
+	defer releaseStream(deps, stream, relayedAddr, streamID)
 
-	defer func() {
-		// Освобождение аллокации логируем всегда: недошедший deallocate держит квоту VK
-		// до конца её lifetime, и следующий Allocate ловит 486.
-		cerr := stream.Close()
-		deps.log().Infof("[STREAM %d] TURN allocation released: relayed=%s deallocate=%v",
-			streamID, relayedAddr, cerr)
-		if cerr != nil {
-			deps.Auth.DropCredentials(streamID)
-		}
-	}()
-
-	wg := sync.WaitGroup{}
 	turnctx, turncancel := context.WithCancel(ctx)
 	defer turncancel()
-
 	// без дедлайна relayConn.ReadFrom не проснётся на отмене turnctx - wg.Wait встанет намертво
 	context.AfterFunc(turnctx, func() {
 		if err := relayConn.SetDeadline(time.Now()); err != nil {
@@ -287,114 +263,117 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		}
 	})
 
-	var internalPipeAddr atomic.Value
-
-	wg.Go(func() {
-		select {
-		case <-turnctx.Done():
-		case <-stream.PermDead:
-			deps.log().Warnf("[STREAM %d] TURN refresh failed - recycle allocation", streamID)
-			turncancel()
-		}
-		// conn2 молчит, пока приложение не шлёт: без дедлайна его читатель досидел бы
-		// до первого пакета, а рецикл на простое висел бы вечно (тоннель без трафика)
-		if err := conn2.SetDeadline(time.Now()); err != nil {
-			deps.log().Errorf("[STREAM %d] Failed to set pipe deadline: %s", streamID, err)
-		}
-	})
-
+	var pipeAddr atomic.Value
+	var wg sync.WaitGroup
+	wg.Go(func() { recycleOnPermDead(turnctx, turncancel, deps, stream.PermDead, conn2, streamID) })
 	wg.Go(func() {
 		defer turncancel()
-		var buf, readSlot []byte
-		if obfConn != nil {
-			buf = make([]byte, obfConn.MaxWire(maxRecordLen))
-			readSlot = buf[obfConn.HeaderLen() : obfConn.HeaderLen()+maxRecordLen]
-		} else {
-			buf = make([]byte, maxRecordLen)
-			readSlot = buf
-		}
-		addrStored := false
-		for {
-			if turnctx.Err() != nil {
-				return
-			}
-			n, addr1, err1 := conn2.ReadFrom(readSlot)
-			if err1 != nil {
-				return
-			}
-			if turnctx.Err() != nil {
-				return
-			}
-
-			if !addrStored {
-				internalPipeAddr.Store(addr1)
-				addrStored = true
-			}
-
-			out := readSlot[:n]
-			if obfConn != nil {
-				written, wErr := obfConn.WrapInPlace(buf, n)
-				if wErr != nil {
-					deps.log().Errorf("[STREAM %d] OBF wrap failed: %v", streamID, wErr)
-					return
-				}
-				out = buf[:written]
-			}
-
-			written, err1 := relayConn.WriteTo(out, peer)
-			if params.TrafficStats != nil {
-				params.TrafficStats.AddTx(written)
-			}
-			if err1 != nil {
-				return
-			}
-		}
+		relayUplink(turnctx, deps, params, codec, conn2, relayConn, peer, &pipeAddr, streamID)
 	})
-
 	wg.Go(func() {
 		defer turncancel()
-		readBufLen := maxRecordLen
-		if obfConn != nil {
-			readBufLen = obfConn.MaxWire(maxRecordLen)
-		}
-		buf := make([]byte, readBufLen)
-		for {
-			n, _, err1 := relayConn.ReadFrom(buf)
-			if err1 != nil {
-				return
-			}
-			addr1 := internalPipeAddr.Load()
-			if addr1 == nil {
-				continue
-			}
-
-			if addr, ok := addr1.(net.Addr); ok {
-				payload := buf[:n]
-				if obfConn != nil {
-					p, uErr := obfConn.UnwrapInPlace(buf[:n])
-					if uErr != nil {
-						deps.log().Errorf("[STREAM %d] OBF unwrap failed: %v (n=%d)", streamID, uErr, n)
-						continue
-					}
-					payload = p
-				}
-				if params.TrafficStats != nil {
-					params.TrafficStats.AddRx(len(payload))
-				}
-				if _, err := conn2.WriteTo(payload, addr); err != nil {
-					return
-				}
-			}
-		}
+		relayDownlink(deps, params, codec, conn2, relayConn, &pipeAddr, streamID)
 	})
-
 	wg.Wait()
+
 	if err := relayConn.SetDeadline(time.Time{}); err != nil {
 		deps.log().Errorf("Failed to clear relay deadline: %s", err)
 	}
-	// Дедлайн снимаем до закрытия пары: пока DTLS сворачивается, его записи в pipe не
-	// должны сыпать таймаутами вместо реальной причины выхода.
 	if err := conn2.SetDeadline(time.Time{}); err != nil {
 		deps.log().Errorf("Failed to clear pipe deadline: %s", err)
+	}
+}
+
+func releaseStream(deps *Deps, stream *turndial.Stream, relayedAddr string, streamID int) {
+	cerr := stream.Close()
+	deps.log().Infof("[STREAM %d] TURN allocation released: relayed=%s deallocate=%v",
+		streamID, relayedAddr, cerr)
+	if cerr != nil {
+		deps.Auth.DropCredentials(streamID)
+	}
+}
+
+func recycleOnPermDead(ctx context.Context, cancel context.CancelFunc, deps *Deps, permDead <-chan struct{}, conn2 net.PacketConn, streamID int) {
+	select {
+	case <-ctx.Done():
+	case <-permDead:
+		deps.log().Warnf("[STREAM %d] TURN refresh failed - recycle allocation", streamID)
+		cancel()
+	}
+	if err := conn2.SetDeadline(time.Now()); err != nil {
+		deps.log().Errorf("[STREAM %d] Failed to set pipe deadline: %s", streamID, err)
+	}
+}
+
+func relayUplink(ctx context.Context, deps *Deps, params *Params, codec wire.Codec, conn2, relayConn net.PacketConn, peer net.Addr, pipeAddr *atomic.Value, streamID int) {
+	var buf, readSlot []byte
+	if codec != nil {
+		buf = make([]byte, codec.MaxWire(maxRecordLen))
+		readSlot = buf[codec.HeaderLen() : codec.HeaderLen()+maxRecordLen]
+	} else {
+		buf = make([]byte, maxRecordLen)
+		readSlot = buf
+	}
+	addrStored := false
+	for ctx.Err() == nil {
+		n, addr, err := conn2.ReadFrom(readSlot)
+		if err != nil || ctx.Err() != nil {
+			return
+		}
+		if !addrStored {
+			pipeAddr.Store(addr)
+			addrStored = true
+		}
+
+		out := readSlot[:n]
+		if codec != nil {
+			written, wErr := codec.WrapInPlace(buf, n)
+			if wErr != nil {
+				deps.log().Errorf("[STREAM %d] OBF wrap failed: %v", streamID, wErr)
+				return
+			}
+			out = buf[:written]
+		}
+
+		written, err := relayConn.WriteTo(out, peer)
+		if params.TrafficStats != nil {
+			params.TrafficStats.AddTx(written)
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func relayDownlink(deps *Deps, params *Params, codec wire.Codec, conn2, relayConn net.PacketConn, pipeAddr *atomic.Value, streamID int) {
+	readBufLen := maxRecordLen
+	if codec != nil {
+		readBufLen = codec.MaxWire(maxRecordLen)
+	}
+	buf := make([]byte, readBufLen)
+	for {
+		n, _, err := relayConn.ReadFrom(buf)
+		if err != nil {
+			return
+		}
+		addr, ok := pipeAddr.Load().(net.Addr)
+		if !ok {
+			continue
+		}
+		payload := buf[:n]
+		if codec != nil {
+			p, uErr := codec.UnwrapInPlace(payload)
+			if uErr != nil {
+				deps.log().Errorf("[STREAM %d] OBF unwrap failed: %v (n=%d)", streamID, uErr, n)
+				continue
+			}
+			payload = p
+		}
+		if params.TrafficStats != nil {
+			params.TrafficStats.AddRx(len(payload))
+		}
+		if _, err := conn2.WriteTo(payload, addr); err != nil {
+			return
+		}
 	}
 }

@@ -15,7 +15,17 @@ linters:
     - prealloc
     - gosec
     - staticcheck
+    - cyclop
+    - funlen
+    - nestif
   settings:
+    cyclop:
+      max-complexity: 15
+    funlen:
+      lines: -1
+      statements: 60
+    nestif:
+      min-complexity: 5
     errcheck:
       check-type-assertions: true
       exclude-functions:
@@ -66,6 +76,15 @@ linters:
           - gocritic
         path: "^cmd/"
         text: "exitAfterDefer"
+      - linters:
+          - cyclop
+          - funlen
+          - nestif
+        path: "_test\\.go$"
+      - linters:
+          - cyclop
+          - nestif
+        path: "internal/provider/vk/internal/(captcha|vkauth)/"
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

@@ -106,48 +106,58 @@ func applyInterface(cfg *tunnel.Config, key, value string) error {
 			return fmt.Errorf("mtu: %w", err)
 		}
 		cfg.MTU = mtu
+	default:
+		return applyAmnezia(&cfg.Amnezia, key, value)
+	}
+	return nil
+}
+
+func applyAmnezia(p *tunnel.AmneziaParams, key, value string) error {
+	switch key {
 	case "jc", "jmin", "jmax", "s1", "s2", "s3", "s4":
 		n, err := strconv.Atoi(value)
 		if err != nil {
 			return fmt.Errorf("%s: %w", key, err)
 		}
-		setAmneziaInt(&cfg.Amnezia, key, n)
+		setAmneziaInt(p, key, n)
 	case "h1":
-		cfg.Amnezia.H1 = value
+		p.H1 = value
 	case "h2":
-		cfg.Amnezia.H2 = value
+		p.H2 = value
 	case "h3":
-		cfg.Amnezia.H3 = value
+		p.H3 = value
 	case "h4":
-		cfg.Amnezia.H4 = value
+		p.H4 = value
 	case "i1", "i2", "i3", "i4", "i5":
-		idx := int(key[1] - '1')
-		cfg.Amnezia.I[idx] = value
+		p.I[int(key[1]-'1')] = value
 	case "headerprotectionkey":
 		k, err := parseKey(value)
 		if err != nil {
 			return fmt.Errorf("headerprotectionkey: %w", err)
 		}
-		cfg.Amnezia.HeaderProtectionKey = k
+		p.HeaderProtectionKey = k
 	case "contentpaddingaddition", "rekeyaftertime", "rekeytimeout",
 		"rejectaftertime", "keepalivetimeout", "maxhandshakeattempts":
 		if err := tunnel.ValidateRange(value); err != nil {
 			return fmt.Errorf("%s: %w", key, err)
 		}
-		setAmneziaRange(&cfg.Amnezia, key, value)
-	case "randomtrailers", "disablecookies":
-		b, err := parseBool(value)
-		if err != nil {
-			return fmt.Errorf("%s: %w", key, err)
-		}
-		if key == "randomtrailers" {
-			cfg.Amnezia.RandomTrailers = b
-		} else {
-			cfg.Amnezia.DisableCookies = b
-		}
+		setAmneziaRange(p, key, value)
+	case "randomtrailers":
+		return setBool(&p.RandomTrailers, key, value)
+	case "disablecookies":
+		return setBool(&p.DisableCookies, key, value)
 	default:
 		return fmt.Errorf("unknown [Interface] key %q", key)
 	}
+	return nil
+}
+
+func setBool(dst *bool, key, value string) error {
+	b, err := parseBool(value)
+	if err != nil {
+		return fmt.Errorf("%s: %w", key, err)
+	}
+	*dst = b
 	return nil
 }
 

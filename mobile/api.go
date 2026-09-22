@@ -236,6 +236,39 @@ func waitDone(done <-chan struct{}, limit time.Duration) {
 	}
 }
 
+func parseStartConfig(raw []byte, withTunnel bool) (*config.Client, error) {
+	overlayURI := ""
+	if subURL := config.PeekSubURLJSON(raw); subURL != "" {
+		sub.SetLogger(coreLog())
+		s, err := sub.Fetch(context.Background(), subURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch subscription: %w", err)
+		}
+		if len(s.Nodes) == 0 || s.Nodes[0].URI == nil {
+			return nil, errors.New("no nodes found in subscription")
+		}
+		overlayURI = s.Nodes[0].URI.String()
+	}
+
+	cfg, err := config.ParseClientJSON(raw, overlayURI)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.ClientID == "" {
+		return nil, errors.New("clientId is required")
+	}
+	if cfg.VK.ManualCaptcha && currentSink() == nil {
+		return nil, errors.New("manual captcha requires event sink")
+	}
+	if cfg.Tunnel.Enabled() && !withTunnel {
+		return nil, fmt.Errorf("%w (mode=%s)", ErrTunnelRequiresStartTunnel, cfg.Tunnel.Mode)
+	}
+	if withTunnel && cfg.Proxy.Mode == config.ProxyModeTCP {
+		return nil, ErrTCPModeRequiresStart
+	}
+	return cfg, nil
+}
+
 func startLocked(configJSON string, tunFD int, withTunnel bool) error {
 	// До backend.Up дескриптор закрывается при ошибке инициализации.
 	ownFD := withTunnel
@@ -245,37 +278,9 @@ func startLocked(configJSON string, tunFD int, withTunnel bool) error {
 		}
 	}()
 
-	raw := []byte(configJSON)
-
-	// Резолв подписки до парсинга даёт обязательный peer.
-	overlayURI := ""
-	if subURL := config.PeekSubURLJSON(raw); subURL != "" {
-		sub.SetLogger(coreLog())
-		s, err := sub.Fetch(context.Background(), subURL)
-		if err != nil {
-			return fmt.Errorf("failed to fetch subscription: %w", err)
-		}
-		if len(s.Nodes) == 0 || s.Nodes[0].URI == nil {
-			return errors.New("no nodes found in subscription")
-		}
-		overlayURI = s.Nodes[0].URI.String()
-	}
-
-	cfg, err := config.ParseClientJSON(raw, overlayURI)
+	cfg, err := parseStartConfig([]byte(configJSON), withTunnel)
 	if err != nil {
 		return err
-	}
-	if cfg.ClientID == "" {
-		return errors.New("clientId is required")
-	}
-	if cfg.VK.ManualCaptcha && currentSink() == nil {
-		return errors.New("manual captcha requires event sink")
-	}
-	if cfg.Tunnel.Enabled() && !withTunnel {
-		return fmt.Errorf("%w (mode=%s)", ErrTunnelRequiresStartTunnel, cfg.Tunnel.Mode)
-	}
-	if withTunnel && cfg.Proxy.Mode == config.ProxyModeTCP {
-		return ErrTCPModeRequiresStart
 	}
 
 	logger := &sinkLogger{debug: cfg.Log.Debug, buf: sharedLogBuf}

@@ -18,30 +18,12 @@ func Validate(c *Client) error {
 		return errors.New("need peer address")
 	}
 
-	switch c.Provider.Name {
-	case ProviderVK:
-		if len(c.VK.Links) == 0 {
-			return errors.New("vk: need at least one link (-links / -link)")
-		}
-		if c.VK.StreamsPerCred <= 0 {
-			return errors.New("-streams-per-cred must be positive")
-		}
-		switch c.VK.Platform {
-		case PlatformDesktop, PlatformMobile:
-		default:
-			return fmt.Errorf("invalid -platform value %q: must be %s | %s", c.VK.Platform, PlatformDesktop, PlatformMobile)
-		}
-	case ProviderDirect:
-	default:
-		return fmt.Errorf("invalid -provider value %q: must be %s | %s", c.Provider.Name, ProviderVK, ProviderDirect)
+	if err := validateProvider(c); err != nil {
+		return err
 	}
-
-	switch c.DNS.Mode {
-	case DNSModePlain, DNSModeDoH, DNSModeAuto:
-	default:
-		return fmt.Errorf("invalid -dns-mode value %q: must be %s | %s | %s", c.DNS.Mode, DNSModePlain, DNSModeDoH, DNSModeAuto)
+	if err := validateDNSMode(c.DNS.Mode); err != nil {
+		return err
 	}
-
 	if err := validateObfProfile(c.Obf.Profile); err != nil {
 		return err
 	}
@@ -55,6 +37,37 @@ func Validate(c *Client) error {
 		return err
 	}
 	return validateObfTiming(c.Obf)
+}
+
+func validateProvider(c *Client) error {
+	switch c.Provider.Name {
+	case ProviderDirect:
+		return nil
+	case ProviderVK:
+	default:
+		return fmt.Errorf("invalid -provider value %q: must be %s | %s", c.Provider.Name, ProviderVK, ProviderDirect)
+	}
+	if len(c.VK.Links) == 0 {
+		return errors.New("vk: need at least one link (-links / -link)")
+	}
+	if c.VK.StreamsPerCred <= 0 {
+		return errors.New("-streams-per-cred must be positive")
+	}
+	switch c.VK.Platform {
+	case PlatformDesktop, PlatformMobile:
+		return nil
+	default:
+		return fmt.Errorf("invalid -platform value %q: must be %s | %s", c.VK.Platform, PlatformDesktop, PlatformMobile)
+	}
+}
+
+func validateDNSMode(m string) error {
+	switch m {
+	case DNSModePlain, DNSModeDoH, DNSModeAuto:
+		return nil
+	default:
+		return fmt.Errorf("invalid -dns-mode value %q: must be %s | %s | %s", m, DNSModePlain, DNSModeDoH, DNSModeAuto)
+	}
 }
 
 func validateProxyMode(m ProxyMode) error {

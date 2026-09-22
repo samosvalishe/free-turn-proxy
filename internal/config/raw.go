@@ -52,15 +52,9 @@ type raw struct {
 
 // applyURI применяет параметры freeturn:// поверх raw-опций.
 func (r *raw) applyURI(u *uri.Config) {
-	if u.Provider != "" {
-		r.Provider = u.Provider
-	}
-	if u.Transport != "" {
-		r.Transport = u.Transport
-	}
-	if u.Mode != "" {
-		r.Mode = u.Mode
-	}
+	override(&r.Provider, u.Provider)
+	override(&r.Transport, u.Transport)
+	override(&r.Mode, u.Mode)
 	if u.KCP != nil {
 		r.KCP = kcpmux.Profile{
 			NoDelay:    u.KCP.NoDelay,
@@ -79,12 +73,8 @@ func (r *raw) applyURI(u *uri.Config) {
 	if u.StreamsPerCred > 0 {
 		r.StreamsPerCred = u.StreamsPerCred
 	}
-	if u.ObfProfile != "" {
-		r.ObfProfile = u.ObfProfile
-	}
-	if u.ObfKey != "" {
-		r.ObfKey = u.ObfKey
-	}
+	override(&r.ObfProfile, u.ObfProfile)
+	override(&r.ObfKey, u.ObfKey)
 
 	if u.ObfTimingMs > 0 && u.ObfProfile != "" && u.ObfProfile != string(ObfProfileNone) {
 		r.ObfTiming = time.Duration(u.ObfTimingMs) * time.Millisecond
@@ -93,27 +83,22 @@ func (r *raw) applyURI(u *uri.Config) {
 	if u.VKLink != "" && r.Links == "" && r.Link == "" {
 		r.Links = u.VKLink
 	}
-	if u.Peer != "" {
-		r.Peer = u.Peer
-	}
-	if u.ClientID != "" {
-		r.ClientID = u.ClientID
-	}
-	if u.Listen != "" {
-		r.Listen = u.Listen
-	}
-	if u.DNSMode != "" {
-		r.DNSMode = u.DNSMode
-	}
-	if u.DNSServers != "" {
-		r.DNSServers = u.DNSServers
-	}
-	if u.ManualCaptcha {
-		r.ManualCaptcha = true
-	}
+	override(&r.Peer, u.Peer)
+	override(&r.ClientID, u.ClientID)
+	override(&r.Listen, u.Listen)
+	override(&r.DNSMode, u.DNSMode)
+	override(&r.DNSServers, u.DNSServers)
+	r.ManualCaptcha = r.ManualCaptcha || u.ManualCaptcha
 	if u.WGConf != "" {
 		r.TunnelMode = "awg"
 		r.TunnelConfig = u.WGConf
+	}
+}
+
+func override[T comparable](dst *T, v T) {
+	var zero T
+	if v != zero {
+		*dst = v
 	}
 }
 

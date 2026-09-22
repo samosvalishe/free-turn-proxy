@@ -77,84 +77,71 @@ func Fetch(ctx context.Context, url string) (*Sub, error) {
 func Parse(r io.Reader) (*Sub, error) {
 	s := &Sub{}
 	scanner := bufio.NewScanner(r)
-
-	var lastNode *Node
-
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		if strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "##") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[0][1:])
-				val := strings.TrimSpace(parts[1])
-				switch key {
-				case "name":
-					s.Name = val
-				case "update":
-					s.Update = val
-				case "refresh":
-					s.Refresh = val
-				case "color":
-					s.Color = val
-				case "icon":
-					s.Icon = val
-				case "used":
-					s.Used = val
-				case "available":
-					s.Available = val
-				}
+		switch {
+		case strings.HasPrefix(line, "##"):
+			if key, val, ok := metaField(line, "##"); ok && len(s.Nodes) > 0 {
+				s.Nodes[len(s.Nodes)-1].setMeta(key, val)
 			}
-			continue
-		}
-
-		if strings.HasPrefix(line, "##") {
-			if lastNode == nil {
+		case strings.HasPrefix(line, "#"):
+			if key, val, ok := metaField(line, "#"); ok {
+				s.setMeta(key, val)
+			}
+		case strings.HasPrefix(line, "freeturn://"):
+			cfg, err := uri.Parse(line)
+			if err != nil {
+				log().Warnf("[Sub] skipped invalid freeturn URI: %v", err)
 				continue
 			}
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[0][2:])
-				val := strings.TrimSpace(parts[1])
-				switch key {
-				case "name":
-					lastNode.Name = val
-				case "color":
-					lastNode.Color = val
-				case "icon":
-					lastNode.Icon = val
-				case "used":
-					lastNode.Used = val
-				case "available":
-					lastNode.Available = val
-				case "ip":
-					lastNode.IP = val
-				case "comment":
-					lastNode.Comment = val
-				}
-			}
-			continue
-		}
-
-		if strings.HasPrefix(line, "freeturn://") {
-			cfg, err := uri.Parse(line)
-			if err == nil {
-				node := Node{URI: cfg}
-				s.Nodes = append(s.Nodes, node)
-				lastNode = &s.Nodes[len(s.Nodes)-1]
-			} else {
-				log().Warnf("[Sub] skipped invalid freeturn URI: %v", err)
-			}
-			continue
+			s.Nodes = append(s.Nodes, Node{URI: cfg})
 		}
 	}
-
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-
 	return s, nil
+}
+
+func metaField(line, prefix string) (key, val string, ok bool) {
+	key, val, ok = strings.Cut(strings.TrimPrefix(line, prefix), ":")
+	return strings.TrimSpace(key), strings.TrimSpace(val), ok
+}
+
+func (s *Sub) setMeta(key, val string) {
+	switch key {
+	case "name":
+		s.Name = val
+	case "update":
+		s.Update = val
+	case "refresh":
+		s.Refresh = val
+	case "color":
+		s.Color = val
+	case "icon":
+		s.Icon = val
+	case "used":
+		s.Used = val
+	case "available":
+		s.Available = val
+	}
+}
+
+func (n *Node) setMeta(key, val string) {
+	switch key {
+	case "name":
+		n.Name = val
+	case "color":
+		n.Color = val
+	case "icon":
+		n.Icon = val
+	case "used":
+		n.Used = val
+	case "available":
+		n.Available = val
+	case "ip":
+		n.IP = val
+	case "comment":
+		n.Comment = val
+	}
 }
