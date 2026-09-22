@@ -12,6 +12,7 @@ import (
 
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/netctl"
 	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
 )
 
@@ -367,6 +368,28 @@ func TestProtectFDReturnsStatus(t *testing.T) {
 	if protectFD(43) {
 		t.Error("protectFD(43) = true, want false when protect fails")
 	}
+}
+
+func TestSetProtectFailsDial(t *testing.T) {
+	p := &testProtector{}
+	SetProtect(p)
+	t.Cleanup(func() { SetProtect(nil) })
+
+	d := net.Dialer{Control: netctl.Apply}
+	conn, err := d.Dial("udp", "127.0.0.1:9")
+	if err == nil {
+		_ = conn.Close()
+	}
+	if !errors.Is(err, ErrProtect) {
+		t.Fatalf("Dial = %v, want ErrProtect", err)
+	}
+
+	p.ok = true
+	conn, err = d.Dial("udp", "127.0.0.1:9")
+	if err != nil {
+		t.Fatalf("Dial with protect ok = %v", err)
+	}
+	_ = conn.Close()
 }
 
 type stubRebinder struct {

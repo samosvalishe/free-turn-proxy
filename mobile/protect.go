@@ -1,6 +1,8 @@
 package mobile
 
 import (
+	"errors"
+	"fmt"
 	"sync/atomic"
 	"syscall"
 
@@ -13,6 +15,8 @@ type Protector interface {
 	Protect(fd int) bool
 }
 
+var ErrProtect = errors.New("mobile: socket protect failed") //nolint:gochecknoglobals // sentinel для errors.Is
+
 var protector atomic.Pointer[Protector]
 
 // SetProtect устанавливает обработчик защиты сокетов хоста (nil - no-op).
@@ -24,7 +28,14 @@ func SetProtect(p Protector) {
 	}
 	protector.Store(&p)
 	netctl.SetControl(func(_, _ string, c syscall.RawConn) error {
-		return c.Control(func(fd uintptr) { p.Protect(int(fd)) })
+		ok := false
+		if err := c.Control(func(fd uintptr) { ok = p.Protect(int(fd)) }); err != nil {
+			return fmt.Errorf("socket control: %w", err)
+		}
+		if !ok {
+			return ErrProtect
+		}
+		return nil
 	})
 }
 
