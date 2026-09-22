@@ -31,7 +31,6 @@ const (
 	setupRetryJitter     = 4 * time.Second
 	providerBackoffDelay = 60 * time.Second
 	reconnectDelay       = 2 * time.Second
-	sessionPollDelay     = time.Second
 	minAcceptBackoff     = 5 * time.Millisecond
 	maxAcceptBackoff     = time.Second
 )
@@ -330,20 +329,14 @@ func retryDelay(auth AuthHandler, err error) time.Duration {
 
 // awaitDead: false - вышли по отмене ctx, а не по смерти сессии.
 func awaitDead(ctx context.Context, log logx.Logger, s *session, id int) bool {
-	t := time.NewTicker(sessionPollDelay)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return false
-		case <-s.permDead:
-			log.Warnf("[session %d] TURN channel-bind умер - рецикл allocation", id)
-			return true
-		case <-t.C:
-			if s.smux.IsClosed() {
-				return true
-			}
-		}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-s.permDead:
+		log.Warnf("[session %d] TURN channel-bind умер - рецикл allocation", id)
+		return true
+	case <-s.smux.CloseChan():
+		return true
 	}
 }
 

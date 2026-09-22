@@ -191,8 +191,12 @@ func TestAwaitDeadOnClosedSession(t *testing.T) {
 	s := &session{smux: sess, permDead: make(chan struct{})}
 	_ = sess.Close()
 
+	start := time.Now()
 	if !awaitDead(context.Background(), logx.Nop(), s, 1) {
 		t.Error("awaitDead() = false on closed smux, want true")
+	}
+	if d := time.Since(start); d > 100*time.Millisecond {
+		t.Errorf("awaitDead() noticed close after %s, want immediately", d)
 	}
 }
 
