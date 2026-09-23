@@ -1,5 +1,80 @@
 # Changelog
 
+## [4.0.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.4.0...v4.0.0) (2026-09-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **auth:** подтверждение Client ID с повтором по таймеру
+* **install:** install.sh с JSON RPC proto 3 и голым WireGuard вместо AWG
+
+### Features
+
+* **auth:** подтверждение Client ID с повтором по таймеру ([d3e4cfc](https://github.com/samosvalishe/free-turn-proxy/commit/d3e4cfc1dbd20f121b15e7f9cc07cdbb39bd4eb3))
+* **client:** провайдер direct - прямо на сервер без TURN-реле ([ee30afc](https://github.com/samosvalishe/free-turn-proxy/commit/ee30afc922acbfce9f2bf961f0b7e8fc05cb06c8))
+* **diagnostics:** связывать события сессии и попытки восстановления ([e102acb](https://github.com/samosvalishe/free-turn-proxy/commit/e102acbc4be2d73704fb3965083bc44153dfedfa))
+* **installer:** вывод всех 3 форматов QR-кодов и поддержка скачивания картинок на ПК ([092ea59](https://github.com/samosvalishe/free-turn-proxy/commit/092ea5916a724251a3cdd1b118d605320a2de157))
+* **installer:** генерация QR в PNG, M3 TUI для клиентов и фикс утечки escape-последовательностей ([b894608](https://github.com/samosvalishe/free-turn-proxy/commit/b8946081101241620d2ddf8a9e940ae1243c20b8))
+* **installer:** глобальный CLI freeturn, авторизация по Client ID по умолчанию и компактный QR ([8d551c6](https://github.com/samosvalishe/free-turn-proxy/commit/8d551c61aedb9b4125834c2b24f4c486a1f495b1))
+* **installer:** раздача QR-кодов и конфигов по веб-ссылкам без вывода в терминал ([065385e](https://github.com/samosvalishe/free-turn-proxy/commit/065385e656085a06bf8079958bf1b563901db64f))
+* **installer:** токен на клиента и TTL для веб-раздачи ([e72157f](https://github.com/samosvalishe/free-turn-proxy/commit/e72157f4f7dcd6f1ad866211e4e82dface26cd55))
+* **install:** install.sh с JSON RPC proto 3 и голым WireGuard вместо AWG ([0ee0d53](https://github.com/samosvalishe/free-turn-proxy/commit/0ee0d5333ea5020e321ae1c5e1368417ea2e42d3))
+* **mobile:** отключаемый кольцевой буфер логов ([a7ec2b9](https://github.com/samosvalishe/free-turn-proxy/commit/a7ec2b949a636de4b32f5a2b2a517ad2e89ec543))
+* rebranding ([58924dc](https://github.com/samosvalishe/free-turn-proxy/commit/58924dc91aba0a3a23f20398fd5e2aa8bd787a6e))
+* **tcp:** вернуть поддержку bond ([6f84a18](https://github.com/samosvalishe/free-turn-proxy/commit/6f84a18b43da17a03fb5fdab2c0d235569a50f9e))
+* **uri:** ссылка на звонок и пейсинг обфускации в freeturn:// ([64f8b63](https://github.com/samosvalishe/free-turn-proxy/commit/64f8b63548edff2ab521be013502680fc5f04df7))
+* загрузка локально собранного бинаря на сервер ([af33b47](https://github.com/samosvalishe/free-turn-proxy/commit/af33b47fb20d5a5bb5ebe50481b54f5e33b9a838))
+
+
+### Bug Fixes
+
+* **captcha:** слать баннер ручной капчи в логгер, а не в stdout ([3b48a17](https://github.com/samosvalishe/free-turn-proxy/commit/3b48a171738e3590a305b60d92ef2181c72a65da))
+* **clients:** останавливать горячую перезагрузку базы по контексту ([b621182](https://github.com/samosvalishe/free-turn-proxy/commit/b621182ce4330992f101d59a49871f00ddd17b84))
+* **clients:** сохранять авторизацию при ошибке записи базы ([061e3b8](https://github.com/samosvalishe/free-turn-proxy/commit/061e3b882b815aca19e46221eea6b3bbab7019ef))
+* **clients:** фиксировать базу на диск через fsync ([ac43e63](https://github.com/samosvalishe/free-turn-proxy/commit/ac43e63ef86e7d27625ce74172cff3c47af2a014))
+* **cli:** предупреждать, что встроенный туннель из ссылки не поднимается ([f18e694](https://github.com/samosvalishe/free-turn-proxy/commit/f18e694f1aa320c9c84c30fa01e14e83c806d3ff))
+* **dns:** не залипать на первом резолвере doh-форвардера ([ece494a](https://github.com/samosvalishe/free-turn-proxy/commit/ece494aa1b3bbcf0609c926acfbd55a64475d671))
+* **dns:** проба udp/53 не теряет второй сервер, doh до смены сети ([b0e3cfe](https://github.com/samosvalishe/free-turn-proxy/commit/b0e3cfe20ae87c7f8893de3f032db9dc5d4c0945))
+* **dns:** сбрасывать udp-резолверы, если сессия их не задала ([4865a73](https://github.com/samosvalishe/free-turn-proxy/commit/4865a73b5fc8338ca5e64c0409df960a21ee2c76))
+* **installer:** передача obf_profile, obf_key и proxy_mode в systemd и docker args ([5dc5095](https://github.com/samosvalishe/free-turn-proxy/commit/5dc5095e2a6c23e73e63398639bfc91b44d70920))
+* **mobile:** отказ protect возвращать ошибкой сокета ([5a1c6e2](https://github.com/samosvalishe/free-turn-proxy/commit/5a1c6e299c1493f04bf0f309340fa8d7f9d473e3))
+* **netconn:** отдавать остаток очереди при закрытии пира ([273a5fa](https://github.com/samosvalishe/free-turn-proxy/commit/273a5fa977c407c6573bede0847d6d04ab048eae))
+* **relay:** восстановление потоков при отказах turn и занятой квоте ([6570cd9](https://github.com/samosvalishe/free-turn-proxy/commit/6570cd9dd760ae00093778cd5a4a095fd6701118))
+* **server:** не ронять процесс паникой в обработчике соединения ([fd5c4f9](https://github.com/samosvalishe/free-turn-proxy/commit/fd5c4f92a59f1d93f7dad6eea974a8a04a9c74f9))
+* **sub:** резолвить подписку через dns-диалер приложения ([8b3bea7](https://github.com/samosvalishe/free-turn-proxy/commit/8b3bea7b1a4d57a18d7b629b11f80d182893dddc))
+* **task:** заглушки mobile-dist в windows ([639582c](https://github.com/samosvalishe/free-turn-proxy/commit/639582c876289a30add9e1844f6633594cda742e))
+* **turn:** отмена контекста прерывает allocate ([6f81528](https://github.com/samosvalishe/free-turn-proxy/commit/6f81528a3473bcffefb69186a4448b186534b36a))
+* **udp:** датаграммы до 2048 байт на всём пути ([5b175bf](https://github.com/samosvalishe/free-turn-proxy/commit/5b175bf4be4c48e0c609122ec24fee18cacf1eea))
+* **udp:** завершать релей при отказе чтения локального сокета ([f4e8e0c](https://github.com/samosvalishe/free-turn-proxy/commit/f4e8e0cfe06b1ed0440a2a0b2009409ac4c87212))
+* **udp:** логировать причину обрыва DTLS-сессии перед паузой ([caa8fea](https://github.com/samosvalishe/free-turn-proxy/commit/caa8fea5bf08fec9053c2aa7f475c719556cae49))
+* **udp:** ограничить очередь между сокетом и DTLS ([5508cd6](https://github.com/samosvalishe/free-turn-proxy/commit/5508cd65a79812e5352fda83eb0eb7ab1d9c7db5))
+* **udp:** ошибка obf до аллокации, без петли allocate ([c13490f](https://github.com/samosvalishe/free-turn-proxy/commit/c13490ff5514e54dcaf6f44483bd3be8e4802d4e))
+* **ui:** убрать утечку OSC 11/CPR escape-последовательностей при выводе плашек ([5568670](https://github.com/samosvalishe/free-turn-proxy/commit/5568670f515e34b23fc67b7ae17b63c80b510303))
+* **vk:** определять ошибки авторизации по sentinel, а не по тексту ([3f9b3b6](https://github.com/samosvalishe/free-turn-proxy/commit/3f9b3b6cd008dd0d6505eed080f8c78321cb249b))
+* гард для релизера ([192dd27](https://github.com/samosvalishe/free-turn-proxy/commit/192dd27a1e7bd5a32beb2e6d57ad59b12867edbe))
+* отбрасывать опоздавший повтор client id, общий backoff квоты ([05bbe99](https://github.com/samosvalishe/free-turn-proxy/commit/05bbe996c1c44aa94484a6e7af28daf16aaca23f))
+
+
+### Performance
+
+* **netconn:** адрес пайпа без аллокации на каждое чтение ([b1cbafd](https://github.com/samosvalishe/free-turn-proxy/commit/b1cbafda736b5efbb607b602379f13a487104f5d))
+* **obf:** держать поток ChaCha8 в соединении rtpopus3 ([f422acb](https://github.com/samosvalishe/free-turn-proxy/commit/f422acb92794149eb8a45d9004736152d39f700f))
+* **randx:** rejection sampling вместо math/big ([e32008b](https://github.com/samosvalishe/free-turn-proxy/commit/e32008bba28670c7fda00bff007f6f9fb5f42580))
+* **tcp:** смерть smux-сессии без поллинга ([5b6ac18](https://github.com/samosvalishe/free-turn-proxy/commit/5b6ac183321bcba27d4890a8a9d30854293d9e0e))
+* **udp:** убрать сисколлы и аллокации с горячего пути релея ([a0c4656](https://github.com/samosvalishe/free-turn-proxy/commit/a0c46560251497d021932789aa339618f0caa700))
+
+
+### Refactoring
+
+* **cli:** общий обработчик сигналов для клиента и сервера ([69dd5f9](https://github.com/samosvalishe/free-turn-proxy/commit/69dd5f9488805b31f2fdf81e569d0228773ddc94))
+* **config:** брать режимы dns из dnsdial ([dd0bc21](https://github.com/samosvalishe/free-turn-proxy/commit/dd0bc211b7c9113c385e4a9fde8178de5fb015d7))
+* **dtls:** убрать дублирующий doc.go ([7df3a3f](https://github.com/samosvalishe/free-turn-proxy/commit/7df3a3fd91c9d933bf8841e86d1cd45d039f116d))
+* **logx:** общий Holder вместо пакетных переменных Log ([56dfc9a](https://github.com/samosvalishe/free-turn-proxy/commit/56dfc9aedd0aa5c6cacdc36c4cf4c62dd40eb9f3))
+* **vk:** не держать write-lock кеша реквизитов во время запроса ([0a3becc](https://github.com/samosvalishe/free-turn-proxy/commit/0a3becc74d751fb4e1185bffd597cbb8c9c2c1f7))
+* **wake:** убрать неиспользуемый Notifier ([7e5b2d4](https://github.com/samosvalishe/free-turn-proxy/commit/7e5b2d4cde87c73a4d20df17de2e770e1ef37089))
+* **wire:** один listener на все профили обфускации ([322c700](https://github.com/samosvalishe/free-turn-proxy/commit/322c7001fb58b489ee8fbb992afadf165719c2de))
+* сложность функций под лимиты линтера ([a8b8363](https://github.com/samosvalishe/free-turn-proxy/commit/a8b8363b79495dbc990764c45758e1e70378421c))
+
 ## [3.4.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.3.2...v3.4.0) (2026-09-07)
 
 
