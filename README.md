@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="logo.webp" height="250">
-
 ![License](https://img.shields.io/badge/license-Happy_Bunny-ff69b4?style=flat-square&logoColor=white&labelColor=0D1117)
 ![Go](https://img.shields.io/badge/Go-1.26-00ADD8?style=flat-square&logo=go&logoColor=white&labelColor=0D1117)
 ![Docker](https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white&labelColor=0D1117)
@@ -11,6 +9,20 @@
 ## О проекте
 
 **Free Turn Proxy** - универсальный прокси-туннель для инкапсуляции UDP/TCP трафика поверх протокола TURN. Клиент извлекает временные TURN-учётки из ссылок на WebRTC-звонки и прозрачно маршрутизирует ваш VPN-трафик (WireGuard, AmneziaWG, Xray/VLESS) до сервера на VPS, используя DTLS и механизмы маскировки пакетов.
+
+## Android-приложение - рекомендуемый способ использования
+
+- Добавляйте подключения по ссылке, QR-коду или вручную.
+- Устанавливайте и настраивайте сервер на VPS из приложения.
+- Переключайте серверы, настраивайте раздельное туннелирование и делитесь доступом.
+- Сохраняйте настройки в зашифрованную резервную копию.
+
+[Скачать APK](https://github.com/samosvalishe/turn-proxy-android/releases/latest)
+
+Требования: Android 7.0+ и устройство ARM (arm64-v8a или armeabi-v7a). Для собственного подключения нужен VPS; в режиме Relay также нужна ссылка на звонок.
+
+> [!WARNING]
+> При переходе Android-приложения на версию 5 потребуется настройка с нуля. Перед обновлением сохраните данные доступа к VPS и параметры подключения. Затем заново добавьте сервер или импортируйте новую ссылку и проверьте параметры VPN и раздельного туннелирования.
 
 ## Разработка
 
