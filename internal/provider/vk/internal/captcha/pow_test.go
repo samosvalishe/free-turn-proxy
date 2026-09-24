@@ -68,6 +68,18 @@ func TestParsePowParamsRejectsUnknownMarkup(t *testing.T) {
 	}
 }
 
+func TestParsePowParamsAcceptsAdditionalArgs(t *testing.T) {
+	html := `<script>window['captchaPowResult']='v2.'+btoa(x);}('fnZQN7lKKXvo37tH',2,'pow_timeout',["globals"]));</script>`
+
+	got, err := parsePowParams(html)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Input != "fnZQN7lKKXvo37tH" || got.Difficulty != 2 || got.Prefix != "v2." {
+		t.Fatalf("pow = %+v", got)
+	}
+}
+
 func TestSolvePoW(t *testing.T) {
 	got, nonce := solvePoW(context.Background(), "input", 1)
 	if len(got) != 64 || !strings.HasPrefix(got, "0") {
