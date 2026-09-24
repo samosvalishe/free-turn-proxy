@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.0.1](https://github.com/samosvalishe/free-turn-proxy/compare/v4.0.0...v4.0.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* naturalyiiBlondinNaVsyStranuTakoy1 ([a2d9a88](https://github.com/samosvalishe/free-turn-proxy/commit/a2d9a88333dc7627216adb7968291078dde8fa23))
+
 ## [4.0.0](https://github.com/samosvalishe/free-turn-proxy/compare/v3.4.0...v4.0.0) (2026-09-23)
 
 
